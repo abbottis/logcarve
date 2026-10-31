@@ -1,0 +1,94 @@
+<p class="tech mb-4 text-sm text-base-content/70" data-observation-window>{{ window_from }} → {{ window_to }}</p>
+{% include "partials/active_matchers.html" %}
+{% if summary.warnings %}
+<div class="mb-4 space-y-2" role="status">
+  {% for warning in summary.warnings %}
+  <p class="alert alert-warning text-sm">{% include "icons/triangle-alert.svg" %}{{ warning }}</p>
+  {% endfor %}
+</div>
+{% endif %}
+
+<section class="card bg-base-100 shadow" aria-labelledby="crawl-obs-h">
+  <div class="card-body">
+    <h2 id="crawl-obs-h" class="card-title text-base">{{ t("crawlers.observations") }}</h2>
+    <dl class="flex flex-wrap gap-x-8 gap-y-2">
+      <div><dt class="text-sm text-base-content/70">{{ t("crawlers.robots") }}</dt><dd class="tech text-lg">{{ robots_requests }}</dd></div>
+      <div><dt class="text-sm text-base-content/70">{{ t("crawlers.sitemap") }}</dt><dd class="tech text-lg">{{ sitemap_requests }}</dd></div>
+    </dl>
+  </div>
+</section>
+
+<section class="card mt-6 bg-base-100 shadow" aria-labelledby="crawl-fam-h">
+  <div class="card-body">
+    <h2 id="crawl-fam-h" class="card-title text-base">{{ t("crawlers.families") }}</h2>
+    {% if details %}
+    <ul class="space-y-4">
+      {% for family in details %}
+      <li class="rounded-lg border border-base-300 p-3">
+        <p class="font-medium">{{ family.title }}</p>
+        <p class="text-sm text-base-content/70">
+          <span class="tech">{{ family.rule_id }} v{{ family.rule_version }}</span>
+          · {{ t("crawler.claimed") }}
+          · <span class="tech">{{ family.requests }}</span> {{ t("table.requests") | lower }}
+          · <span class="tech">{{ family.distinct_agents }}</span> {{ t("crawlers.agents") | lower }}
+        </p>
+        <p class="mt-1 text-sm">{{ family.meaning }}</p>
+        {% if family.top_agents %}
+        <h3 class="mt-2 text-sm font-medium">{{ t("crawlers.agents_sample", shown=family.agents_shown, total=family.agents_total) }}</h3>
+        <ul class="mt-1 space-y-1">
+          {% for agent in family.top_agents %}
+          <li class="tech break-all text-sm">{{ agent }}</li>
+          {% endfor %}
+        </ul>
+        {% endif %}
+        {% if family.paths_truncated %}
+        <p class="mt-1 text-sm text-base-content/70" role="note">{{ t("crawlers.paths_truncated", cap=family.paths_agent_cap) }}</p>
+        {% endif %}
+        {% if family.top_paths %}
+        <h3 class="mt-2 text-sm font-medium">{{ t("crawlers.top_paths") }}</h3>
+        <div class="table-scroll overflow-x-auto">
+          <table class="table table-sm">
+            <caption class="sr-only">{{ family.title }} — {{ t("crawlers.top_paths") }}</caption>
+            <thead><tr><th scope="col">{{ t("table.path") }}</th><th scope="col">{{ t("table.status") }}</th><th scope="col" class="text-right">{{ t("table.requests") }}</th></tr></thead>
+            <tbody>
+              {% for row in family.top_paths %}
+              <tr><td class="tech break-all">{{ row.path }}</td><td class="tech">{{ row.status }}</td><td class="text-right tech">{{ row.requests }}</td></tr>
+              {% endfor %}
+            </tbody>
+          </table>
+        </div>
+        {% endif %}
+        {% if family.not_found %}
+        <h3 class="mt-2 text-sm font-medium">{{ t("crawlers.not_found") }}</h3>
+        <div class="table-scroll overflow-x-auto">
+          <table class="table table-sm">
+            <caption class="sr-only">{{ family.title }} — {{ t("crawlers.not_found") }}</caption>
+            <thead><tr><th scope="col">{{ t("table.path") }}</th><th scope="col" class="text-right">{{ t("table.requests") }}</th></tr></thead>
+            <tbody>
+              {% for row in family.not_found %}
+              <tr><td class="tech break-all">{{ row.path }}</td><td class="text-right tech">{{ row.requests }}</td></tr>
+              {% endfor %}
+            </tbody>
+          </table>
+        </div>
+        {% endif %}
+        {% if family.limitations %}
+        <h3 class="mt-2 text-sm font-medium">{{ t("finding.limitations") }}</h3>
+        <ul class="list-disc space-y-1 pl-5 text-sm text-base-content/70">
+          {% for limitation in family.limitations %}
+          <li>{{ limitation }}</li>
+          {% endfor %}
+        </ul>
+        {% endif %}
+      </li>
+      {% endfor %}
+    </ul>
+    {% else %}
+    <p class="text-sm text-base-content/70" role="status">{{ t("crawlers.no_claims") }}</p>
+    {% endif %}
+  </div>
+</section>
+
+<div class="mt-6 space-y-2 text-sm text-base-content/70">
+  <p>{{ t("data.events", count=summary.coverage.unique_events) }} · {{ t("data.observed", min=summary.coverage.observed_min, max=summary.coverage.observed_max) }}</p>
+</div>

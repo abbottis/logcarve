@@ -1,0 +1,109 @@
+<p class="tech mb-4 text-sm text-base-content/70" data-observation-window>{{ window_from }} → {{ window_to }}</p>
+{% include "partials/active_matchers.html" %}
+{% if summary.warnings %}
+<div class="mb-4 space-y-2" role="status">
+  {% for warning in summary.warnings %}
+  <p class="alert alert-warning text-sm">{% include "icons/triangle-alert.svg" %}{{ warning }}</p>
+  {% endfor %}
+</div>
+{% endif %}
+
+<section class="card bg-base-100 shadow" aria-labelledby="sec-status-h">
+  <div class="card-body">
+    <h2 id="sec-status-h" class="card-title text-base">{{ t("security.status_breakdown") }}</h2>
+    {% if status_rows %}
+    <div class="table-scroll overflow-x-auto">
+      <table class="table table-sm">
+        <caption class="sr-only">{{ t("security.status_breakdown") }}</caption>
+        <thead><tr><th scope="col">{{ t("table.status") }}</th><th scope="col" class="text-right">{{ t("table.requests") }}</th></tr></thead>
+        <tbody>
+          {% for row in status_rows %}
+          <tr><td class="tech">{{ row.status }}</td><td class="text-right tech">{{ row.requests }}</td></tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+    {% else %}
+    <p class="text-sm text-base-content/70" role="status">{{ t("errors.no_groups") }}</p>
+    {% endif %}
+  </div>
+</section>
+
+<section class="card mt-6 bg-base-100 shadow" aria-labelledby="sec-find-h">
+  <div class="card-body">
+    <h2 id="sec-find-h" class="card-title text-base">{{ t("security.findings") }}</h2>
+    {% if findings %}
+    <ul class="space-y-3">
+      {% for finding in findings %}
+      <li class="rounded-lg border border-base-300 p-3">
+        <p class="font-medium">{{ finding.title }}</p>
+        <p class="text-sm text-base-content/70">
+          <span class="tech">{{ finding.rule_id }} v{{ finding.rule_version }}</span>
+          · {{ t("finding.investigation_candidate") }}
+          {% if finding.counts.requests is defined %}<span class="tech">{{ finding.counts.requests }}</span> {{ t("table.requests") | lower }}{% endif %}
+          {% if finding.counts.errors is defined %}<span class="tech">{{ finding.counts.errors }}</span> {{ t("table.errors") | lower }}{% endif %}
+          {% if finding.counts.distinct_agents is defined %}<span class="tech">{{ finding.counts.distinct_agents }}</span> {{ t("table.agent") | lower }}s{% endif %}
+          {% if finding.counts.distinct_paths is defined %}<span class="tech">{{ finding.counts.distinct_paths }}</span> {{ t("table.paths") | lower }}{% endif %}
+        </p>
+        <p class="mt-1 text-sm">{{ finding.meaning }}</p>
+        {% if finding.evidence.paths %}
+        <h3 class="mt-2 text-sm font-medium">{{ t("finding.evidence") }}</h3>
+        <div class="table-scroll overflow-x-auto">
+          <table class="table table-sm">
+            <caption class="sr-only">{{ finding.title }} — {{ t("finding.evidence") }}</caption>
+            <thead><tr><th scope="col">{{ t("table.path") }}</th><th scope="col" class="text-right">{{ t("table.requests") }}</th><th scope="col" class="text-right">{{ t("table.errors") }}</th></tr></thead>
+            <tbody>
+              {% for row in finding.evidence.paths %}
+              <tr><td class="tech break-all">{{ row.path }}</td><td class="text-right tech">{{ row.requests }}</td><td class="text-right tech">{{ row.errors }}</td></tr>
+              {% endfor %}
+            </tbody>
+          </table>
+        </div>
+        <p class="mt-1 text-sm text-base-content/70">{{ t("finding.sample_paths", shown=finding.evidence.paths_shown, total=finding.evidence.paths_total) }}</p>
+        {% endif %}
+        {% if finding.evidence.client_pseudonym %}
+        <h3 class="mt-2 text-sm font-medium">{{ t("finding.evidence") }}</h3>
+        <p class="tech min-w-0 break-all text-sm">{{ t("finding.client_pseudonym") }}: <span>{{ finding.evidence.client_pseudonym }}</span></p>
+        {% if finding.evidence.sample_paths %}
+        <div class="table-scroll overflow-x-auto">
+          <table class="table table-sm">
+            <caption class="sr-only">{{ finding.title }} — {{ t("finding.evidence") }}</caption>
+            <thead><tr><th scope="col">{{ t("table.path") }}</th><th scope="col">{{ t("table.status") }}</th><th scope="col" class="text-right">{{ t("table.requests") }}</th></tr></thead>
+            <tbody>
+              {% for row in finding.evidence.sample_paths %}
+              <tr><td class="tech break-all">{{ row.path }}</td><td class="tech">{{ row.status }}</td><td class="text-right tech">{{ row.hits }}</td></tr>
+              {% endfor %}
+            </tbody>
+          </table>
+        </div>
+        <p class="mt-1 text-sm text-base-content/70">{{ t("finding.sample_paths", shown=finding.evidence.sample_paths_shown, total=finding.evidence.sample_paths_total) }}</p>
+        {% endif %}
+        {% endif %}
+        <p class="mt-2 text-sm text-base-content/70">
+          {{ t("finding.window") }}: <span class="tech">{{ finding.window.time_from }} → {{ finding.window.time_to }}</span>
+          · {{ t("finding.coverage") }}: <span class="tech">{{ finding.coverage_summary.unique_events }}</span>
+        </p>
+        {% if finding.limitations %}
+        <h3 class="mt-2 text-sm font-medium">{{ t("finding.limitations") }}</h3>
+        <ul class="list-disc space-y-1 pl-5 text-sm text-base-content/70">
+          {% for limitation in finding.limitations %}
+          <li>{{ limitation }}</li>
+          {% endfor %}
+        </ul>
+        {% endif %}
+        {% if finding.link %}
+        <p class="mt-2"><a class="link" href="{{ finding.link }}">{{ t("finding.supporting_data") }}</a></p>
+        {% endif %}
+      </li>
+      {% endfor %}
+    </ul>
+    {% else %}
+    <p class="text-sm text-base-content/70" role="status">{{ t("security.no_findings") }}</p>
+    {% endif %}
+    {% include "partials/paging.html" %}
+  </div>
+</section>
+
+<div class="mt-6 space-y-2 text-sm text-base-content/70">
+  <p>{{ t("data.events", count=summary.coverage.unique_events) }} · {{ t("data.observed", min=summary.coverage.observed_min, max=summary.coverage.observed_max) }}</p>
+</div>

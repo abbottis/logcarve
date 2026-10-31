@@ -1,0 +1,153 @@
+@import "tailwindcss";
+@plugin "daisyui" {
+  themes: light --default, dark;
+}
+
+/* Bind daisyUI semantic tokens to the spec §3.4 sky/slate palette so
+   both themes change actual computed colors (no purple defaults). */
+@plugin "daisyui/theme" {
+  name: "light";
+  --color-base-100: var(--color-white);
+  --color-base-200: var(--color-slate-50);
+  --color-base-300: var(--color-slate-200);
+  --color-base-content: var(--color-slate-900);
+  --color-primary: var(--color-sky-600);
+  /* White text on sky-600 only reaches ~4.0:1, below AA. Near-black
+     foreground keeps the semantic sky accent while passing 4.5:1. */
+  --color-primary-content: var(--color-slate-950);
+  --color-info: var(--color-sky-600);
+  --color-info-content: var(--color-white);
+  --color-success: var(--color-emerald-600);
+  --color-success-content: var(--color-white);
+  --color-warning: var(--color-amber-600);
+  --color-warning-content: var(--color-white);
+  --color-error: var(--color-red-600);
+  --color-error-content: var(--color-white);
+}
+
+@plugin "daisyui/theme" {
+  name: "dark";
+  --color-base-100: var(--color-slate-900);
+  --color-base-200: var(--color-slate-950);
+  --color-base-300: var(--color-slate-800);
+  --color-base-content: var(--color-slate-100);
+  --color-primary: var(--color-sky-400);
+  --color-primary-content: var(--color-slate-950);
+  --color-info: var(--color-sky-400);
+  --color-info-content: var(--color-slate-950);
+  --color-success: var(--color-emerald-400);
+  --color-success-content: var(--color-slate-950);
+  --color-warning: var(--color-amber-400);
+  --color-warning-content: var(--color-slate-950);
+  --color-error: var(--color-red-400);
+  --color-error-content: var(--color-slate-950);
+}
+
+/* Local self-hosted fonts (WOFF2 vendored by npm run build:vendor). */
+@font-face {
+  font-family: "Inter Variable";
+  font-style: normal;
+  font-weight: 100 900;
+  font-display: swap;
+  src: url("/static/fonts/inter-latin-wght-normal.woff2") format("woff2");
+}
+
+@font-face {
+  font-family: "JetBrains Mono Variable";
+  font-style: normal;
+  font-weight: 100 800;
+  font-display: swap;
+  src: url("/static/fonts/jetbrains-mono-latin-wght-normal.woff2") format("woff2");
+}
+
+@theme {
+  --font-sans: "Inter Variable", ui-sans-serif, system-ui, sans-serif;
+  --font-mono: "JetBrains Mono Variable", ui-monospace, monospace;
+}
+
+/* Visible keyboard focus everywhere; never remove outlines without a
+   stronger replacement. */
+:where(a, button, input, select, [tabindex]):focus-visible {
+  outline: 2px solid var(--color-sky-600);
+  outline-offset: 2px;
+}
+
+/* Monospace is reserved for technical values (hashes, URLs, code,
+   table numerals, labels); never for long prose. */
+.tech {
+  font-family: var(--font-mono);
+  font-variant-numeric: tabular-nums;
+}
+
+/* Charts keep a readable minimum height; their data tables remain the
+   primary content for assistive technology. */
+.chart-frame {
+  position: relative;
+  min-width: 0;
+  min-height: 16rem;
+}
+
+/* Intrinsic-size guards: cards, grid children, stats and chart frames
+   must never force document-level horizontal overflow. Long content
+   wraps or scrolls inside its own bounded container instead. The page
+   itself is never clipped to hide overflow. */
+.card,
+.card-body,
+.stats,
+.stat,
+.chart-frame {
+  min-width: 0;
+}
+.stat-title,
+.stat-desc {
+  overflow-wrap: anywhere;
+}
+.chart-frame canvas {
+  max-width: 100%;
+}
+.table-scroll {
+  max-width: 100%;
+  overflow-x: auto;
+}
+
+/* Local htmx request indicators (htmx includeIndicatorStyles is off so
+   no style element is injected at runtime, keeping style-src 'self'). */
+.htmx-indicator {
+  opacity: 0;
+  transition: opacity 150ms ease-in;
+}
+.htmx-request .htmx-indicator,
+.htmx-request.htmx-indicator {
+  opacity: 1;
+}
+
+/* Inlined monochrome icons inherit the surrounding text color, so they
+   stay readable in both themes (unlike <img>-loaded SVGs). */
+.lc-icon {
+  width: 1.125rem;
+  height: 1.125rem;
+  flex: none;
+}
+.btn .lc-icon {
+  width: 1rem;
+  height: 1rem;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after {
+    animation-duration: 0.01ms !important;
+    transition-duration: 0.01ms !important;
+  }
+}
+
+/* Untrusted plain model answers: the browser inserts them via
+   textContent (no markup execution), and this guard keeps readable
+   line breaks plus bounded wrapping even for a long single token or
+   a client pseudonym, inside a bounded scroll region. */
+.ask-answer {
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  word-break: break-word;
+  max-height: 24rem;
+  overflow-y: auto;
+}

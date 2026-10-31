@@ -1,0 +1,38 @@
+<p class="tech mb-4 text-sm text-base-content/70" data-observation-window>{{ window_from }} → {{ window_to }}</p>
+{% include "partials/active_matchers.html" %}
+{% if summary.warnings %}
+<div class="mb-4 space-y-2" role="status">
+  {% for warning in summary.warnings %}
+  <p class="alert alert-warning text-sm">{% include "icons/triangle-alert.svg" %}{{ warning }}</p>
+  {% endfor %}
+</div>
+{% endif %}
+
+<section class="card bg-base-100 shadow" aria-labelledby="err-groups-h">
+  <div class="card-body">
+    <h2 id="err-groups-h" class="card-title text-base">{{ t("errors.groups") }}</h2>
+    {% if groups %}
+    <div class="table-scroll overflow-x-auto">
+      <table class="table table-sm">
+        <caption class="sr-only">{{ t("errors.groups") }}</caption>
+        <thead><tr><th scope="col">{{ t("table.path") }}</th><th scope="col">{{ t("table.status") }}</th><th scope="col" class="text-right">{{ t("table.requests") }}</th><th scope="col" class="text-right">{{ t("table.referrer") }}</th></tr></thead>
+        <tbody>
+          {% for group in groups %}
+          <tr><td class="tech break-all">{{ group.path }}</td><td class="tech">{{ group.status }}</td><td class="text-right tech">{{ group.requests }}</td><td class="text-right tech">{{ group.referrers }}</td></tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+    {% else %}
+    <p class="text-sm text-base-content/70" role="status">{{ t("errors.no_groups") }}</p>
+    {% endif %}
+    {% include "partials/paging.html" %}
+  </div>
+</section>
+
+<div class="mt-6 space-y-2 text-sm text-base-content/70">
+  <p>{{ t("data.events", count=summary.coverage.unique_events) }} · {{ t("data.observed", min=summary.coverage.observed_min, max=summary.coverage.observed_max) }}</p>
+  {% if not summary.duration.available %}
+  <p role="note">{{ t("data.response_time_unavailable") }}</p>
+  {% endif %}
+</div>

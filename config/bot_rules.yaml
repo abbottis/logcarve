@@ -1,0 +1,45 @@
+# LogCarve bot-claim rules, version 2.
+#
+# Provenance: hand-authored for the LogCarve MVP from public crawler
+# documentation (no LogWerk material reused). A match proves a CLAIMED
+# User-Agent identity only; verification (reverse/forward DNS) is an
+# explicit P1 non-goal. Every consumer must surface the `meaning`
+# wording instead of asserting a verified crawler.
+version: 2
+provenance: "LogCarve MVP hand-authored bot claims; UA match only, verification deferred to P1"
+rules:
+  - id: bot-search-google
+    version: 1
+    category: search_crawler
+    title: "Claimed Googlebot"
+    meaning: "User-Agent claims Googlebot; identity not verified"
+    ua_contains: ["Googlebot"]
+    severity: info
+  - id: bot-search-bing
+    version: 1
+    category: search_crawler
+    title: "Claimed Bingbot"
+    meaning: "User-Agent claims Bingbot; identity not verified"
+    ua_contains: ["Bingbot"]
+    severity: info
+  - id: bot-ai-gpt
+    version: 1
+    category: ai_crawler
+    title: "Claimed GPTBot"
+    meaning: "User-Agent claims GPTBot; identity not verified"
+    ua_contains: ["GPTBot"]
+    severity: info
+  - id: bot-ai-claude
+    version: 1
+    category: ai_crawler
+    title: "Claimed ClaudeBot"
+    meaning: "User-Agent claims ClaudeBot; identity not verified"
+    ua_contains: ["ClaudeBot"]
+    severity: info
+  - id: bot-ai-perplexity
+    version: 1
+    category: ai_crawler
+    title: "Claimed PerplexityBot"
+    meaning: "User-Agent claims PerplexityBot; identity not verified"
+    ua_contains: ["PerplexityBot"]
+    severity: info

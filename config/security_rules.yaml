@@ -1,0 +1,23 @@
+# LogCarve security-candidate rules, version 1.
+#
+# Provenance: hand-authored for the LogCarve MVP from common sensitive
+# paths and failure patterns (no LogWerk material reused). Every match
+# is an INVESTIGATION CANDIDATE, never proof of compromise or
+# attribution. Thresholds are explicit parameters, not verdicts.
+version: 1
+provenance: "LogCarve MVP hand-authored security candidates; matches are investigation leads only"
+rules:
+  - id: sec-sensitive-path
+    version: 1
+    category: sensitive_path
+    title: "Sensitive or scan-typical path requested"
+    meaning: "Path matches a sensitive/scan-typical pattern; investigation candidate only"
+    path_contains: ["/.env", "/.git/", "/wp-admin", "/wp-login", "/phpmyadmin", "/.aws/", "/id_rsa", "/.svn/"]
+    severity: candidate
+  - id: sec-repeated-client-errors
+    version: 1
+    category: repeated_client_errors
+    title: "Repeated client errors from one pseudonym"
+    meaning: "One client pseudonym produced repeated 4xx responses; investigation candidate only"
+    min_client_errors: 5
+    severity: candidate

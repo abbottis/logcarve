@@ -1,0 +1,63 @@
+# Secrets and machine-specific configuration
+.env
+.env.*
+!.env.example
+/config.yaml
+/config/config.yaml
+*.pem
+*.key
+credentials*.json
+/CONTEXT7_API_KEY
+/CONTEXT7_API_KEY.*
+/config/*settings.local.json
+
+# Imported/private data and local operational evidence
+/data/
+/backups/
+/logs/
+*.log
+*.log.*
+*.gz
+*.sqlite
+*.sqlite3
+*.sqlite*
+*.db
+*.db-*
+/artifacts/
+conversation-*.txt
+*trajectory*.json
+run.json
+playwright-report/
+test-results/
+
+# Runtime-generated Muse state (a deliberate future hook config may be tracked)
+.muse/*
+!.muse/hooks.json
+
+# Build and tooling outputs
+.venv/
+venv/
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+htmlcov/
+node_modules/
+dist/
+build/
+*.egg-info/
+/app/web/static/css/*
+/app/web/static/js/*
+/app/web/static/fonts/*
+# License/provenance notices are builder-regenerated but tracked as the
+# single source notice per asset family, so fresh clones and the final
+# image carry attributions without cached outputs.
+!/app/web/static/fonts/INTER-OFL.txt
+!/app/web/static/fonts/JETBRAINS-MONO-OFL.txt
+
+# OS/editor files
+.DS_Store
+.idea/
+.vscode/

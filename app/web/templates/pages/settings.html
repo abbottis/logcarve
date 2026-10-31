@@ -1,0 +1,44 @@
+{% extends "base.html" %}
+{% set active = "settings" %}
+{% block content %}
+<div class="mb-4 flex flex-wrap items-baseline gap-x-3 gap-y-1">
+  <h1 class="text-2xl font-semibold">{{ t("settings.title") }}</h1>
+</div>
+<div class="grid gap-6 xl:grid-cols-2">
+  <section class="card bg-base-100 shadow" aria-labelledby="set-general-h">
+    <div class="card-body">
+      <h2 id="set-general-h" class="card-title text-base">{{ t("settings.general") }}</h2>
+      <dl class="space-y-2">
+        <div class="flex justify-between gap-4"><dt class="text-base-content/70">{{ t("settings.timezone") }}</dt><dd class="tech">{{ default_timezone }}</dd></div>
+        <div class="flex justify-between gap-4"><dt class="text-base-content/70">{{ t("settings.retention") }}</dt><dd class="tech">{{ t("settings.retention_days", days=retention_days) }}</dd></div>
+        <div class="flex justify-between gap-4"><dt class="text-base-content/70">{{ t("settings.external_api") }}</dt><dd>{% if external_api_enabled %}{{ t("settings.enabled") }}{% else %}{{ t("settings.disabled") }}{% endif %}</dd></div>
+      </dl>
+      <p class="mt-3 text-sm text-base-content/70">{{ t("settings.theme_note") }}</p>
+    </div>
+  </section>
+  <section class="card bg-base-100 shadow" aria-labelledby="set-api-h">
+    <div class="card-body">
+      <h2 id="set-api-h" class="card-title text-base">{{ t("settings.external_api") }}</h2>
+      <dl class="space-y-2">
+        <div class="flex justify-between gap-4"><dt class="text-base-content/70">{{ t("settings.api_base") }}</dt><dd class="tech break-all">{{ app_base_url }}/api/v1</dd></div>
+        <div class="flex justify-between gap-4"><dt class="text-base-content/70">{{ t("settings.api_docs") }}</dt><dd class="tech break-all">{{ app_base_url }}/api/v1/openapi.json</dd></div>
+        <div class="flex justify-between gap-4"><dt class="text-base-content/70">{{ t("settings.token_scopes") }}</dt><dd class="tech">analytics:read</dd></div>
+      </dl>
+      <p class="mt-3 text-sm">{{ t("settings.token_admin") }}</p>
+      <p class="mt-1 text-sm text-base-content/70">{{ t("settings.consumer_notice") }}</p>
+    </div>
+  </section>
+  <section class="card bg-base-100 shadow" aria-labelledby="set-ai-h">
+    <div class="card-body">
+      <h2 id="set-ai-h" class="card-title text-base">{{ t("settings.assistant") }}</h2>
+      <dl class="space-y-2">
+        <div class="flex justify-between gap-4"><dt class="text-base-content/70">{{ t("settings.assistant") }}</dt><dd>{% if ai_enabled %}{{ t("settings.enabled") }}{% else %}{{ t("settings.disabled") }}{% endif %}</dd></div>
+        <div class="flex justify-between gap-4"><dt class="text-base-content/70">{{ t("settings.model") }}</dt><dd class="tech">{{ model_provider }} / {{ model_id }}</dd></div>
+        <div class="flex justify-between gap-4"><dt class="text-base-content/70">{{ t("settings.tier") }}</dt><dd class="tech">{{ model_service_tier }}</dd></div>
+        <div class="flex justify-between gap-4"><dt class="text-base-content/70">{{ t("settings.budget") }}</dt><dd class="tech">{{ llm_warn_at_usd }} / {{ llm_stop_at_usd }} / {{ llm_budget_usd }}</dd></div>
+        <div class="flex justify-between gap-4"><dt class="text-base-content/70">{{ t("settings.budget_daily") }}</dt><dd class="tech">{{ llm_daily_limit_usd }}</dd></div>
+      </dl>
+    </div>
+  </section>
+</div>
+{% endblock %}

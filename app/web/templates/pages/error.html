@@ -1,0 +1,11 @@
+{% extends "base.html" %}
+{% set bare = True %}
+{% block bare_content %}
+<div class="card bg-base-100 shadow">
+  <div class="card-body">
+    <h1 class="card-title">{{ t("error.title") }}</h1>
+    <p role="alert">{{ message }}</p>
+    <a href="/" class="btn btn-primary mt-4">{{ t("error.back") }}</a>
+  </div>
+</div>
+{% endblock %}

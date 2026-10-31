@@ -1,0 +1,50 @@
+<form id="filter-bar"
+      {% if fragment_url %}hx-get="{{ fragment_url }}" hx-target="#page-content" hx-swap="innerHTML"{% else %}method="get" action="{{ form_action }}"{% endif %}
+      class="mb-4 flex flex-wrap items-end gap-3 rounded-lg border border-base-300 bg-base-100 p-3"
+      aria-label="{{ t("filter.title") }}"
+      data-msg-apply-failed="{{ t("filter.apply_failed") }}">
+  {# Preserve evidence-driven scope across Apply: matchers, source, page
+     size and bucket resubmit with the window. Paging offset is reset
+     deliberately: a new window always starts at the first page, while
+     prev/next links carry explicit offsets. #}
+  {% for key, value in matchers.items() %}
+  <input type="hidden" name="{{ key }}" value="{{ value }}">
+  {% endfor %}
+  {% if params_source %}<input type="hidden" name="source" value="{{ params_source }}">{% endif %}
+  {% if limit is defined %}<input type="hidden" name="limit" value="{{ limit }}">{% endif %}
+  {% if bucket %}<input type="hidden" name="bucket" value="{{ bucket }}">{% endif %}
+  <div class="form-control">
+    <label class="label py-1" for="f-site"><span class="label-text">{{ t("filter.site") }}</span></label>
+    <select id="f-site" name="site" class="select select-bordered select-sm">
+      {% for s in sites %}
+      <option value="{{ s.id }}" {% if s.id == site %}selected{% endif %}>{{ s.name }} ({{ s.id }})</option>
+      {% endfor %}
+    </select>
+  </div>
+  <div class="form-control">
+    <label class="label py-1" for="f-range"><span class="label-text">{{ t("filter.range") }}</span></label>
+    <select id="f-range" name="range" class="select select-bordered select-sm">
+      <option value="24h" {% if range == "24h" %}selected{% endif %}>{{ t("filter.preset_24h") }}</option>
+      <option value="7d" {% if range == "7d" %}selected{% endif %}>{{ t("filter.preset_7d") }}</option>
+      <option value="30d" {% if range == "30d" %}selected{% endif %}>{{ t("filter.preset_30d") }}</option>
+      <option value="custom" {% if range == "custom" %}selected{% endif %}>{{ t("filter.custom") }}</option>
+    </select>
+  </div>
+  <div class="form-control">
+    <label class="label py-1" for="f-from"><span class="label-text">{{ t("filter.from") }}</span></label>
+    <input id="f-from" name="from" type="datetime-local" value="{{ display_from }}" class="input input-bordered input-sm tech">
+  </div>
+  <div class="form-control">
+    <label class="label py-1" for="f-to"><span class="label-text">{{ t("filter.to") }}</span></label>
+    <input id="f-to" name="to" type="datetime-local" value="{{ display_to }}" class="input input-bordered input-sm tech">
+  </div>
+  <div class="form-control">
+    <label class="label py-1" for="f-tz"><span class="label-text">{{ t("filter.timezone") }}</span></label>
+    <select id="f-tz" name="tz" class="select select-bordered select-sm">
+      <option value="UTC" {% if tz_name == "UTC" %}selected{% endif %}>UTC</option>
+      <option value="Europe/Berlin" {% if tz_name == "Europe/Berlin" %}selected{% endif %}>Europe/Berlin</option>
+    </select>
+  </div>
+  <button type="submit" class="btn btn-primary btn-sm">{{ t("filter.apply") }}</button>
+  <p class="w-full text-sm text-base-content/70">{{ t("filter.times_in", tz=tz_name) }}</p>
+</form>

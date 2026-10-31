@@ -1,0 +1,8 @@
+{% if matchers %}
+<p class="mb-3 text-sm text-base-content/70" role="note">
+  {{ t("filters.active_matchers") }}:
+  {% for key, value in matchers.items() %}
+  <span class="badge badge-outline tech mr-1">{{ key }}={{ value }}</span>
+  {% endfor %}
+</p>
+{% endif %}

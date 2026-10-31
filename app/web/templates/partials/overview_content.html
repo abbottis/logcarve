@@ -1,0 +1,151 @@
+<p class="tech mb-4 text-sm text-base-content/70" data-observation-window>{{ window_from }} → {{ window_to }}</p>
+{% if summary.warnings %}
+<div class="mb-4 space-y-2" role="status">
+  {% for warning in summary.warnings %}
+  <p class="alert alert-warning text-sm">{% include "icons/triangle-alert.svg" %}{{ warning }}</p>
+  {% endfor %}
+</div>
+{% endif %}
+
+{% if totals.requests == 0 %}
+<div class="alert" role="status">
+  {% include "icons/info.svg" %}
+  <span>{{ t("data.no_data") }}</span>
+</div>
+{% else %}
+<div class="stats stats-vertical w-full shadow sm:stats-horizontal" role="list" aria-label="{{ t("overview.title") }}">
+  <div class="stat" role="listitem">
+    <div class="stat-title">{{ t("overview.kpi.requests") }}</div>
+    <div class="stat-value tech">{{ totals.requests }}</div>
+  </div>
+  <div class="stat" role="listitem">
+    <div class="stat-title">{{ t("overview.kpi.errors_4xx") }} / {{ t("overview.kpi.errors_5xx") }}</div>
+    <div class="stat-value tech">{{ totals.errors_4xx }} / {{ totals.errors_5xx }}</div>
+    {% if error_share is not none %}
+    <div class="stat-desc">{{ t("overview.kpi.error_share") }}: {{ error_share }}%</div>
+    {% endif %}
+  </div>
+  <div class="stat" role="listitem">
+    <div class="stat-title">{{ t("overview.kpi.top_crawler") }}</div>
+    {% if top_claim %}
+    <div class="stat-value text-lg">{{ top_claim.title }}</div>
+    <div class="stat-desc">{{ t("crawler.claimed") }} · <span class="tech">{{ top_claim.requests }}</span> {{ t("table.requests") | lower }}</div>
+    {% else %}
+    <div class="stat-value text-lg">{{ t("overview.kpi.none_claimed") }}</div>
+    {% endif %}
+  </div>
+</div>
+
+<div class="mt-6 grid gap-6 xl:grid-cols-2">
+  <section class="card bg-base-100 shadow" aria-labelledby="traffic-h">
+    <div class="card-body">
+      <h2 id="traffic-h" class="card-title text-base">{{ t("overview.traffic") }}</h2>
+      <div class="chart-frame"><canvas id="traffic-timeline" aria-label="{{ t("overview.traffic") }}" role="img"></canvas></div>
+      <script id="traffic-timeline-data" type="application/json">{{ {"buckets": timeline, "requestsLabel": t("table.requests")} | tojson }}</script>
+      <details class="collapse collapse-arrow border border-base-300">
+        <summary class="collapse-title text-sm font-medium">{{ t("overview.traffic_table") }}</summary>
+        <div class="collapse-content table-scroll overflow-x-auto">
+          <table class="table table-sm">
+            <caption class="sr-only">{{ t("overview.traffic_table") }}</caption>
+            <thead><tr><th scope="col">{{ t("table.bucket") }}</th><th scope="col" class="text-right">{{ t("table.requests") }}</th></tr></thead>
+            <tbody>
+              {% for row in timeline %}
+              <tr><td class="tech">{{ row.label }}</td><td class="text-right tech">{{ row.requests }}</td></tr>
+              {% endfor %}
+            </tbody>
+          </table>
+        </div>
+      </details>
+    </div>
+  </section>
+  <section class="card bg-base-100 shadow" aria-labelledby="status-h">
+    <div class="card-body">
+      <h2 id="status-h" class="card-title text-base">{{ t("overview.status") }}</h2>
+      <div class="chart-frame"><canvas id="status-distribution" aria-label="{{ t("overview.status") }}" role="img"></canvas></div>
+      <script id="status-distribution-data" type="application/json">{{ {"rows": status_rows, "requestsLabel": t("table.requests")} | tojson }}</script>
+      <details class="collapse collapse-arrow border border-base-300">
+        <summary class="collapse-title text-sm font-medium">{{ t("overview.status_table") }}</summary>
+        <div class="collapse-content table-scroll overflow-x-auto">
+          <table class="table table-sm">
+            <caption class="sr-only">{{ t("overview.status_table") }}</caption>
+            <thead><tr><th scope="col">{{ t("table.status") }}</th><th scope="col" class="text-right">{{ t("table.requests") }}</th></tr></thead>
+            <tbody>
+              {% for row in status_rows %}
+              <tr><td class="tech">{{ row.status }}</td><td class="text-right tech">{{ row.requests }}</td></tr>
+              {% endfor %}
+            </tbody>
+          </table>
+        </div>
+      </details>
+    </div>
+  </section>
+</div>
+
+<div class="mt-6 grid gap-6 xl:grid-cols-2">
+  <section class="card bg-base-100 shadow" aria-labelledby="paths-h">
+    <div class="card-body">
+      <h2 id="paths-h" class="card-title text-base">{{ t("overview.top_paths") }}</h2>
+      <div class="table-scroll overflow-x-auto">
+        <table class="table table-sm">
+          <caption class="sr-only">{{ t("overview.top_paths") }}</caption>
+          <thead><tr><th scope="col">{{ t("table.path") }}</th><th scope="col">{{ t("table.method") }}</th><th scope="col" class="text-right">{{ t("table.requests") }}</th><th scope="col" class="text-right">{{ t("table.errors") }}</th></tr></thead>
+          <tbody>
+            {% for item in paths["items"] %}
+            <tr><td class="tech break-all">{{ item.path }}</td><td class="tech">{{ item.method }}</td><td class="text-right tech">{{ item.requests }}</td><td class="text-right tech">{{ item.errors }}</td></tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+      {% if paths["items"] %}
+      <p class="mt-2 text-sm text-base-content/70">{{ t("paging.showing", start=offset + 1, end=offset + paths["items"]|length, total=paths["total_groups"]) }}</p>
+      {% endif %}
+    </div>
+  </section>
+  <section class="card bg-base-100 shadow" aria-labelledby="ref-h">
+    <div class="card-body">
+      <h2 id="ref-h" class="card-title text-base">{{ t("overview.top_referrers") }}</h2>
+      <div class="table-scroll overflow-x-auto">
+        <table class="table table-sm">
+          <caption class="sr-only">{{ t("overview.top_referrers") }}</caption>
+          <thead><tr><th scope="col">{{ t("table.referrer") }}</th><th scope="col" class="text-right">{{ t("table.requests") }}</th><th scope="col" class="text-right">{{ t("table.paths") }}</th></tr></thead>
+          <tbody>
+            {% for item in referrers["items"] %}
+            <tr><td class="tech break-all">{{ item.referer_host }}</td><td class="text-right tech">{{ item.requests }}</td><td class="text-right tech">{{ item.paths }}</td></tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+      {% if referrers["items"] %}
+      <p class="mt-2 text-sm text-base-content/70">{{ t("paging.showing", start=offset + 1, end=offset + referrers["items"]|length, total=referrers["total_groups"]) }}</p>
+      {% endif %}
+    </div>
+  </section>
+</div>
+
+{% if findings %}
+<section class="card mt-6 bg-base-100 shadow" aria-labelledby="find-h">
+  <div class="card-body">
+    <h2 id="find-h" class="card-title text-base">{{ t("overview.findings") }}</h2>
+    <ul class="space-y-3">
+      {% for finding in findings %}
+      <li class="rounded-lg border border-base-300 p-3">
+        <p class="font-medium">{{ finding.title }}</p>
+        <p class="text-sm text-base-content/70">
+          <span class="tech">{{ finding.rule_id }} v{{ finding.rule_version }}</span>
+          · {{ t("finding.investigation_candidate") }}
+          · <span class="tech">{{ finding.counts.requests }}</span> {{ t("table.requests") | lower }}
+        </p>
+      </li>
+      {% endfor %}
+    </ul>
+  </div>
+</section>
+{% endif %}
+{% endif %}
+
+<div class="mt-6 space-y-2 text-sm text-base-content/70">
+  <p>{{ t("data.events", count=summary.coverage.unique_events) }} · {{ t("data.observed", min=summary.coverage.observed_min, max=summary.coverage.observed_max) }}</p>
+  {% if not summary.duration.available %}
+  <p role="note">{% include "icons/clock.svg" %}{{ t("data.response_time_unavailable") }}</p>
+  {% endif %}
+</div>

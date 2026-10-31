@@ -1,0 +1,68 @@
+<!DOCTYPE html>
+<html lang="en" data-theme="light">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="htmx-config" content='{"allowEval": false, "includeIndicatorStyles": false, "attributesToSettle": ["class", "width", "height"], "historyCacheSize": 0, "refreshOnHistoryMiss": true}'>
+  <title>{{ title | default(t("app.name")) }} — {{ t("app.name") }}</title>
+  <script src="/static/js/theme.js"></script>
+  <link rel="stylesheet" href="/static/app.css">
+  <script src="/static/vendor/js/htmx.min.js" defer></script>
+  <script src="/static/js/prefs.js" defer></script>
+  <script src="/static/js/nav.js" defer></script>
+  <script src="/static/js/filter.js" defer></script>
+  <script src="/static/js/csrf.js" defer></script>
+  <script src="/static/js/session.js" defer></script>
+  {% block head %}{% endblock %}
+</head>
+<body class="min-h-screen bg-base-200 text-base-content antialiased">
+  <a href="#main" class="sr-only focus:not-sr-only focus:absolute focus:z-50 focus:bg-base-100 focus:p-2">{{ t("nav.skip") }}</a>
+  {% if not bare %}
+  <div class="flex min-h-screen">
+    <div id="nav-backdrop" class="fixed inset-0 z-30 hidden bg-black/50 lg:hidden" aria-hidden="true"></div>
+    <nav id="side-nav" class="fixed inset-y-0 left-0 z-40 hidden w-60 shrink-0 overflow-y-auto border-r border-base-300 bg-base-100 p-4 lg:static lg:block" aria-label="{{ t("nav.main") }}">
+      <ul class="menu gap-1">
+        {% for item in [("overview", "/", "nav.overview", "layout-dashboard"), ("security", "/security", "nav.security", "shield-alert"), ("crawlers", "/crawlers", "nav.crawlers", "bot"), ("errors", "/errors", "nav.errors", "circle-alert"), ("ask", "/ask", "nav.ask_ai", "sparkles"), ("settings", "/settings", "nav.settings", "settings"), ("sources", "/data-sources", "nav.data_sources", "database")] %}
+        <li>
+          {# The active view keeps its full current canonical filters;
+             other views take the shared site/source/window/tz state. #}
+          <a href="{% if active == item[0] and canonical_url is defined %}{{ canonical_url }}{% else %}{{ item[1] }}{{ nav_query | default('') }}{% endif %}" class="{% if active == item[0] %}active{% endif %}" {% if active == item[0] %}aria-current="page"{% endif %}>
+            {% include "icons/" ~ item[3] ~ ".svg" %}
+            {{ t(item[2]) }}
+          </a>
+        </li>
+        {% endfor %}
+      </ul>
+    </nav>
+    <div class="flex min-w-0 flex-1 flex-col">
+      <header class="navbar sticky top-0 z-30 flex-wrap gap-2 border-b border-base-300 bg-base-100 py-2">
+        <button id="nav-button" type="button" class="btn btn-ghost btn-square btn-sm lg:hidden" aria-expanded="false" aria-controls="side-nav" aria-label="{{ t("nav.menu") }}">
+          {% include "icons/menu.svg" %}
+        </button>
+        <a href="/" class="text-lg font-semibold">{{ t("app.name") }}</a>
+        <div class="ms-auto flex items-center gap-1">
+          <label class="sr-only" for="theme-select">{{ t("theme.choice") }}</label>
+          <select id="theme-select" class="select select-bordered select-sm" data-theme-select>
+            <option value="system">{{ t("theme.system") }}</option>
+            <option value="light">{{ t("theme.light") }}</option>
+            <option value="dark">{{ t("theme.dark") }}</option>
+          </select>
+          <button type="button" class="btn btn-ghost btn-sm" data-logout="/api/v1/admin/logout" data-msg-logout-failed="{{ t("auth.logout.failed") }}" aria-label="{{ t("auth.logout") }}" title="{{ t("auth.logout") }}">
+            {% include "icons/log-out.svg" %}
+            <span class="hidden min-[420px]:inline">{{ t("auth.logout") }}</span>
+          </button>
+        </div>
+      </header>
+      <p data-logout-error class="alert alert-error m-4 mb-0" role="alert" hidden></p>
+      <main id="main" class="mx-auto w-full max-w-6xl flex-1 p-4 sm:p-6">
+        {% block content %}{% endblock %}
+      </main>
+    </div>
+  </div>
+  {% else %}
+  <main id="main" class="mx-auto flex min-h-screen w-full max-w-md flex-col justify-center p-6">
+    {% block bare_content %}{% endblock %}
+  </main>
+  {% endif %}
+</body>
+</html>

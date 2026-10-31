@@ -1,0 +1,48 @@
+# T10 standalone local demo profile (synthetic data, AI off, loopback only).
+#
+# Standalone by design: it does NOT read the owner base `.env`, inherits no
+# model key/config, and forces the AI-off posture via `environment` (which
+# takes precedence over `env_file`). Generated demo-only secrets live in
+# ignored `artifacts/local-demo-secrets/demo.env` (directory 0700, files
+# 0600); the existing product MODEL_API_KEY file is never referenced.
+#
+# Usage (coordinator executes; Muse sandbox cannot reach the Docker socket):
+#   ./scripts/demo/init.sh    # generate secrets once (refuses overwrite)
+#   ./scripts/demo/start.sh   # build, start, seed verified synthetic rows
+#   ./scripts/demo/health.sh  # public liveness + gated readiness (private)
+#   ./scripts/demo/stop.sh    # stop, keep data
+#   ./scripts/demo/reset.sh   # nondestructive verified reseed (no down -v)
+#
+# Recording-day entry URL (custom window covers the full 30-row T8 fixture,
+# 26–28 Oct 2026, usable on 3 Nov long after the default 7d window ages out):
+#   http://127.0.0.1:8080/?site=default&range=custom&from=2026-10-26T00:00:00%2B00:00&to=2026-10-29T00:00:00%2B00:00&tz=Europe%2FBerlin&source=example-combined
+name: logcarve-demo
+
+services:
+  app:
+    build: .
+    image: logcarve-demo:t10
+    ports:
+      - "127.0.0.1:8080:8080"
+    env_file:
+      - path: ./artifacts/local-demo-secrets/demo.env
+        required: true
+    environment:
+      AI_ENABLED: "false"
+      MODEL_API_KEY: ""
+      MODEL_DATA_POLICY_VERIFIED: "false"
+      MODEL_ALLOW_REAL_DATA: "false"
+      DATABASE_PATH: /data/logcarve-demo.sqlite3
+      APP_BASE_URL: http://127.0.0.1:8080
+      DEFAULT_TIMEZONE: Europe/Berlin
+      EXTERNAL_API_ENABLED: "true"
+    volumes:
+      - demo-data:/data
+      - ./tests/fixtures/combined/t8_smoke.txt:/logs/demo-access.log:ro
+    # Least privilege from the image (USER 10001); no privileged mode,
+    # no Docker socket, no extra capabilities, read-only source mount.
+
+volumes:
+  # Project-scoped by the `name: logcarve-demo` above (no explicit global
+  # `name:`), so smoke runs and other Compose projects can never collide.
+  demo-data:
