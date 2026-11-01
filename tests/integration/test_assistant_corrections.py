@@ -514,3 +514,53 @@ def test_unavailable_ai_import_keeps_deterministic_api(env, monkeypatch):
     chat = client.post("/api/v1/chat/ask", json=_chat_body(), headers={"X-CSRF-Token": csrf})
     assert chat.status_code == 503
     assert chat.json()["code"] == "ai_unavailable"
+
+
+SENTINEL = "synthetic-selector-private-sentinel"
+
+
+@pytest.mark.parametrize(
+    "override",
+    [
+        {"bot": SENTINEL},
+        {"provider_claim": SENTINEL},
+        {"purpose": SENTINEL},
+    ],
+    ids=["bot", "provider", "purpose"],
+)
+def test_unknown_selector_sentinel_not_reflected(env, override):
+    fake = FakeProvider(script=_direct_answer())
+    with pytest.raises(InvestigationError) as excinfo:
+        _investigate(env, fake, **override)
+    assert excinfo.value.code == "invalid_request"
+    assert str(excinfo.value) == "Unknown or contradictory selector."
+    assert SENTINEL not in str(excinfo.value)
+    assert isinstance(excinfo.value.__cause__, ValueError)
+    assert fake.outgoing == []
+    assert budget.lifetime_micro_usd(env["db"]) == 0
+
+
+def test_chat_unknown_provider_sentinel_400_parity(env, monkeypatch):
+    from app.main import create_app
+
+    fake = FakeProvider(script=_direct_answer())
+    monkeypatch.setenv("AI_ENABLED", "true")
+    monkeypatch.setenv("MODEL_DATA_POLICY_VERIFIED", "true")
+    monkeypatch.setenv("MODEL_ALLOW_REAL_DATA", "true")
+    monkeypatch.setenv("LLM_DAILY_LIMIT_USD", "50")
+    monkeypatch.setattr("app.ai.service.select_provider", lambda settings: fake)
+    client = TestClient(create_app(db_path=env["db"], secure_cookies=False))
+    csrf = _login(client)
+    response = client.post(
+        "/api/v1/chat/ask",
+        json=_chat_body(provider=SENTINEL),
+        headers={"X-CSRF-Token": csrf},
+    )
+    assert response.status_code == 400
+    body = response.json()
+    assert body["code"] == "invalid_request"
+    assert body["message"] == "Unknown or contradictory selector."
+    assert SENTINEL not in response.text
+    assert body["request_id"] == response.headers["X-Request-ID"]
+    assert fake.outgoing == []
+    assert budget.lifetime_micro_usd(env["db"]) == 0

@@ -555,9 +555,7 @@ def run_investigation(
             purpose=purpose,
         )
     except ValueError as exc:
-        raise InvestigationError(
-            "invalid_request", f"Unknown or contradictory selector: {exc}."
-        ) from exc
+        raise InvestigationError("invalid_request", "Unknown or contradictory selector.") from exc
     scope = validate_scope(
         Path(db_path),
         actor=actor,

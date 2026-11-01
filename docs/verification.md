@@ -959,3 +959,24 @@ URL/Ask state). Directly observed in this session unless noted.
   runs Playwright incl. extended nav roundtrip with /requests).
 - Coverage: ANA-05, API-05 (service layer; external API unchanged),
   UI-05 implementation done; independent browser review before C.
+
+## 2026-11-01 — Selector error privacy correction (feature/traffic-analytics)
+
+Bounded fix for the independently reproduced selector reflection: unknown
+bot/provider/purpose values were embedded in the `InvestigationError`
+message and echoed by the authenticated chat 400. Synthetic repro only
+(`synthetic-selector-private-sentinel`, no DB or provider use); pre-fix
+`str(exc)` contained the sentinel for all three selector kinds.
+
+- Fix (`app/ai/service.py`): selector `ValueError` now maps to the fixed
+  message `Unknown or contradictory selector.` Internal chaining
+  (`from exc`) retained; `invalid_request`/HTTP 400 behavior unchanged.
+  No provider called, no model-history/cost changes.
+- Regressions (`tests/integration/test_assistant_corrections.py`):
+  parametrized bot/provider/purpose sentinel nonreflection (fixed text,
+  chained `ValueError`, zero fake-provider calls, zero budget spend) plus
+  an authenticated chat 400 case asserting body/header `request_id`
+  parity and full-body sentinel nonreflection.
+- Observed: 4 new tests PASS; 61 PASS across corrections, assistant
+  scope, assistant and classification suites; full corrections file
+  24 PASS; `ruff check` and `ruff format --check` clean.
