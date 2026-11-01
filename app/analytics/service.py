@@ -21,11 +21,15 @@ from app.analytics.contracts import (
     BotTableQuery,
     BucketSize,
     ExplorerQuery,
+    JourneyQuery,
+    JourneyTimelineQuery,
     SlowEndpointsQuery,
+    TimeWindow,
     TopPathsQuery,
     TopReferrersQuery,
 )
 from app.analytics.rules import Rule
+from app.ingestion.combined import _REJECTION_REASONS
 
 LIMITATIONS_LOGS = [
     "access logs alone cannot prove traffic completeness: coverage describes observed events, not proven source coverage",
@@ -390,9 +394,12 @@ def security_findings(
 
     Includes the conservative conflicting-bot-identity candidate when the
     selected scope contains one: exact all-row totals (no UA sampling
-    cap) with a bounded, explicitly labelled agent sample. No DNS, HTTP,
-    GeoIP, unmasking or bot removal is ever performed; absence of this
-    candidate never proves the traffic genuine.
+    cap) with a bounded, explicitly labelled agent sample. Every other
+    rule counts ALL matching rows exactly in SQL no matter how many
+    distinct paths exist; only samples are bounded, with
+    shown/total/truncated fields. No DNS, HTTP, GeoIP, unmasking or bot
+    removal is ever performed; absence of a candidate never proves the
+    traffic genuine.
     """
     observed = datetime.now(UTC) if observation_time is None else observation_time
     clf = _classifier_for(filt, rules)
@@ -430,94 +437,442 @@ def security_findings(
                     limitations=[*LIMITATIONS_SECURITY, *LIMITATIONS_BOT, *LIMITATIONS_LOGS],
                 )
             )
-    path_rows, paths_truncated = queries.distinct_paths(conn, filt, clf)
     for rule in rules:
-        if rule.path_contains:
-            matched = [(p, c, e) for p, c, e in path_rows if rule.matches_path(p)]
-            if matched:
-                total = sum(c for _, c, _ in matched)
-                findings.append(
-                    Finding(
-                        rule_id=rule.id,
-                        rule_version=rule.version,
-                        category=rule.category,
-                        title=rule.title,
-                        severity=rule.severity,
-                        meaning=rule.meaning,
-                        window=_window_dict(filt),
-                        filters=_filter_dict(filt),
-                        observation_time=observed.isoformat(),
-                        counts={"requests": total, "distinct_paths": len(matched)},
-                        evidence={
-                            "paths": [
-                                {"path": p, "requests": c, "errors": e} for p, c, e in matched[:20]
-                            ],
-                            "paths_shown": min(20, len(matched)),
-                            "paths_total": len(matched),
-                        },
-                        coverage_summary=coverage,
-                        limitations=[*LIMITATIONS_SECURITY, *LIMITATIONS_LOGS],
-                    )
-                )
-        if rule.min_client_errors is not None:
-            candidates = queries.repeated_client_errors(
-                conn, filt, min_errors=rule.min_client_errors, classifier=clf
-            )
-            batched = queries.sample_paths_for_clients(
-                conn,
-                filt,
-                [str(candidate["client_pseudonym"]) for candidate in candidates],
-                classifier=clf,
-            )
-            for candidate in candidates:
-                sample_paths = batched.get(str(candidate["client_pseudonym"]), [])
-                findings.append(
-                    Finding(
-                        rule_id=rule.id,
-                        rule_version=rule.version,
-                        category=rule.category,
-                        title=rule.title,
-                        severity=rule.severity,
-                        meaning=rule.meaning,
-                        window=_window_dict(filt),
-                        filters=_filter_dict(filt),
-                        observation_time=observed.isoformat(),
-                        counts={
-                            "errors": candidate["errors"],
-                            "distinct_paths": candidate["paths"],
-                        },
-                        evidence={
-                            "client_pseudonym": candidate["client_pseudonym"],
-                            "sample_paths": sample_paths,
-                            "sample_paths_shown": len(sample_paths),
-                            "sample_paths_total": candidate["paths"],
-                        },
-                        coverage_summary=coverage,
-                        limitations=[*LIMITATIONS_SECURITY, *LIMITATIONS_LOGS],
-                    )
-                )
-    if paths_truncated:
-        findings.append(
-            Finding(
-                rule_id="scan-truncated",
-                rule_version=1,
-                category="unknown",
-                title="Path scan hit its bound",
-                severity="info",
-                meaning="distinct-value scan truncated; rare paths may be missing",
-                window=_window_dict(filt),
-                filters=_filter_dict(filt),
-                observation_time=observed.isoformat(),
-                counts={"requests": 0, "distinct_paths": 0},
-                evidence={},
-                coverage_summary=coverage,
-                limitations=[*LIMITATIONS_SECURITY],
-            )
+        if rule.conflicting_identities:
+            continue
+        has_threshold = (
+            rule.min_client_errors is not None
+            or rule.min_client_requests is not None
+            or rule.min_client_distinct_paths is not None
         )
+        if has_threshold:
+            offenders, offenders_total = queries.security_offenders(conn, filt, rule, clf)
+            truncated = offenders_total > len(offenders)
+            for offender in offenders:
+                # The legacy 4xx rule keeps its exact historic shape:
+                # every counted row is a stored 4xx, so the count reads
+                # ``errors``; narrowed rate rules count ``requests``.
+                if rule.min_client_errors is not None:
+                    counts = {
+                        "errors": offender["hits"],
+                        "distinct_paths": offender["distinct_paths"],
+                    }
+                else:
+                    counts = {
+                        "requests": offender["hits"],
+                        "distinct_paths": offender["distinct_paths"],
+                    }
+                findings.append(
+                    Finding(
+                        rule_id=rule.id,
+                        rule_version=rule.version,
+                        category=rule.category,
+                        title=rule.title,
+                        severity=rule.severity,
+                        meaning=rule.meaning,
+                        window=_window_dict(filt),
+                        filters=_filter_dict(filt),
+                        observation_time=observed.isoformat(),
+                        counts=counts,
+                        evidence={
+                            "client_pseudonym": offender["client_pseudonym"],
+                            "sample_paths": offender["sample_paths"],
+                            "sample_paths_shown": len(offender["sample_paths"]),
+                            "sample_paths_total": offender["distinct_paths"],
+                            "offenders_shown": len(offenders),
+                            "offenders_total": offenders_total,
+                            "offenders_truncated": truncated,
+                        },
+                        coverage_summary=coverage,
+                        limitations=[*LIMITATIONS_SECURITY, *LIMITATIONS_LOGS],
+                    )
+                )
+        elif rule.path_contains or rule.status_in:
+            totals = queries.security_rule_totals(conn, filt, rule, clf)
+            if totals["requests"] == 0:
+                continue
+            sample, groups_total = queries.security_rule_sample(conn, filt, rule, clf)
+            findings.append(
+                Finding(
+                    rule_id=rule.id,
+                    rule_version=rule.version,
+                    category=rule.category,
+                    title=rule.title,
+                    severity=rule.severity,
+                    meaning=rule.meaning,
+                    window=_window_dict(filt),
+                    filters=_filter_dict(filt),
+                    observation_time=observed.isoformat(),
+                    counts={
+                        "requests": totals["requests"],
+                        "distinct_paths": totals["distinct_paths"],
+                    },
+                    evidence={
+                        "paths": sample,
+                        "paths_shown": len(sample),
+                        "paths_total": groups_total,
+                        "paths_truncated": groups_total > len(sample),
+                    },
+                    coverage_summary=coverage,
+                    limitations=[*LIMITATIONS_SECURITY, *LIMITATIONS_LOGS],
+                )
+            )
     return sorted(
         findings,
         key=lambda f: (-(f.counts.get("requests", 0) + f.counts.get("errors", 0)), f.rule_id),
     )
+
+
+LIMITATIONS_JOURNEYS = [
+    (
+        "request journeys are technical groupings of stored requests by HMAC client pseudonym "
+        "and sanitized User-Agent with a 30-minute inactivity split: never visitors, people, "
+        "browser sessions or clicks"
+    ),
+    "a gap of exactly 1800 seconds continues a journey; only a strictly longer gap starts a new one",
+    (
+        "filters hide rows but never invent journey starts: boundaries come from the unfiltered "
+        "site/source event stream"
+    ),
+    (
+        "a first-of-key journey near the window start (or last near the window end) may continue "
+        "outside the window: flagged partial, never resolved by reading outside the authorized window"
+    ),
+]
+
+
+def journeys(
+    conn: sqlite3.Connection,
+    query: JourneyQuery,
+    rules: list[Rule] | None = None,
+    *,
+    observation_time: datetime | None = None,
+) -> dict[str, object]:
+    """Paginated technical request journeys (never visitors or sessions).
+
+    Grouping key is the HMAC client pseudonym plus the sanitized
+    User-Agent (a UA change starts a new key, never a continuation);
+    boundaries derive from the authorized site/source event stream
+    BEFORE the caller's content matchers. Each row carries the
+    unfiltered total with the filtered shown count, a stable journey
+    ID, the base-scope entry path and explicit edge flags.
+    """
+    clf = _classifier_for(query.filt, rules)
+    observed = datetime.now(UTC) if observation_time is None else observation_time
+    items, total = queries.journey_list(conn, query, clf)
+    return {
+        "site_id": query.filt.site_id,
+        "time_range": _window_dict(query.filt),
+        "generated_at": observed.isoformat(),
+        "filters": _filter_dict(query.filt),
+        "gap_definition": (
+            f"new journey when the gap to the previous event of the same "
+            f"(client pseudonym, sanitized User-Agent) key strictly exceeds "
+            f"{queries.JOURNEY_GAP_SECONDS} seconds; exactly "
+            f"{queries.JOURNEY_GAP_SECONDS} seconds continues the journey"
+        ),
+        "sort": query.sort,
+        "min_requests": query.min_requests,
+        "items": items,
+        "total_groups": total,
+        "limit": query.filt.limit,
+        "offset": query.filt.offset,
+        "coverage": coverage_summary(conn, query.filt, rules),
+        "limitations": [*LIMITATIONS_JOURNEYS, *LIMITATIONS_LOGS],
+    }
+
+
+def journey_timeline(
+    conn: sqlite3.Connection,
+    query: JourneyTimelineQuery,
+    rules: list[Rule] | None = None,
+) -> dict[str, object]:
+    """Bounded chronological timeline for one journey key.
+
+    Raises ``KeyError`` for an unknown journey and ``ValueError`` for
+    contradictory selectors (via the shared classifier). No plaintext
+    address or tracking cookie is exposed; agents render truncated at
+    200 characters with an explicit flag.
+    """
+    clf = _classifier_for(query.filt, rules)
+    result = queries.journey_timeline(conn, query, clf)
+    return {
+        "site_id": query.filt.site_id,
+        "time_range": _window_dict(query.filt),
+        "filters": _filter_dict(query.filt),
+        **result,
+        "coverage": coverage_summary(conn, query.filt, rules),
+        "limitations": [*LIMITATIONS_JOURNEYS, *LIMITATIONS_LOGS],
+    }
+
+
+def journey_entry_paths(
+    conn: sqlite3.Connection,
+    filt: AnalyticsFilter,
+    rules: list[Rule] | None = None,
+    *,
+    min_requests: int = 1,
+    observation_time: datetime | None = None,
+) -> dict[str, object]:
+    """Entry-path aggregation from eligible complete/partial journeys.
+
+    The entry is each journey's base-scope first request, so filters
+    cannot move entries. Complete and window-edge partial journeys
+    aggregate together with both shares reported; the partial share
+    carries the outside-window caveat, never a confident total.
+    """
+    clf = _classifier_for(filt, rules)
+    observed = datetime.now(UTC) if observation_time is None else observation_time
+    items, total = queries.journey_entry_paths(conn, filt, clf, min_requests=min_requests)
+    return {
+        "site_id": filt.site_id,
+        "time_range": _window_dict(filt),
+        "generated_at": observed.isoformat(),
+        "filters": _filter_dict(filt),
+        "min_requests": min_requests,
+        "items": items,
+        "total_groups": total,
+        "limit": filt.limit,
+        "offset": filt.offset,
+        "partial_caveat": (
+            "partial journeys may start or end outside the window: their entry "
+            "is the first observed request, not proven to be the true first"
+        ),
+        "coverage": coverage_summary(conn, filt, rules),
+        "limitations": [*LIMITATIONS_JOURNEYS, *LIMITATIONS_LOGS],
+    }
+
+
+def rejected_lines(
+    conn: sqlite3.Connection,
+    filt: AnalyticsFilter,
+    rules: list[Rule] | None = None,
+    *,
+    observation_time: datetime | None = None,
+) -> dict[str, object]:
+    """Line-level rejected accounting, explicitly NOT event findings.
+
+    Rejected source lines never became stored events, so they can
+    never appear as findings, paths, clients or evidence rows. This
+    report carries only per-import line totals plus the allowlisted
+    pre-discard reason-code vocabulary (codes only, never raw bytes,
+    addresses or query values). Origin-observed malformed requests
+    (stored status 400) stay event-level under the security rules;
+    parser-rejected lines stay here.
+    """
+    clf = _classifier_for(filt, rules)
+    observed = datetime.now(UTC) if observation_time is None else observation_time
+    cov = queries.coverage(conn, filt, clf)
+    attempts = cov["import_attempts"]
+    assert isinstance(attempts, dict)
+    return {
+        "site_id": filt.site_id,
+        "time_range": _window_dict(filt),
+        "generated_at": observed.isoformat(),
+        "filters": _filter_dict(filt),
+        "line_totals": {
+            "lines_total": attempts["lines_total"],
+            "lines_accepted": attempts["lines_accepted"],
+            "lines_rejected": attempts["lines_rejected"],
+            "records_replayed": attempts["records_replayed"],
+        },
+        "imports": [
+            {
+                "import_id": imp["import_id"],
+                "status": imp["status"],
+                "lines_total": imp["lines_total"],
+                "lines_accepted": imp["lines_accepted"],
+                "lines_rejected": imp["lines_rejected"],
+                "error_summary": imp["error_summary"],
+            }
+            for imp in cov["imports"]  # type: ignore[union-attr]
+        ],
+        "reason_codes": sorted(_REJECTION_REASONS),
+        "line_vs_event": (
+            "rejected lines are source bytes the parser refused before any "
+            "event existed: they are counted here at line level only and "
+            "never described as persisted events, paths, clients or evidence"
+        ),
+        "coverage": coverage_summary(conn, filt, rules),
+        "limitations": [*LIMITATIONS_SECURITY, *LIMITATIONS_LOGS],
+    }
+
+
+def previous_window_filter(filt: AnalyticsFilter) -> AnalyticsFilter:
+    """Immediately preceding equal-length window, same scope/selectors.
+
+    Only the window slides back by exactly its own duration; every
+    other selector (site, source, matchers) is preserved so the
+    comparison never widens the authorized scope.
+    """
+    duration = filt.window.time_to - filt.window.time_from
+    return filt.model_copy(
+        update={
+            "window": TimeWindow(
+                time_from=filt.window.time_from - duration,
+                time_to=filt.window.time_from,
+            ),
+            "limit": 1,
+            "offset": 0,
+        }
+    )
+
+
+def _comparison_metric(
+    name: str, current: float, previous: float, comparable: bool
+) -> dict[str, object]:
+    """One current-vs-previous metric with honest ratio handling."""
+    change: int | float = current - previous
+    if not comparable:
+        return {
+            "name": name,
+            "current": current,
+            "previous": previous,
+            "absolute_change": change,
+            "ratio": None,
+            "percent": None,
+            "ratio_status": "insufficient_coverage",
+            "note": "coverage is limited (running/failed imports): no confident ratio",
+        }
+    if previous == 0:
+        return {
+            "name": name,
+            "current": current,
+            "previous": previous,
+            "absolute_change": change,
+            "ratio": None,
+            "percent": None,
+            "ratio_status": "zero_baseline",
+            "note": "baseline is zero: change is exact, ratio is unavailable (never infinite)",
+        }
+    ratio = current / previous
+    return {
+        "name": name,
+        "current": current,
+        "previous": previous,
+        "absolute_change": change,
+        "ratio": ratio,
+        "percent": (ratio - 1.0) * 100.0,
+        "ratio_status": "ok",
+        "note": "",
+    }
+
+
+def compare_windows(
+    conn: sqlite3.Connection,
+    current: AnalyticsFilter,
+    previous: AnalyticsFilter,
+    rules: list[Rule] | None = None,
+    *,
+    observation_time: datetime | None = None,
+) -> dict[str, object]:
+    """Current-vs-explicit/previous equal-length window comparison.
+
+    Both filters must share site and source scope and span exactly
+    equal durations; anything else raises ``ValueError`` instead of
+    widening. Each side reports its own coverage range, raw counts,
+    absolute change and ratio/percentage. A zero baseline yields an
+    exact change with an unavailable ratio (never divide-by-zero or
+    infinite); limited coverage (running/failed imports on either
+    side) marks every ratio unavailable rather than a confident
+    spike. Only the two validated windows are read.
+    """
+    if current.site_id != previous.site_id or current.source_id != previous.source_id:
+        raise ValueError("comparison windows must share site and source scope")
+    current_duration = current.window.time_to - current.window.time_from
+    previous_duration = previous.window.time_to - previous.window.time_from
+    if current_duration != previous_duration:
+        raise ValueError("comparison windows must have exactly equal length")
+    if current_duration <= timedelta(0):
+        raise ValueError("comparison windows must have positive length")
+    observed = datetime.now(UTC) if observation_time is None else observation_time
+    sides: dict[str, dict[str, object]] = {}
+    for name, filt in (("current", current), ("previous", previous)):
+        clf = _classifier_for(filt, rules)
+        counts = queries.summary_counts(conn, filt, clf)
+        traffic = {row["traffic"]: row for row in queries.traffic_breakdown(conn, filt, clf)}
+        cov = queries.coverage(conn, filt, clf)
+        imports = cov["imports"]
+        assert isinstance(imports, list)
+        limited = any(imp["status"] not in ("completed",) for imp in imports)  # type: ignore[union-attr]
+        hours = current_duration.total_seconds() / 3600.0
+        sides[name] = {
+            "counts": counts,
+            "claimed_bot": int(traffic.get("claimed_bot", {}).get("requests", 0)),
+            "automation": int(traffic.get("other_automation", {}).get("requests", 0)),
+            "requests_per_hour": counts["requests"] / hours if hours else None,
+            "coverage": {
+                "unique_events": cov["unique_events"],
+                "observed_min": cov["observed_min"],
+                "observed_max": cov["observed_max"],
+                "sources": cov["sources"],
+                "import_attempts": cov["import_attempts"],
+                "coverage_limited": limited,
+            },
+        }
+    cur, prev = sides["current"], sides["previous"]
+    assert isinstance(cur["coverage"], dict) and isinstance(prev["coverage"], dict)
+    comparable = not (cur["coverage"]["coverage_limited"] or prev["coverage"]["coverage_limited"])
+    cur_counts = cur["counts"]
+    prev_counts = prev["counts"]
+    assert isinstance(cur_counts, dict) and isinstance(prev_counts, dict)
+    metrics = [
+        _comparison_metric("requests", cur_counts["requests"], prev_counts["requests"], comparable),
+        _comparison_metric(
+            "errors_4xx", cur_counts["errors_4xx"], prev_counts["errors_4xx"], comparable
+        ),
+        _comparison_metric(
+            "errors_5xx", cur_counts["errors_5xx"], prev_counts["errors_5xx"], comparable
+        ),
+        _comparison_metric(
+            "bytes_total", cur_counts["bytes_total"], prev_counts["bytes_total"], comparable
+        ),
+        _comparison_metric(
+            "claimed_bot_requests",
+            int(cur["claimed_bot"]),
+            int(prev["claimed_bot"]),
+            comparable,
+        ),
+        _comparison_metric(
+            "automation_requests",
+            int(cur["automation"]),
+            int(prev["automation"]),
+            comparable,
+        ),
+    ]
+    assert isinstance(cur["requests_per_hour"], (int, float))
+    assert prev["requests_per_hour"] is None or isinstance(prev["requests_per_hour"], (int, float))
+    metrics.append(
+        _comparison_metric(
+            "requests_per_hour",
+            float(cur["requests_per_hour"]),
+            float(prev["requests_per_hour"] or 0.0),
+            comparable and prev["requests_per_hour"] is not None,
+        )
+    )
+    reasons = []
+    if not comparable:
+        reasons.append("coverage limited by running/failed imports on at least one side")
+    if prev_counts["requests"] == 0:
+        reasons.append("baseline window holds no requests: ratios unavailable")
+    return {
+        "site_id": current.site_id,
+        "source_id": current.source_id,
+        "current_window": _window_dict(current),
+        "previous_window": _window_dict(previous),
+        "window_seconds": int(current_duration.total_seconds()),
+        "generated_at": observed.isoformat(),
+        "metrics": metrics,
+        "coverage": {"current": cur["coverage"], "previous": prev["coverage"]},
+        "comparable": comparable and int(prev_counts["requests"]) > 0,
+        "comparable_reasons": reasons,
+        "limitations": [
+            "each side covers only its own validated window: no hidden widening",
+            "ratios are unavailable on zero baselines or limited coverage, never infinite",
+            *LIMITATIONS_BOT,
+            *LIMITATIONS_LOGS,
+        ],
+    }
 
 
 #: All traffic buckets in stable order; missing buckets are zero-filled so

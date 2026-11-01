@@ -1,5 +1,35 @@
 # Verification record
 
+## 2026-11-01 — Parity T2b journeys/security/comparison (E/F/H, shared layer)
+
+Authorized LogWerk parity build on `feature/logwerk-parity-2026-11-01`,
+exact model `muse-spark-1.3-contributor`/medium/Contributor ON; sandbox +
+approval ON, sole writer, no subagents. Public/synthetic checkout only:
+no parent private files/keys/real logs/product calls/Docker/push/main/deployment.
+All code/tests by the implementer. No UI import or translations; no
+original-IP joins/projections; legacy HMAC/IDs/auth/usage/allowance,
+the 120-row fixture and the 77 bot rules with the conservative
+conflicting-bot detector preserved. Metric definitions and provenance:
+`docs/logwerk-parity-metrics.md` (E/F/H sections added).
+
+| Check | Result | Evidence |
+| --- | --- | --- |
+| New `tests/integration/test_parity_t2b.py` | PASS | 19 passed: journeys (gap equality 29m59s/30m/30m1s, identical-ts stability, filter-proof starts, edge partials incl. exact-gap-complete, paging/sorts, bounded timelines, entry agreement), security (5050-path beyond-cap exactness, 401/403 rate + benign controls, breadth threshold, traversal no-decode spellings, line-vs-event, preserved counts), comparison (exact deltas, zero/empty baselines, unequal-scope rejection, insufficient coverage) — project `.venv`, Python 3.12 |
+| Full `tests/unit tests/integration` | PASS | 717 passed, 2 skipped (loopback sockets unavailable in sandbox; pre-existing env category) |
+| `ruff check` + `ruff format --check` | PASS | Both clean over `app` + `tests` + `config` (one COUNT-ELSE-0 support-link regression and one legacy-sample regression caught by existing tests and fixed before commit) |
+| `uv lock --check --offline` | PASS | `UV_CACHE_DIR=/tmp/uvcache`: resolved 42 packages, no manifest/lock delta (no new dependencies) |
+| Bot catalog / HMAC / 120-row fixture | PASS | Untouched: new tests generate tmp fixtures only; 77-rule count asserted in-test; old security IDs/versions byte-identical |
+| No-original-IP surface | PASS | Journeys/timelines/entries/offenders carry pseudonyms + truncated agents only; rejected lines reported at line level with code vocabulary, never as events |
+
+Acceptance impact: PAR-05/PAR-06 implemented at the shared
+service/query layer (deterministic, parameterized, bounded SQL;
+`total_groups` exact, samples bounded with shown/total/truncated;
+401 = challenge / 304 = validation wording; ratios unavailable, never
+infinite). PAR-08 comparison windows implemented as shared-layer
+validation + helpers; follow/rotation, saved views and refresh stay
+with T3/T5. Actual API/export wiring stays T3 and full admin UI stays
+T4, not claimed complete here. Stopping for independent review.
+
 ## 2026-11-01 — Stage B3bcb915 browser-test maintenance (9 stale expectations, test-only)
 
 Owner-authorized TEST CORRECTION ONLY on `feature/owner-ux-review-2026-11-01`

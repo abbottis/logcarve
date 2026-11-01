@@ -16,7 +16,7 @@ def test_shipped_rule_files_load_with_versions():
     bots = load_rules(BOT_RULES)
     sec = load_rules(SEC_RULES)
     assert bots.version == 3
-    assert sec.version == 2
+    assert sec.version == 3
     assert len(bots.rules) == 77
     assert bots.provenance and sec.provenance
     assert {rule.id for rule in bots.rules} >= {
@@ -26,18 +26,53 @@ def test_shipped_rule_files_load_with_versions():
         "bot-ai-claude",
         "bot-ai-perplexity",
     }
+    # T2b keeps the three v1/v2 rules (IDs and versions unchanged) and
+    # adds eight original v1 candidates.
     assert {rule.id for rule in sec.rules} == {
         "sec-sensitive-path",
         "sec-repeated-client-errors",
         "sec-conflicting-bot-identity",
+        "sec-exposed-config",
+        "sec-cms-probe",
+        "sec-device-proxy",
+        "sec-traversal-attempt",
+        "sec-origin-bad-request",
+        "sec-auth-challenge-cluster",
+        "sec-repeated-auth-challenges",
+        "sec-probe-breadth",
     }
-    conflict = next(r for r in sec.rules if r.id == "sec-conflicting-bot-identity")
+    old = {rule.id: rule for rule in sec.rules}
+    assert old["sec-sensitive-path"].version == 1
+    assert old["sec-sensitive-path"].path_contains == [
+        "/.env",
+        "/.git/",
+        "/wp-admin",
+        "/wp-login",
+        "/phpmyadmin",
+        "/.aws/",
+        "/id_rsa",
+        "/.svn/",
+    ]
+    assert old["sec-repeated-client-errors"].version == 1
+    assert old["sec-repeated-client-errors"].min_client_errors == 5
+    conflict = old["sec-conflicting-bot-identity"]
     assert conflict.version == 1
     assert conflict.category == "conflicting_bot_identity"
     assert conflict.conflicting_identities is True
     assert not conflict.ua_contains and not conflict.ua_regex
     assert not conflict.path_contains and conflict.min_client_errors is None
+    assert not conflict.status_in
+    assert conflict.min_client_requests is None
+    assert conflict.min_client_distinct_paths is None
     assert "never" in conflict.meaning and "fake" in conflict.meaning
+    # New T2b provenance: 401 wording, traversal decoding bound.
+    auth = old["sec-auth-challenge-cluster"]
+    assert auth.status_in == [401, 403]
+    assert "challenge" in auth.meaning
+    traversal = old["sec-traversal-attempt"]
+    assert "never a decoded path" in traversal.meaning or "never decoded" in traversal.meaning
+    for rule in sec.rules:
+        assert rule.severity == "candidate"
 
 
 def test_ua_matching_is_case_insensitive_claim_only():

@@ -206,3 +206,48 @@ class BotTableQuery(BaseModel):
 class ExplorerQuery(BaseModel):
     filt: AnalyticsFilter
     sort: ExplorerSort = "newest"
+
+
+#: Request-journey list sorts. Every option maps to ONE fixed ORDER BY
+#: fragment in ``queries.journey_list``; ties break by stable journey
+#: ID so paging is deterministic. ``requests_desc`` ranks by the
+#: filtered (shown) request count, never the unfiltered total.
+JourneySort = Literal[
+    "requests_desc",
+    "start_asc",
+    "start_desc",
+    "duration_desc",
+]
+
+
+class JourneyQuery(BaseModel):
+    """Paginated request-journey list over one shared filter.
+
+    ``min_requests`` keeps only journeys with at least that many
+    filtered (shown) requests; the unfiltered per-journey total is
+    always reported alongside so filters never silently narrow a
+    journey.
+    """
+
+    filt: AnalyticsFilter
+    sort: JourneySort = "requests_desc"
+    min_requests: int = Field(default=1, ge=1, le=MAX_LIMIT)
+
+
+class JourneyTimelineQuery(BaseModel):
+    """Bounded chronological timeline for one journey key.
+
+    The journey is re-derived from the authorized site/source event
+    stream (same gap rule as the list), so the timeline agrees with
+    the list even when filters hide the journey's first request.
+    """
+
+    filt: AnalyticsFilter
+    client_pseudonym: str = Field(min_length=1, max_length=128)
+    user_agent: str | None = Field(default=None, max_length=4096)
+    journey_start: datetime
+
+    @field_validator("journey_start")
+    @classmethod
+    def _require_tz_start(cls, value: datetime) -> datetime:
+        return _as_utc(value)

@@ -45,7 +45,21 @@ class Rule(BaseModel):
     ua_contains: list[str] = Field(default_factory=list)
     ua_regex: list[str] = Field(default_factory=list)
     path_contains: list[str] = Field(default_factory=list)
+    #: Row-level status allowlist (stored origin status codes). Combined
+    #: with ``path_contains`` by conjunction: a row matches only when
+    #: every set matcher holds. Never reconstructed from queries or raw
+    #: lines — only the stored normalized status participates.
+    status_in: list[int] = Field(default_factory=list)
     min_client_errors: int | None = Field(default=None, ge=1)
+    #: Per-pseudonym rate rule: pseudonyms with at least this many
+    #: matching rows (after ``path_contains``/``status_in`` narrowing)
+    #: become one finding each. Counts only stored events; rejected
+    #: lines never participate.
+    min_client_requests: int | None = Field(default=None, ge=1)
+    #: Per-pseudonym breadth rule: pseudonyms touching at least this
+    #: many distinct matching paths become one finding each (probe
+    #: sweep candidate, never proof of a scan).
+    min_client_distinct_paths: int | None = Field(default=None, ge=1)
     conflicting_identities: bool = False
     severity: ClaimSeverity = "info"
 
@@ -55,6 +69,18 @@ class Rule(BaseModel):
         for value in values:
             if not value or len(value) > 256:
                 raise ValueError("matchers must be 1..256 characters")
+        return values
+
+    @field_validator("status_in")
+    @classmethod
+    def _valid_status(cls, values: list[int]) -> list[int]:
+        for value in values:
+            if not isinstance(value, int) or isinstance(value, bool):
+                raise TypeError("status_in entries must be integers")
+            if value < 100 or value > 599:
+                raise ValueError("status_in entries must be 100..599")
+        if len(set(values)) != len(values):
+            raise ValueError("status_in entries must be distinct")
         return values
 
     @field_validator("ua_regex")
@@ -73,10 +99,23 @@ class Rule(BaseModel):
             not self.ua_contains
             and not self.ua_regex
             and not self.path_contains
+            and not self.status_in
             and self.min_client_errors is None
+            and self.min_client_requests is None
+            and self.min_client_distinct_paths is None
             and not self.conflicting_identities
         ):
             raise ValueError(f"rule {self.id} needs at least one matcher")
+        if self.conflicting_identities and (
+            self.ua_contains
+            or self.ua_regex
+            or self.path_contains
+            or self.status_in
+            or self.min_client_errors is not None
+            or self.min_client_requests is not None
+            or self.min_client_distinct_paths is not None
+        ):
+            raise ValueError(f"rule {self.id}: conflicting_identities stands alone")
         return self
 
     def matches_ua(self, user_agent: str | None) -> bool:

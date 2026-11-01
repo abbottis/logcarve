@@ -1,7 +1,7 @@
-# LogWerk parity metrics (T2a slices C/D) — definitions and provenance
+# LogWerk parity metrics (T2a slices C/D, T2b slices E/F/H) — definitions and provenance
 
 Status: implemented 2026-11-01 on `feature/logwerk-parity-2026-11-01`
-(shared service/query layer only; HTTP wiring is T3, journeys T2b).
+(shared service/query layer only; HTTP wiring is T3, admin UI is T4).
 All consumers (future dashboard, REST API, bounded tools) share the
 functions in `app/analytics/service.py` over `app/analytics/queries.py`,
 so equal filters always yield equal results.
@@ -126,12 +126,86 @@ near-float-ceiling interpolation stable.
   schemes can never appear as clickable); IDN compares in stored
   encoded form.
 
+## Request journeys (slice E, PAR-05)
+
+- Journeys are technical groupings of stored requests by
+  `(client_pseudonym, sanitized User-Agent)`: a User-Agent change
+  starts a new key (never a continuation), and the grouping never
+  claims visitors, people, browser sessions or clicks. `journey_list`,
+  `journey_timeline` and `journey_entry_paths` share the contract
+  (`JourneyQuery`/`JourneyTimelineQuery`) and one SQL segmentation.
+- **Boundary rule**: a new journey starts when the gap to the previous
+  event of the same key **strictly exceeds 1800 seconds**; a gap of
+  exactly 1800 seconds continues the journey (tested with 29m59s,
+  30m00s and 30m01s gaps plus identical timestamps, which share a
+  journey ordered by row id). Stable journey IDs are SHA-256 over
+  site/source scope, pseudonym, sanitized agent (`None` marked, never
+  colliding) and start instant.
+- Boundaries derive from the site/source/window event stream BEFORE
+  any content matcher: the filtered `shown` count is a conditional
+  aggregate computed afterwards, so a filter hiding the first or a
+  middle request shrinks `shown` but never invents a start, moves an
+  entry path or changes the journey ID (tested). Entry paths always
+  aggregate the base-scope first request of eligible journeys
+  (`min_requests` filtered rows), with complete/partial shares.
+- Window edges are honest, never widened: a first-of-key journey is
+  `left_truncated` only when `start - window_from < 1800s`, a last
+  journey `right_truncated` only when `window_to - end < 1800s` (at
+  exactly the gap distance a hidden neighbour would start its own
+  journey, so the edge is provably complete — tested both sides). No
+  read outside the authorized window ever happens.
+- Exact `total_groups` via grouped-subquery counts; only the requested
+  page crosses into Python (never a `fetchall` of every event); list
+  sorts (`requests_desc` ranks filtered shown, plus `start_asc`,
+  `start_desc`, `duration_desc` with stable ID tie-breaks), `limit` /
+  `offset`, and bounded timelines (`shown`/`total`/`truncated` per
+  journey) with `KeyError` for unknown keys.
+
+## Security candidates and baseline comparison (slices F/H, PAR-06)
+
+- Security catalog `config/security_rules.yaml` v3: the three v1/v2
+  rules keep IDs and version 1 byte-identical (including the
+  conservative conflicting-bot-identity rule); eight original v1
+  candidates cover exposed config/secrets, CMS/PHP, device/admin/proxy,
+  traversal, origin-observed malformed requests (stored 400),
+  401/403 challenge clusters, per-pseudonym 401/403 rates and
+  sensitive-surface breadth (threshold 4). All `severity: candidate`.
+- Matching runs on stored sanitized data only (query-stripped,
+  secret-masked paths; stored origin statuses; HMAC pseudonyms) or the
+  allowlisted pre-discard reason-code vocabulary reported at line
+  level. Rejected lines never become findings: `rejected_lines`
+  reports per-import line totals plus the code vocabulary, while
+  status-400 rows are origin-observed events. A 401 is an
+  authentication challenge and a 403 an authorization refusal — neither
+  proves a failed login; a 304 stays normal cache validation.
+- Totals are exact whole-scope SQL (`COUNT(*)` /
+  `COUNT(DISTINCT path)` / grouped-subquery offender totals) no matter
+  how many distinct paths exist (proven with 5050 rare paths beyond
+  the old 5000 cap: totals exact, sample bounded with
+  `shown`/`total`/`truncated`). Only samples are bounded: top
+  path/status rows (`JOURNEY_SAMPLE_PATHS`), top offenders
+  (`SECURITY_MAX_OFFENDERS`) with explicit truncation, bounded
+  per-offender samples. The legacy 4xx rule keeps its historic
+  all-status sample shape; the old capped-scan pseudo-finding is gone.
+- `compare_windows` validates identical site/source scope and exactly
+  equal durations (`ValueError` otherwise) and reads only the two
+  windows. Each side reports coverage range, raw counts, absolute
+  change and ratio/percentage per metric (requests, 4xx, 5xx, bytes,
+  claimed-bot/automation requests, requests/hour). Zero baselines
+  yield an exact change with `ratio: None` (`zero_baseline`, never
+  infinite); running/failed imports on either side mark every ratio
+  `insufficient_coverage`. `previous_window_filter` slides exactly one
+  duration with selectors preserved.
+
 ## Provenance
 
 - Enrichment policy tag `t1b.1` (plus custom fingerprints); old rows
   gain enrichment only via read-only source reprocess.
 - Bot catalog: `config/bot_rules.yaml`, 77 rules (18 `ai_crawler`),
   asserted untouched by test.
+- Security catalog: `config/security_rules.yaml` v3 (2026-11-01,
+  parity T2b): v1/v2 rules unchanged, eight original v1 candidates;
+  no LogWerk material reused; provenance string in-file.
 - New metadata filters (logged host, HTTP version, MIME, cache, TLS,
   timing availability/range) are validated/bounded in
   `AnalyticsFilter`, bound as parameters, and carried through filter

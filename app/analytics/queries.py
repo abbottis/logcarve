@@ -6,9 +6,10 @@ cardinality scans (distinct agents/paths) are bounded with explicit
 truncation flags so reads never load the whole database into memory.
 """
 
+import hashlib
 import math
 import sqlite3
-from datetime import datetime, timedelta
+from datetime import UTC, datetime, timedelta
 from typing import Literal
 
 from app.analytics.classification import (
@@ -20,10 +21,13 @@ from app.analytics.contracts import (
     AnalyticsFilter,
     BucketSize,
     ExplorerQuery,
+    JourneyQuery,
+    JourneyTimelineQuery,
     SlowEndpointsQuery,
     TopPathsQuery,
     TopReferrersQuery,
 )
+from app.analytics.rules import Rule
 from app.db.importer import sanitize_error_summary
 
 MAX_DISTINCT_SCAN = 5000
@@ -95,7 +99,14 @@ _STATUS_CLASS_RANGE = {
 }
 
 
-def _where(filt: AnalyticsFilter, classifier: Classifier | None = None) -> tuple[str, list[object]]:
+def _base_where(filt: AnalyticsFilter) -> tuple[str, list[object]]:
+    """Authorized event scope: site, optional source, UTC window only.
+
+    Journey boundaries and coverage always derive from this scope
+    BEFORE any content/method/status/traffic matcher, so narrow
+    filters can hide rows but never invent new journey starts or
+    widen the authorized history.
+    """
     clauses = ["site_id = ?", "ts_utc >= ?", "ts_utc < ?"]
     params: list[object] = [
         filt.site_id,
@@ -105,6 +116,20 @@ def _where(filt: AnalyticsFilter, classifier: Classifier | None = None) -> tuple
     if filt.source_id is not None:
         clauses.append("source_id = ?")
         params.append(filt.source_id)
+    return " AND ".join(clauses), params
+
+
+def _matcher_clauses(
+    filt: AnalyticsFilter, classifier: Classifier | None = None
+) -> tuple[list[str], list[object]]:
+    """Content/matcher predicates applied AFTER scope segmentation.
+
+    Every clause here narrows which rows are shown/counted; none of
+    them may redefine journey boundaries (those come from
+    :func:`_base_where` alone).
+    """
+    clauses: list[str] = []
+    params: list[object] = []
     if filt.method is not None:
         clauses.append("method = ?")
         params.append(filt.method)
@@ -169,7 +194,19 @@ def _where(filt: AnalyticsFilter, classifier: Classifier | None = None) -> tuple
     match_clauses, match_params = _classification_clauses(filt, classifier)
     clauses.extend(match_clauses)
     params.extend(match_params)
-    return " AND ".join(clauses), params
+    return clauses, params
+
+
+def _where(filt: AnalyticsFilter, classifier: Classifier | None = None) -> tuple[str, list[object]]:
+    """Full filtered scope: authorized base plus content matchers."""
+    base_where, base_params = _base_where(filt)
+    matcher_clauses, matcher_params = _matcher_clauses(filt, classifier)
+    if matcher_clauses:
+        return base_where + " AND " + " AND ".join(matcher_clauses), [
+            *base_params,
+            *matcher_params,
+        ]
+    return base_where, base_params
 
 
 def traffic_case_sql(classifier: Classifier) -> tuple[str, list[object]]:
@@ -2080,3 +2117,521 @@ def referrer_404_targets(
         ],
         total,
     )
+
+
+#: Request-journey inactivity threshold (seconds). A gap STRICTLY
+#: greater than this between two consecutive events of one
+#: (client pseudonym, sanitized User-Agent) key starts a new journey;
+#: a gap of exactly 1800 s continues the same journey. Journeys are
+#: technical groupings, never visitors, people, sessions or clicks.
+JOURNEY_GAP_SECONDS = 1800
+
+#: Bounded journey reads: only the requested page crosses into Python.
+JOURNEY_SAMPLE_PATHS = 20
+JOURNEY_MAX_OFFENDERS = 100
+
+
+def journey_id_for(
+    site_id: str,
+    source_id: str | None,
+    client_pseudonym: str,
+    user_agent: str | None,
+    start_ts: str,
+) -> str:
+    """Stable journey identity for one grouping key and start instant.
+
+    SHA-256 over the site/source scope, the HMAC pseudonym, the
+    sanitized User-Agent (``None`` marked explicitly so it can never
+    collide with a stored agent) and the ISO start instant. No
+    plaintext address or tracking cookie ever participates.
+    """
+    digest = hashlib.sha256()
+    ua_part = "\x00null" if user_agent is None else "S:" + user_agent
+    for part in (site_id, source_id or "", client_pseudonym, ua_part, start_ts):
+        digest.update(b"\x1f")
+        digest.update(part.encode("utf-8"))
+    return digest.hexdigest()
+
+
+def _journey_segments(
+    filt: AnalyticsFilter, classifier: Classifier | None = None
+) -> tuple[str, list[object], str, list[object]]:
+    """Segmented journey CTE over the authorized base scope.
+
+    Boundaries derive from the site/source/window event stream BEFORE
+    any content matcher: the ``shown`` conditional aggregate applies
+    the caller's matchers afterwards, so a filter that hides the
+    first or a middle request shrinks ``shown`` but never invents a
+    new start. Returns the CTE text, its bound params, the ``shown``
+    predicate (with its own params) and the window ISO bounds.
+    """
+    base_where, base_params = _base_where(filt)
+    matcher_clauses, matcher_params = _matcher_clauses(filt, classifier)
+    if matcher_clauses:
+        shown_cond = " AND ".join(f"({clause})" for clause in matcher_clauses)
+    else:
+        shown_cond = "1 = 1"
+    cte = (
+        "WITH base AS ("
+        " SELECT id, ts_utc, method, path, status, bytes, referer_host,"
+        " user_agent, client_pseudonym"
+        f" FROM requests WHERE {base_where}"
+        "), prev AS ("
+        " SELECT base.*,"
+        " LAG(ts_utc) OVER (PARTITION BY client_pseudonym, user_agent"
+        " ORDER BY ts_utc ASC, id ASC) AS prev_ts"
+        " FROM base"
+        "), marked AS ("
+        " SELECT prev.*, CASE WHEN prev_ts IS NULL THEN 1"
+        f" WHEN unixepoch(ts_utc) - unixepoch(prev_ts) > {JOURNEY_GAP_SECONDS} THEN 1"
+        " ELSE 0 END AS is_start FROM prev"
+        "), numbered AS ("
+        " SELECT marked.*, SUM(is_start) OVER (PARTITION BY client_pseudonym,"
+        " user_agent ORDER BY ts_utc ASC, id ASC ROWS UNBOUNDED PRECEDING) AS jseq"
+        " FROM marked"
+        "), keyed AS ("
+        " SELECT numbered.*, MAX(jseq) OVER (PARTITION BY client_pseudonym,"
+        " user_agent) AS jmax,"
+        " FIRST_VALUE(path) OVER (PARTITION BY client_pseudonym, user_agent,"
+        " jseq ORDER BY ts_utc ASC, id ASC) AS entry_path"
+        " FROM numbered"
+        "), journeys AS ("
+        " SELECT client_pseudonym, user_agent,"
+        " MIN(ts_utc) AS start_ts, MAX(ts_utc) AS end_ts,"
+        " COUNT(*) AS total,"
+        f" SUM(CASE WHEN {shown_cond} THEN 1 ELSE 0 END) AS shown,"
+        " MIN(jseq) AS jseq, MAX(jmax) AS jmax, MAX(entry_path) AS entry_path"
+        " FROM keyed GROUP BY client_pseudonym, user_agent, jseq"
+        ")"
+    )
+    return cte, base_params, shown_cond, matcher_params
+
+
+def _journey_edge_columns(window_from: str, window_to: str) -> tuple[str, list[object]]:
+    """Window-edge truncation flags for one journey row.
+
+    The window is half-open ``[from, to)``. A first-of-key journey is
+    left-truncated only when an unseen predecessor could still join it
+    (``start - from < gap``); at exactly the gap distance a hidden
+    predecessor would itself start a new journey, so the edge is
+    provably complete. Right edge mirrors this. No read outside the
+    authorized window ever happens: uncertainty is flagged, not
+    resolved by widening.
+    """
+    sql = (
+        "CASE WHEN jseq = 1 AND unixepoch(start_ts) - unixepoch(?) <"
+        f" {JOURNEY_GAP_SECONDS} THEN 1 ELSE 0 END AS left_truncated,"
+        " CASE WHEN jseq = jmax AND unixepoch(?) - unixepoch(end_ts) <"
+        f" {JOURNEY_GAP_SECONDS} THEN 1 ELSE 0 END AS right_truncated"
+    )
+    return sql, [window_from, window_to]
+
+
+_JOURNEY_ORDER: dict[str, str] = {
+    "requests_desc": (
+        "shown DESC, start_ts ASC, client_pseudonym ASC,"
+        " jseq ASC, COALESCE(user_agent, CHAR(0)) ASC"
+    ),
+    "start_asc": (
+        "start_ts ASC, client_pseudonym ASC, jseq ASC, COALESCE(user_agent, CHAR(0)) ASC"
+    ),
+    "start_desc": (
+        "start_ts DESC, client_pseudonym ASC, jseq ASC, COALESCE(user_agent, CHAR(0)) ASC"
+    ),
+    "duration_desc": (
+        "(unixepoch(end_ts) - unixepoch(start_ts)) DESC, start_ts ASC,"
+        " client_pseudonym ASC, jseq ASC, COALESCE(user_agent, CHAR(0)) ASC"
+    ),
+}
+
+
+def journey_list(
+    conn: sqlite3.Connection, query: JourneyQuery, classifier: Classifier | None = None
+) -> tuple[list[dict[str, object]], int]:
+    """Paginated request journeys with exact totals and edge honesty.
+
+    ``total`` counts eligible journeys (at least ``min_requests``
+    filtered/shown requests) exactly — never a capped distinct scan,
+    never a silent truncation. Each row carries the unfiltered
+    ``requests_total`` alongside the filtered ``requests_shown``
+    count, the stable journey ID, the base-scope entry path and
+    explicit window-edge flags. Only the requested page crosses into
+    Python — never a ``fetchall`` of every event.
+    """
+    filt = query.filt
+    cte, cte_params, _shown_cond, matcher_params = _journey_segments(filt, classifier)
+    edge_sql, edge_params = _journey_edge_columns(
+        filt.window.time_from.isoformat(), filt.window.time_to.isoformat()
+    )
+    eligible = (
+        f"{cte}, eligible AS (SELECT client_pseudonym, user_agent, start_ts, end_ts,"
+        f" total, shown, jseq, jmax, entry_path, {edge_sql} FROM journeys WHERE shown >= ?)"
+    )
+    base_args: list[object] = [*cte_params, *matcher_params, *edge_params, query.min_requests]
+    total = int(conn.execute(f"{eligible} SELECT COUNT(*) FROM eligible", base_args).fetchone()[0])
+    try:
+        order = _JOURNEY_ORDER[query.sort]
+    except KeyError as exc:
+        raise ValueError(f"unknown journey sort: {query.sort!r}") from exc
+    rows = conn.execute(
+        f"{eligible} SELECT client_pseudonym, user_agent, start_ts, end_ts, total, shown,"
+        " jseq, jmax, entry_path, left_truncated, right_truncated"
+        f" FROM eligible ORDER BY {order} LIMIT ? OFFSET ?",
+        [*base_args, filt.limit, filt.offset],
+    ).fetchall()
+    items = []
+    for client, agent, start, end, total_n, shown_n, _jseq, _jmax, entry, left, right in rows:
+        left_flag = bool(left)
+        right_flag = bool(right)
+        if left_flag and right_flag:
+            completeness = "partial-both"
+        elif left_flag:
+            completeness = "partial-left"
+        elif right_flag:
+            completeness = "partial-right"
+        else:
+            completeness = "complete"
+        items.append(
+            {
+                "journey_id": journey_id_for(
+                    filt.site_id, filt.source_id, str(client), agent, str(start)
+                ),
+                "client_pseudonym": client,
+                "requests_total": int(total_n),
+                "requests_shown": int(shown_n),
+                "started_at": start,
+                "ended_at": end,
+                "duration_s": int(unixepoch_seconds(str(end)) - unixepoch_seconds(str(start))),
+                "entry_path": entry,
+                "left_truncated": left_flag,
+                "right_truncated": right_flag,
+                "completeness": completeness,
+            }
+        )
+    return items, total
+
+
+def unixepoch_seconds(value: str) -> int:
+    """Whole-second epoch for an ISO instant (testable pure helper)."""
+
+    parsed = datetime.fromisoformat(value)
+    if parsed.tzinfo is None:
+        parsed = parsed.replace(tzinfo=UTC)
+    return int(parsed.timestamp())
+
+
+def journey_timeline(
+    conn: sqlite3.Connection, query: JourneyTimelineQuery, classifier: Classifier | None = None
+) -> dict[str, object]:
+    """Bounded chronological timeline for one journey key.
+
+    The journey is re-derived with the same gap rule over the same
+    authorized scope, then the caller's matchers select the shown
+    rows: ``shown``/``total`` stay explicit even when filters hide the
+    entry request. Raises ``KeyError`` for an unknown journey key.
+    """
+    filt = query.filt
+    cte, cte_params, shown_cond, matcher_params = _journey_segments(filt, classifier)
+    start_iso = query.journey_start.isoformat()
+    key_args: list[object] = [query.client_pseudonym, query.user_agent]
+    target = conn.execute(
+        f"{cte} SELECT jseq, total, shown, start_ts, end_ts, entry_path FROM journeys"
+        " WHERE client_pseudonym = ? AND COALESCE(user_agent, CHAR(0)) = COALESCE(?, CHAR(0))"
+        " AND start_ts = ?",
+        [*cte_params, *matcher_params, *key_args, start_iso],
+    ).fetchone()
+    if target is None:
+        raise KeyError("unknown journey: no journey starts there for that client")
+    jseq, total_n, _shown_all, start_ts, end_ts, entry_path = target
+    shown_total = int(
+        conn.execute(
+            f"{cte}, keyed_rows AS (SELECT * FROM keyed"
+            " WHERE client_pseudonym = ?"
+            " AND COALESCE(user_agent, CHAR(0)) = COALESCE(?, CHAR(0)) AND jseq = ?)"
+            f" SELECT COUNT(*) FROM keyed_rows WHERE {shown_cond}",
+            [*cte_params, *matcher_params, *key_args, jseq, *matcher_params],
+        ).fetchone()[0]
+    )
+    rows = conn.execute(
+        f"{cte}, keyed_rows AS (SELECT * FROM keyed"
+        " WHERE client_pseudonym = ?"
+        " AND COALESCE(user_agent, CHAR(0)) = COALESCE(?, CHAR(0)) AND jseq = ?)"
+        " SELECT ts_utc, method, path, status, bytes, referer_host,"
+        " substr(user_agent, 1, 200),"
+        " CASE WHEN user_agent IS NOT NULL AND LENGTH(user_agent) > 200 THEN 1 ELSE 0 END"
+        f" FROM keyed_rows WHERE {shown_cond}"
+        " ORDER BY ts_utc ASC, id ASC LIMIT ? OFFSET ?",
+        [
+            *cte_params,
+            *matcher_params,
+            *key_args,
+            jseq,
+            *matcher_params,
+            filt.limit,
+            filt.offset,
+        ],
+    ).fetchall()
+    edge_sql, edge_params = _journey_edge_columns(
+        filt.window.time_from.isoformat(), filt.window.time_to.isoformat()
+    )
+    edge = conn.execute(
+        f"{cte} SELECT {edge_sql} FROM journeys"
+        " WHERE client_pseudonym = ? AND COALESCE(user_agent, CHAR(0)) = COALESCE(?, CHAR(0))"
+        " AND start_ts = ?",
+        [*cte_params, *matcher_params, *edge_params, *key_args, start_iso],
+    ).fetchone()
+    assert edge is not None
+    left_flag, right_flag = bool(edge[0]), bool(edge[1])
+    items = [
+        {
+            "ts_utc": ts,
+            "method": method,
+            "path": path,
+            "status": status,
+            "bytes": nbytes,
+            "referer_host": host,
+            "user_agent": agent,
+            "ua_truncated": bool(truncated),
+        }
+        for ts, method, path, status, nbytes, host, agent, truncated in rows
+    ]
+    return {
+        "journey_id": journey_id_for(
+            filt.site_id, filt.source_id, query.client_pseudonym, query.user_agent, str(start_ts)
+        ),
+        "client_pseudonym": query.client_pseudonym,
+        "started_at": start_ts,
+        "ended_at": end_ts,
+        "entry_path": entry_path,
+        "requests_total": int(total_n),
+        "requests_shown": shown_total,
+        "left_truncated": left_flag,
+        "right_truncated": right_flag,
+        "items": items,
+        "shown": len(items),
+        "total": shown_total,
+        "truncated": shown_total > filt.offset + len(items),
+        "limit": filt.limit,
+        "offset": filt.offset,
+    }
+
+
+def journey_entry_paths(
+    conn: sqlite3.Connection,
+    filt: AnalyticsFilter,
+    classifier: Classifier | None = None,
+    *,
+    min_requests: int = 1,
+) -> tuple[list[dict[str, object]], int]:
+    """Entry-path aggregation over eligible journeys.
+
+    The entry is always the journey's base-scope first request, so a
+    filter hiding it cannot move the entry. Journeys qualify with at
+    least ``min_requests`` filtered rows; complete and window-edge
+    partial journeys aggregate together with both shares reported and
+    the partial caveat carried by callers.
+    """
+    if min_requests < 1:
+        raise ValueError("min_requests must be >= 1")
+    cte, cte_params, _shown_cond, matcher_params = _journey_segments(filt, classifier)
+    edge_sql, edge_params = _journey_edge_columns(
+        filt.window.time_from.isoformat(), filt.window.time_to.isoformat()
+    )
+    scoped = f"{cte}, eligible AS (SELECT entry_path, {edge_sql} FROM journeys WHERE shown >= ?)"
+    args: list[object] = [*cte_params, *matcher_params, *edge_params, min_requests]
+    total = int(
+        conn.execute(f"{scoped} SELECT COUNT(DISTINCT entry_path) FROM eligible", args).fetchone()[
+            0
+        ]
+    )
+    rows = conn.execute(
+        f"{scoped} SELECT entry_path, COUNT(*) AS journeys,"
+        " SUM(CASE WHEN left_truncated = 0 AND right_truncated = 0 THEN 1 ELSE 0 END)"
+        " AS complete_journeys,"
+        " SUM(CASE WHEN left_truncated = 1 OR right_truncated = 1 THEN 1 ELSE 0 END)"
+        " AS partial_journeys"
+        " FROM eligible GROUP BY entry_path"
+        " ORDER BY journeys DESC, entry_path ASC LIMIT ? OFFSET ?",
+        [*args, filt.limit, filt.offset],
+    ).fetchall()
+    return (
+        [
+            {
+                "entry_path": path,
+                "journeys": int(count),
+                "complete_journeys": int(complete),
+                "partial_journeys": int(partial),
+            }
+            for path, count, complete, partial in rows
+        ],
+        total,
+    )
+
+
+def _rule_row_condition(rule: Rule) -> tuple[str, list[object]]:
+    """Conjunction of stored-field matchers for one security rule.
+
+    ``path_contains`` matches the stored sanitized (query-stripped,
+    secret-masked) path as a case-insensitive substring; ``%``/``_``
+    in fragments are LIKE-escaped so they match literally, never as
+    wildcards. No percent-decoding is performed at ingest or here, so
+    an encoded spelling (``%2e``) matches only the literal stored
+    spelling — the wire encoding it implies is documented per rule,
+    never decoded. ``status_in`` matches the stored origin status.
+    Rejected lines and raw bytes never participate.
+    """
+    clauses: list[str] = []
+    params: list[object] = []
+    if rule.path_contains:
+        fragments = []
+        for fragment in rule.path_contains:
+            fragments.append("lower(path) LIKE ? ESCAPE '\\'")
+            params.append("%" + _like_escape(fragment.lower()) + "%")
+        clauses.append("(" + " OR ".join(fragments) + ")")
+    if rule.status_in:
+        placeholders = ", ".join("?" for _ in rule.status_in)
+        clauses.append(f"status IN ({placeholders})")
+        params.extend(rule.status_in)
+    if not clauses:
+        return "1 = 1", []
+    return " AND ".join(clauses), params
+
+
+def security_rule_totals(
+    conn: sqlite3.Connection,
+    filt: AnalyticsFilter,
+    rule: Rule,
+    classifier: Classifier | None = None,
+) -> dict[str, int]:
+    """Exact whole-scope totals for one aggregate security rule.
+
+    A single ``GROUP BY``-free SQL aggregation over every matching
+    row: totals stay exact no matter how many distinct paths exist.
+    Only the bounded sample (see :func:`security_rule_sample`) pages.
+    """
+    where, params = _where(filt, classifier)
+    cond, cond_params = _rule_row_condition(rule)
+    row = conn.execute(
+        f"SELECT COUNT(*), COUNT(DISTINCT path) FROM requests WHERE {where} AND ({cond})",
+        [*params, *cond_params],
+    ).fetchone()
+    return {"requests": int(row[0]), "distinct_paths": int(row[1])}
+
+
+def security_rule_sample(
+    conn: sqlite3.Connection,
+    filt: AnalyticsFilter,
+    rule: Rule,
+    classifier: Classifier | None = None,
+    *,
+    limit: int = JOURNEY_SAMPLE_PATHS,
+) -> tuple[list[dict[str, object]], int]:
+    """Bounded top path/status rows for one rule plus the exact group total."""
+    where, params = _where(filt, classifier)
+    cond, cond_params = _rule_row_condition(rule)
+    total = int(
+        conn.execute(
+            "SELECT COUNT(*) FROM (SELECT 1 FROM requests"
+            f" WHERE {where} AND ({cond}) GROUP BY path, status)",
+            [*params, *cond_params],
+        ).fetchone()[0]
+    )
+    rows = conn.execute(
+        "SELECT path, status, COUNT(*) AS requests,"
+        " COUNT(CASE WHEN status BETWEEN 400 AND 499 THEN 1 END) AS errors"
+        f" FROM requests WHERE {where} AND ({cond})"
+        " GROUP BY path, status ORDER BY requests DESC, path ASC, status ASC LIMIT ?",
+        [*params, *cond_params, limit],
+    ).fetchall()
+    return (
+        [
+            {"path": path, "status": status, "requests": int(count), "errors": int(errors)}
+            for path, status, count, errors in rows
+        ],
+        total,
+    )
+
+
+#: Cap for per-pseudonym offender pages: only the top slice crosses
+#: into Python, with shown/total/truncated reported explicitly.
+SECURITY_MAX_OFFENDERS = JOURNEY_MAX_OFFENDERS
+SECURITY_OFFENDER_PATHS = 5
+
+
+def security_offenders(
+    conn: sqlite3.Connection,
+    filt: AnalyticsFilter,
+    rule: Rule,
+    classifier: Classifier | None = None,
+) -> tuple[list[dict[str, object]], int]:
+    """Per-pseudonym rate/breadth offenders for one threshold rule.
+
+    ``min_client_errors`` keeps the legacy 4xx meaning (any stored
+    4xx counts). ``min_client_requests`` counts matching rows after
+    the rule's own ``path_contains``/``status_in`` narrowing;
+    ``min_client_distinct_paths`` additionally requires that many
+    distinct matching paths (probe-sweep candidate). Thresholds
+    combine by conjunction. Exact offender total via a grouped
+    subquery; only the top page (requests DESC, pseudonym ASC) plus a
+    bounded per-offender path sample cross into Python. The sample
+    spans the offender's narrowed scope, except for the legacy
+    un-narrowed 4xx rule, which keeps its historic all-status sample.
+    Rejected lines never count: only stored events aggregate here.
+    """
+    where, params = _where(filt, classifier)
+    cond, cond_params = _rule_row_condition(rule)
+    predicates = [f"({cond})"]
+    having: list[str] = []
+    if rule.min_client_errors is not None:
+        predicates.append("status BETWEEN 400 AND 499")
+        having.append(f"COUNT(*) >= {int(rule.min_client_errors)}")
+    if rule.min_client_requests is not None:
+        having.append(f"COUNT(*) >= {int(rule.min_client_requests)}")
+    if rule.min_client_distinct_paths is not None:
+        having.append(f"COUNT(DISTINCT path) >= {int(rule.min_client_distinct_paths)}")
+    if not having:
+        raise ValueError(f"rule {rule.id} sets no per-client threshold")
+    scoped = f"{where} AND {' AND '.join(predicates)}"
+    args: list[object] = [*params, *cond_params]
+    total = int(
+        conn.execute(
+            f"SELECT COUNT(*) FROM (SELECT 1 FROM requests WHERE {scoped}"
+            f" GROUP BY client_pseudonym HAVING {' AND '.join(having)})",
+            args,
+        ).fetchone()[0]
+    )
+    rows = conn.execute(
+        "SELECT client_pseudonym, COUNT(*) AS hits, COUNT(DISTINCT path) AS paths"
+        f" FROM requests WHERE {scoped} GROUP BY client_pseudonym"
+        f" HAVING {' AND '.join(having)}"
+        " ORDER BY hits DESC, client_pseudonym ASC LIMIT ?",
+        [*args, SECURITY_MAX_OFFENDERS + 1],
+    ).fetchall()
+    # The legacy 4xx rule (no row narrowing) keeps its historic
+    # all-status sample: selection counts 4xx only, the sample shows
+    # the offender's other rows too. Narrowed rules (path/status
+    # selectors) sample within their own scope instead.
+    if rule.path_contains or rule.status_in:
+        sample_where, sample_params = scoped, args
+    else:
+        sample_where, sample_params = where, params
+    offenders = []
+    for ident, hits, paths in rows[:SECURITY_MAX_OFFENDERS]:
+        sample = conn.execute(
+            "SELECT path, status, COUNT(*) AS hits FROM requests"
+            f" WHERE {sample_where} AND client_pseudonym = ?"
+            " GROUP BY path, status ORDER BY hits DESC, path ASC, status ASC LIMIT ?",
+            [*sample_params, ident, SECURITY_OFFENDER_PATHS],
+        ).fetchall()
+        offenders.append(
+            {
+                "client_pseudonym": ident,
+                "hits": int(hits),
+                "distinct_paths": int(paths),
+                "sample_paths": [
+                    {"path": path, "status": status, "hits": int(count)}
+                    for path, status, count in sample
+                ],
+            }
+        )
+    return offenders, total

@@ -1,4 +1,4 @@
-# LogCarve security-candidate rules, version 2.
+# LogCarve security-candidate rules, version 3.
 #
 # Provenance: hand-authored for the LogCarve MVP from common sensitive
 # paths and failure patterns (no LogWerk material reused). Every match
@@ -11,8 +11,20 @@
 # never a reason to auto-block or to remove rows from counts. Detection
 # lives in `app/analytics/conflict.py` (explicit 9-token known set,
 # URL-stripped token-boundary matching); older rules/versions unchanged.
-version: 2
-provenance: "LogCarve MVP hand-authored security candidates v2: sensitive-path and repeated-error rules unchanged, plus one original conflicting-bot-identity candidate; matches are investigation leads only"
+# v3 (2026-11-01, parity stage T2b) adds ORIGINAL configuration/secret,
+# CMS/PHP, device/admin/proxy and traversal candidates, origin-observed
+# malformed-request (stored status 400) and 401/403 challenge-cluster
+# candidates, per-pseudonym 401/403 rate and probe-breadth candidates.
+# The three v1/v2 rules keep their IDs and version 1 byte-identical.
+# All new rules match stored sanitized fields (query-stripped,
+# secret-masked paths; stored origin statuses; HMAC pseudonyms) or the
+# allowlisted pre-discard reason-code vocabulary reported at line level
+# only. Parser-rejected lines never become findings. A 401 is an
+# authentication challenge and a 403 an authorization refusal: neither
+# proves a failed login or an attack. A 304 is normal cache validation,
+# never waste.
+version: 3
+provenance: "LogCarve MVP hand-authored security candidates v3: the three v1/v2 rules unchanged (same IDs/versions), plus original config/CMS/device/traversal/400/401-403/breadth candidates; matches are investigation leads only"
 rules:
   - id: sec-sensitive-path
     version: 1
@@ -34,4 +46,62 @@ rules:
     title: "Conflicting bot identities in one User-Agent"
     meaning: "One User-Agent claims named bot identities from two or more distinct providers; a potential spoof or inconsistency lead, never proof of a fake bot and never a reason to block"
     conflicting_identities: true
+    severity: candidate
+  - id: sec-exposed-config
+    version: 1
+    category: sensitive_path
+    title: "Exposed configuration or secret file requested"
+    meaning: "Path matches a configuration/secret file pattern beyond the core sensitive set; investigation candidate only, never proof of disclosure"
+    path_contains: ["/.htaccess", "/.htpasswd", "/wp-config", "/config.php", "/configuration.php", "/.DS_Store", "/server-status", "/server-info", "/phpinfo"]
+    severity: candidate
+  - id: sec-cms-probe
+    version: 1
+    category: sensitive_path
+    title: "CMS or PHP endpoint probed"
+    meaning: "Path matches a CMS/PHP endpoint pattern; investigation candidate only, never proof of a scan"
+    path_contains: ["/wp-content/", "/wp-includes/", "/xmlrpc.php", "/administrator/", "/admin.php", "/user/login", "/phpinfo.php"]
+    severity: candidate
+  - id: sec-device-proxy
+    version: 1
+    category: sensitive_path
+    title: "Device, admin-console or proxy endpoint requested"
+    meaning: "Path matches an embedded-device, admin-console or proxy pattern; investigation candidate only, never proof of targeting"
+    path_contains: ["/cgi-bin/", "/boaform/", "/goform/", "/setup.cgi", "/login.cgi", "/GponForm/", "/proxy.cgi"]
+    severity: candidate
+  - id: sec-traversal-attempt
+    version: 1
+    category: sensitive_path
+    title: "Path-traversal spelling requested"
+    meaning: "Stored path carries a literal dot-dot, backslash-dot-dot or percent-encoded dot/slash spelling; no percent-decoding is performed at ingest or match time, so an encoded spelling matches only the literal stored spelling and never a decoded path. Investigation candidate only"
+    path_contains: ["../", "..\\", "%2e%2e", "%252e", "%c0%ae", "%c0%af", "%u002e"]
+    severity: candidate
+  - id: sec-origin-bad-request
+    version: 1
+    category: sensitive_path
+    title: "Origin-rejected malformed request observed"
+    meaning: "The origin stored status 400 for this event: the origin observed a malformed request. Parser-rejected source lines are not events and are reported only at line level, never here"
+    status_in: [400]
+    severity: candidate
+  - id: sec-auth-challenge-cluster
+    version: 1
+    category: repeated_client_errors
+    title: "Authentication/authorization challenge cluster"
+    meaning: "Stored 401/403 responses observed. A 401 is an authentication challenge and a 403 an authorization refusal: neither proves a failed login, a credential attack or targeting. Investigation candidate only"
+    status_in: [401, 403]
+    severity: candidate
+  - id: sec-repeated-auth-challenges
+    version: 1
+    category: repeated_client_errors
+    title: "Repeated auth challenges for one pseudonym"
+    meaning: "One client pseudonym received repeated stored 401/403 challenges. A 401 is an authentication challenge and a 403 an authorization refusal: neither proves a failed login or an attack. Investigation candidate only, with benign single-challenge clients never flagged"
+    status_in: [401, 403]
+    min_client_requests: 5
+    severity: candidate
+  - id: sec-probe-breadth
+    version: 1
+    category: sensitive_path
+    title: "Broad sensitive-surface sweep by one pseudonym"
+    meaning: "One client pseudonym touched many distinct sensitive paths. Breadth is a probe-sweep candidate only, never proof of a scan; narrow benign touches never qualify"
+    path_contains: ["/.env", "/.git/", "/wp-admin", "/wp-login", "/phpmyadmin", "/.aws/", "/id_rsa", "/.svn/", "/.htaccess", "/.htpasswd", "/wp-config", "/config.php", "/configuration.php", "/.DS_Store", "/server-status", "/server-info", "/phpinfo", "/wp-content/", "/wp-includes/", "/xmlrpc.php", "/administrator/", "/admin.php", "/user/login", "/phpinfo.php", "/cgi-bin/", "/boaform/", "/goform/", "/setup.cgi", "/login.cgi", "/GponForm/", "/proxy.cgi"]
+    min_client_distinct_paths: 4
     severity: candidate
