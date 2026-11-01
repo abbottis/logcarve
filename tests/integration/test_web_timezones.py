@@ -109,6 +109,16 @@ def test_default_timezone_env_exact_key_wins_over_abbreviation(monkeypatch):
     # A fixed offset is not a region and must never be guessed from.
     monkeypatch.setenv("TZ", "UTC+2")
     assert tzmod.resolve_default_timezone(None) == "UTC"
+    # Installed abbreviations and fixed-offset Etc entries stay
+    # explicitly selectable, but automatic TZ detection must never
+    # guess them as a region.
+    for abbrev in ("CET", "EST", "Etc/GMT+2"):
+        assert abbrev in tzmod.catalog_keys(), f"{abbrev} stays explicitly offered"
+        monkeypatch.setenv("TZ", abbrev)
+        assert tzmod.resolve_default_timezone(None) == "UTC", abbrev
+    # Path syntax is never accepted as a server region name.
+    monkeypatch.setenv("TZ", "/usr/share/zoneinfo/Asia/Tokyo")
+    assert tzmod.resolve_default_timezone(None) == "UTC"
 
 
 def test_explicit_override_wins_over_default(web, monkeypatch):
@@ -218,3 +228,120 @@ def test_settings_default_timezone_validation(monkeypatch):
     monkeypatch.setenv("DEFAULT_TIMEZONE", "")
     with pytest.raises(ValidationError):
         Settings()
+
+
+def test_settings_validator_never_enumerates_catalogue(monkeypatch):
+    """Three Settings constructions must not enumerate the zone files.
+
+    `load_settings` runs per request, so the validator proves a single
+    key with one `ZoneInfo` construction instead of calling
+    `available_timezones` on every `Settings` instance.
+    """
+    from zoneinfo import available_timezones as real_catalogue
+
+    calls = []
+    import app.config as config_mod
+
+    monkeypatch.setenv("DEFAULT_TIMEZONE", "Asia/Tokyo")
+    monkeypatch.setattr(
+        config_mod,
+        "available_timezones",
+        lambda: calls.append(1) or real_catalogue(),
+        raising=False,
+    )
+    for _ in range(3):
+        assert Settings(_env_file=None).default_timezone == "Asia/Tokyo"
+    assert calls == [], "validator must not enumerate the filesystem catalogue"
+
+
+def test_absent_config_uses_trusted_tz_through_routing(web, monkeypatch):
+    """Absent DEFAULT_TIMEZONE resolves the regional server TZ in routing.
+
+    With no explicitly configured default, `TZ=Asia/Tokyo` reaches real
+    pages through `Settings`/request routing (not only the standalone
+    resolver helper); an explicit `DEFAULT_TIMEZONE` always wins.
+    """
+    client, _ = web
+    _login(client)
+    monkeypatch.delenv("DEFAULT_TIMEZONE", raising=False)
+    monkeypatch.setenv("TZ", "Asia/Tokyo")
+    page = client.get(f"/requests?site=default&{WINDOW_QS}").text
+    assert "Time (Asia/Tokyo)" in page
+    monkeypatch.setenv("DEFAULT_TIMEZONE", "Europe/Berlin")
+    page = client.get(f"/requests?site=default&{WINDOW_QS}").text
+    assert "Time (Europe/Berlin)" in page
+
+
+def test_explicit_abbreviation_zone_stays_selectable(web):
+    """Installed aliases such as CET remain explicit tz options."""
+    client, _ = web
+    _login(client)
+    assert "CET" in tzmod.catalog_keys()
+    response = client.get(f"/requests?site=default&{WINDOW_QS}&tz=CET")
+    assert response.status_code == 200
+    assert "Time (CET)" in response.text
+
+
+def test_partial_swap_carries_updated_timezone_notice(web):
+    """A successful htmx Apply updates the displayed-timezone notice.
+
+    The notice lives outside `#page-content`, so every data partial
+    carries an out-of-band update with the server-validated zone; a
+    failed Apply (400) carries none and the stale notice stays put.
+    """
+    client, _ = web
+    _login(client)
+    partial = client.get(f"/partials/overview?site=default&{WINDOW_QS}&tz=Pacific%2FAuckland")
+    assert partial.status_code == 200
+    assert 'id="filter-times-notice"' in partial.text
+    assert "hx-swap-oob" in partial.text
+    assert "Times shown in Pacific/Auckland" in partial.text
+    for fragment in (
+        "crawlers",
+        "errors",
+        "requests",
+        "security",
+    ):
+        response = client.get(f"/partials/{fragment}?site=default&{WINDOW_QS}&tz=Asia%2FTokyo")
+        assert response.status_code == 200, fragment
+        assert "Times shown in Asia/Tokyo" in response.text, fragment
+    bad = client.get(f"/partials/overview?site=default&{WINDOW_QS}&tz=Nope%2FZone")
+    assert bad.status_code == 400
+    assert "filter-times-notice" not in bad.text
+
+
+def test_missing_zone_db_fails_fast_deterministically(monkeypatch):
+    """Absent zone data names UTC but cannot render without the DB.
+
+    Rendering any zone (including UTC) requires the tz database; the
+    fallback is a deterministic UTC name plus a safe 400, never silent
+    UTC-looking output or a crash. Documents the tzdata prerequisite.
+    """
+    import app.web.timezones as tz_module
+
+    monkeypatch.setattr(
+        tz_module, "available_timezones", lambda: (_ for _ in ()).throw(OSError("no zone db"))
+    )
+    tz_module._catalog.cache_clear()
+    tz_module._sorted_rest.cache_clear()
+    try:
+        assert tz_module._catalog() == ("UTC",)
+        assert tz_module.resolve_default_timezone(None) == "UTC"
+    finally:
+        tz_module._catalog.cache_clear()
+        tz_module._sorted_rest.cache_clear()
+
+
+def test_missing_zone_db_request_fails_fast(web, monkeypatch):
+    """A data page without a usable zone DB fails fast with a safe 400."""
+    from zoneinfo import ZoneInfoNotFoundError
+
+    import app.web.routes as routes_mod
+
+    client, _ = web
+    _login(client)
+    monkeypatch.setattr(
+        routes_mod, "ZoneInfo", lambda name: (_ for _ in ()).throw(ZoneInfoNotFoundError("no db"))
+    )
+    response = client.get(f"/?site=default&{WINDOW_QS}&tz=UTC")
+    assert response.status_code == 400

@@ -18,10 +18,14 @@ keys. Selection stays a native ``<select>`` for keyboard access.
 
 Default precedence: an explicit valid ``tz`` URL value always wins. When
 absent, the validated ``DEFAULT_TIMEZONE`` configuration applies. Only
-an exact installed IANA key from the operator ``TZ`` environment counts
-as a reliable local server name; a container cannot infer geographic
-location from a datetime abbreviation or fixed offset, so those are never
-guessed. Anything unusable falls back to ``UTC`` deterministically.
+an exact installed IANA region key from the operator ``TZ`` environment
+counts as a reliable local server name; a container cannot infer
+geographic location from a datetime abbreviation or fixed offset, so
+those are never guessed. Anything unusable names ``UTC``
+deterministically. Naming UTC is always safe; *rendering* any zone
+(including UTC) still requires the system tz database — without usable
+zone data the data pages fail fast with a safe 400 instead of showing
+unconverted times.
 """
 
 from __future__ import annotations
@@ -101,19 +105,38 @@ def display_options(default: str | None = None) -> list[dict[str, str]]:
     return [{"value": name, "label": display_label(name)} for name in ordered_timezones(default)]
 
 
+def _is_env_region_key(name: str) -> bool:
+    """True only for a defensible auto-detected server region key.
+
+    Explicit ``tz``/configured values may use any exact installed alias
+    (including ``CET``); automatic ``TZ`` detection must name a real
+    region (``Region/City``) or ``UTC``. Abbreviations (``CET``/``EST``),
+    fixed-offset ``Etc/*`` entries and filesystem/path syntax never
+    identify a region and are never guessed from.
+    """
+    if name == FALLBACK_TIMEZONE:
+        return True
+    if "/" not in name or "\\" in name:
+        return False
+    if name.startswith("Etc/"):
+        return False
+    return not name.startswith(("/", "."))
+
+
 def resolve_default_timezone(configured: str | None = None) -> str:
     """Effective default when the URL carries no explicit ``tz``.
 
-    Validated configuration wins. Otherwise an exact installed IANA key
-    from the operator ``TZ`` environment is a reliable local server name
-    and applies. Abbreviations and fixed offsets never identify a region,
-    so anything else falls back to ``UTC`` deterministically. Never reads
-    timezone files directly and never accepts a filesystem path.
+    Validated configuration wins. Otherwise an exact installed IANA
+    *region* key from the operator ``TZ`` environment is a reliable
+    local server name and applies; abbreviations, fixed offsets and
+    path syntax fall back to ``UTC`` deterministically even when they
+    happen to be installed aliases. Never reads timezone files directly
+    and never accepts a filesystem path.
     """
     if isinstance(configured, str) and configured and is_supported(configured):
         return configured
     env_tz = os.environ.get("TZ", "")
-    if env_tz and is_supported(env_tz):
+    if env_tz and _is_env_region_key(env_tz) and is_supported(env_tz):
         return env_tz
     return FALLBACK_TIMEZONE
 

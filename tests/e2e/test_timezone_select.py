@@ -176,8 +176,14 @@ def test_asian_zone_explorer_and_nav_preservation(page, tz_base, observed):
           .querySelector("tbody tr td").innerText"""
     )
     assert "JST" in first_cell
-    # Sidebar navigation keeps the explicit zone on data pages.
-    page.get_by_role("navigation").get_by_role("link", name="Overview").click()
+    # Sidebar navigation keeps the explicit zone on data pages: open the
+    # real narrow overlay menu, then follow the actual scoped visible link.
+    menu = page.get_by_role("button", name="Menu")
+    assert menu.is_visible()
+    menu.click()
+    assert menu.get_attribute("aria-expanded") == "true"
+    assert page.locator("#side-nav").is_visible()
+    page.locator("#side-nav").get_by_role("link", name="Overview").click()
     page.get_by_role("heading", name="Traffic timeline").wait_for(timeout=10000)
     assert _params(page.url).get("tz") == ["Asia/Tokyo"]
     assert "Times shown in Asia/Tokyo" in page.content()

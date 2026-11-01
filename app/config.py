@@ -7,7 +7,7 @@ insecure values. Product AI stays disabled until a later slice
 explicitly enables it.
 """
 
-from zoneinfo import ZoneInfo, ZoneInfoNotFoundError, available_timezones
+from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 from pydantic import Field, SecretStr, field_validator, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
@@ -59,20 +59,17 @@ class Settings(BaseSettings):
 
         This validates the configured server default only; per-request
         `tz` values are validated separately against the cached catalogue.
+        A single `ZoneInfo` construction proves installability without
+        enumerating the filesystem catalogue on every `Settings`
+        construction (`load_settings` runs per request).
         """
         name = (value or "").strip()
         if not name:
             raise ValueError("default_timezone must be a valid IANA timezone name")
         try:
-            supported = name in available_timezones()
-        except OSError:
-            supported = True
-        try:
             ZoneInfo(name)
-        except (ZoneInfoNotFoundError, ValueError) as exc:
+        except (ZoneInfoNotFoundError, ValueError, OSError) as exc:
             raise ValueError(f"unknown timezone: {name}") from exc
-        if not supported:
-            raise ValueError(f"unknown timezone: {name}")
         return name
 
     @model_validator(mode="after")

@@ -83,12 +83,21 @@ def _configured_default() -> str | None:
     """Validated configured default timezone, or None when unusable.
 
     Settings stay the authority; any load/validation failure falls back
-    to UTC downstream instead of breaking the filter parse.
+    to UTC downstream instead of breaking the filter parse. An absent
+    `DEFAULT_TIMEZONE` environment value counts as unconfigured (None)
+    so the resolver's reliable regional server `TZ` fallback stays
+    reachable; only an explicitly configured value wins over `TZ`.
     """
     try:
-        candidate = load_settings().default_timezone
+        settings = load_settings()
     except (ValidationError, OSError, ValueError):
         return None
+    if "default_timezone" not in settings.model_fields_set:
+        # Not explicitly configured (neither environment nor `.env`):
+        # leave the default absent so the resolver's reliable regional
+        # server `TZ` fallback stays reachable in real routing.
+        return None
+    candidate = settings.default_timezone
     return candidate if isinstance(candidate, str) and candidate else None
 
 
