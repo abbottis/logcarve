@@ -43,10 +43,10 @@
 
 ## Precise next work (owner-led, no paid replay)
 
-1. Owner manual acceptance TODAY with
+1. Owner manual acceptance TODAY 1 Nov 2026 with
    [acceptance checklist](acceptance-checklist.md); record
-   expected/actual/issues on Tue 03 Nov. Nothing auto-accepts on the
-   owner's behalf.
+   expected/actual/issues today; planned recording by Tue 3 Nov.
+   Nothing auto-accepts on the owner's behalf.
 2. Three-minute video rehearsal after acceptance, then
    recording/publication only after owner feedback and audit. No
    merge to `main`, production deployment or GitHub push without

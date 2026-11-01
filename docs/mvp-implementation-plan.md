@@ -1,6 +1,6 @@
 # LogCarve MVP implementation plan
 
-- Status: **accepted**, 2026-10-29 by owner, subject to the six decisions in [ADR 0002](decisions/0002-mvp-scope-grill.md). T1 authorized; T2–T10 each need separate authorization.
+- Status: **accepted**, 2026-10-29 by owner, subject to the six decisions in [ADR 0002](decisions/0002-mvp-scope-grill.md). T1 authorized; T2–T10 each need separate authorization (historical 29 Oct record; current readiness scope: `acceptance-readiness-plan.md`).
 - Origin: [technical spec v0.4](technical-spec.md), [MVP scope](mvp.md), [proposed architecture](architecture.md), [acceptance criteria](acceptance-criteria.md), area rules under `app/*/` and `tests/`.
 - Scope contract: one site, one configured NCSA Combined source (Nginx and Apache samples), batch import, SQLite persistence, reproducible analytics, browser dashboard, internal Meta assistant AND independently usable authenticated read-only REST API. P1/P2 items stay out.
 
@@ -75,9 +75,10 @@ T8, T10 or release as fully passed.
   candidate Compose runs and internal-network offline smoke runs on
   Linux ARM64 containers (see `verification.md`); native Linux
   x86-64 and standalone Linux host install remain NOT RUN.
-- Local Python 3.15.2 versus target image pin: resolved — the
-  project pins Python 3.12.16 via `uv` (`uv.lock`), and the tested
-  version is recorded at bootstrap in each verification entry.
+- Local Python 3.15.2 versus target image pin: resolved —
+  `.python-version` targets 3.12, the Dockerfile runtime pins 3.12.16
+  (that exact patch was tested), and `uv.lock` pins dependencies; the
+  tested version is recorded at bootstrap in each verification entry.
 - Still open from the ADR 0002 list: real-provider execution beyond
   the single authorized capped smoke (AI-02 INCOMPLETE, no new paid
   authorization), publication gates and final release/QA approvals —

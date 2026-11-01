@@ -2,17 +2,20 @@
 
 AI-assisted, self-hosted web access-log analytics for security, crawler activity and development.
 
-**Analytics closeout — 1 November 2026.** The parser, SQLite storage,
+**Acceptance readiness — 1 November 2026.** The parser, SQLite storage,
 deterministic analytics, authenticated REST API, bounded Meta assistant,
 browser dashboard and local synthetic demo are implemented. Fundamental
 traffic graphs, traffic selection with a 77-rule bot catalog, bot sorting
 and drilldowns, and a sanitized request explorer are available from the
-reviewed public source branch `feature/traffic-analytics` (clean
-application source `e81d2d0`); independent runtime verification is
-recorded in the [verification history](docs/verification.md).
-No `main` merge, release claim or production deployment is included; the
-local persistent demo was updated in place. Inspect `git status` for the
-active checkout rather than assuming a branch name.
+current local acceptance candidate at clean application source
+`bb272a9` (reviewed public source branch
+`feature/acceptance-polish-2026-11-01`; canonical equivalent `ad6d74f`
+on `local/acceptance-readiness-2026-11-01`); independent runtime
+verification is recorded in the [verification history](docs/verification.md).
+Owner manual acceptance is pending. No `main` merge, release claim or
+production deployment is included; the local persistent demo was updated
+in place. Inspect `git status` for the active checkout rather than
+assuming a branch name.
 
 ## Run the local synthetic demo
 
@@ -59,7 +62,8 @@ replays the verified synthetic fixture without resetting auth or usage.
 
 ## Verification and remaining work
 
-The independently verified analytics closeout passed 428 unit/integration
+The earlier (historical) independently verified analytics closeout at
+`e81d2d0` on `feature/traffic-analytics` passed 428 unit/integration
 tests, 22 protected browser E2E tests, a 53/53 synthetic API probe, Ruff
 check and format on 152 files, `uv lock --check` on 40 packages, the asset
 build with no-external-references check, fully redacted Gitleaks

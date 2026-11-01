@@ -1,4 +1,4 @@
-# Acceptance checklist — owner review (Tue 03 Nov)
+# Acceptance checklist — owner review (1 Nov 2026)
 
 Short practical checklist for today's owner review of the
 acceptance-ready demo at application anchor `bb272a9` (reviewed
@@ -6,7 +6,8 @@ public source branch `feature/acceptance-polish-2026-11-01`;
 canonical equivalent `ad6d74f` on
 `local/acceptance-readiness-2026-11-01`). Inspect `git status`
 rather than assuming a branch name. Record expected, actual and
-issues per row; nothing here auto-accepts on the owner's behalf.
+issues per row; planned recording by Tue 3 Nov; nothing here
+auto-accepts on the owner's behalf.
 
 ## Demo access
 
@@ -33,7 +34,7 @@ issues per row; nothing here auto-accepts on the owner's behalf.
 
 ## AI state (read honestly)
 
-- Current UI/demo: AI OFF (disabled, empty model key, no Internet).
+- Current UI/demo: AI OFF (disabled, empty model key) on the normal bridge network — it makes no provider calls but is NOT air-gapped. The offline proof is the separate internal-network smoke (see `docs/demo.md`).
 - Historical real Meta smoke: 2 of 3 investigations completed with
   evidence; the third failed closed at its context bound. AI-02
   stays INCOMPLETE; the third case was not rerun.

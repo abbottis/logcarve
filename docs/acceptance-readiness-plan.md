@@ -95,9 +95,10 @@ persistent demo, 7/7 timezone acceptance on both, exact-image demo
 update with the 8080 demo left running. No `main` merge, production
 deployment, paid call, cap change or dependency added. Prior
 incomplete real AI demo and no-new-paid-call status retained.
-Remaining for the owner: manual acceptance TODAY (see
-`docs/acceptance-checklist.md`, record on Tue 03 Nov), then video
-rehearsal/publication only after owner feedback and audit; real AI
+Remaining for the owner: manual acceptance 1 Nov 2026 (see
+`docs/acceptance-checklist.md`, record today), then video
+rehearsal with planned recording by Tue 3 Nov and publication
+only after owner feedback and audit; real AI
 proof only with a new explicit bounded authorization; Linux x86-64
 verification for a full install claim. No new GitHub push yet; the
 old publication checkpoint remains older and `main` is unchanged.
