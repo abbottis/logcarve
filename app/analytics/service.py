@@ -21,6 +21,7 @@ from app.analytics.contracts import (
     BotTableQuery,
     BucketSize,
     ExplorerQuery,
+    SlowEndpointsQuery,
     TopPathsQuery,
     TopReferrersQuery,
 )
@@ -79,6 +80,15 @@ def _filter_dict(filt: AnalyticsFilter) -> dict[str, object]:
         "category": filt.category,
         "provider": filt.provider,
         "purpose": filt.purpose,
+        "server_host": filt.server_host,
+        "http_version": filt.http_version,
+        "mime_type": filt.mime_type,
+        "cache_status": filt.cache_status,
+        "tls_protocol": filt.tls_protocol,
+        "timing_available": filt.timing_available,
+        "upstream_available": filt.upstream_available,
+        "timing_min_ms": filt.timing_min_ms,
+        "timing_max_ms": filt.timing_max_ms,
     }
 
 
@@ -850,4 +860,191 @@ def client_top(
         "offset": filt.offset,
         "coverage": coverage_summary(conn, filt, rules),
         "limitations": [*LIMITATIONS_LOGS],
+    }
+
+
+LIMITATIONS_PERFORMANCE = [
+    "zero is a valid measured latency; missing timing is unavailable, never zero",
+    "upstream totals aggregate all logged legs; a partial multi-leg timing leaves the total unavailable",
+    "status 304 is normal cache validation, not crawl waste",
+]
+
+LIMITATIONS_SEO = [
+    "AI-only means observed for configured AI-bot categories and not for other traffic in the same scope: absence elsewhere is observed absence, never proof of absence",
+    "a User-Agent match proves a claimed identity only, never a verified crawler",
+    "bot activity proves nothing about indexing, training use or search ranking",
+]
+
+
+def performance_overview(
+    conn: sqlite3.Connection,
+    filt: AnalyticsFilter,
+    rules: list[Rule] | None = None,
+    *,
+    observation_time: datetime | None = None,
+) -> dict[str, object]:
+    """Measured latency, upstream, cache, MIME, version, TLS and host view.
+
+    One deterministic entry for the future dashboard, REST API and
+    bounded tools: equal filters always yield equal results. All values
+    are exact all-row aggregates over the filtered scope; missing data
+    stays ``None``/``Unknown`` and legacy Combined scopes honestly
+    report ``latency_available: False``. Original IPs never participate:
+    only HMAC pseudonyms and sanitized enrichment columns are read.
+    """
+    clf = _classifier_for(filt, rules)
+    observed = datetime.now(UTC) if observation_time is None else observation_time
+    latency = queries.timing_stats(conn, filt, clf, "request_time_ms")
+    upstream = queries.timing_stats(conn, filt, clf, "upstream_time_ms")
+    cache = queries.cache_distribution(conn, filt, clf)
+    versions, versions_total = queries.version_distribution(conn, filt, clf)
+    tls, tls_total = queries.tls_distribution(conn, filt, clf)
+    hosts, hosts_total = queries.host_distribution(conn, filt, clf)
+    warnings: list[str] = [
+        *(str(w) for w in latency["warnings"]),  # type: ignore[union-attr]
+        *(str(w) for w in upstream["warnings"]),  # type: ignore[union-attr]
+        *_warnings(conn, filt, clf),
+    ]
+    return {
+        "site_id": filt.site_id,
+        "time_range": _window_dict(filt),
+        "generated_at": observed.isoformat(),
+        "filters": _filter_dict(filt),
+        "latency_available": int(latency["measured"]) > 0,  # type: ignore[arg-type]
+        "latency_ms": latency,
+        "upstream_ms": upstream,
+        "units": "milliseconds",
+        "percentile_definition": (
+            "linear interpolation over ascending measured values v[0..n-1] "
+            "(missing excluded): rank r = q*(n-1), "
+            "v[floor(r)] + (v[ceil(r)] - v[floor(r)]) * (r - floor(r))"
+        ),
+        "cache": cache,
+        "mime_vs_resource": queries.mime_resource_breakdown(conn, filt, clf),
+        "http_versions": {"items": versions, "total": versions_total},
+        "tls_protocols": {"items": tls, "total": tls_total},
+        "logged_hosts": {"items": hosts, "total": hosts_total},
+        "coverage": coverage_summary(conn, filt, rules),
+        "warnings": warnings,
+        "limitations": [*LIMITATIONS_PERFORMANCE, *LIMITATIONS_LOGS],
+    }
+
+
+def slow_endpoints(
+    conn: sqlite3.Connection, query: SlowEndpointsQuery, rules: list[Rule] | None = None
+) -> dict[str, object]:
+    """Slow measured endpoints with counts and per-path percentiles."""
+    clf = _classifier_for(query.filt, rules)
+    items, total, meta = queries.slow_endpoints(conn, query, clf)
+    return {
+        "site_id": query.filt.site_id,
+        "time_range": _window_dict(query.filt),
+        "filters": _filter_dict(query.filt),
+        "sort": query.sort,
+        "items": items,
+        "total_paths": total,
+        "meta": meta,
+        "limit": query.filt.limit,
+        "offset": query.filt.offset,
+        "units": "milliseconds",
+        "coverage": coverage_summary(conn, query.filt, rules),
+        "limitations": [*LIMITATIONS_PERFORMANCE, *LIMITATIONS_LOGS],
+    }
+
+
+def seo_status_groups(
+    conn: sqlite3.Connection,
+    filt: AnalyticsFilter,
+    rules: list[Rule],
+    *,
+    status_class: str = "4xx",
+) -> dict[str, object]:
+    """Bot redirects/client/server errors grouped by path and rule.
+
+    ``status_class`` is one of ``3xx`` (bot redirects), ``4xx`` (client
+    errors) or ``5xx`` (server errors). Every row attributes to exactly
+    one configured rule/provider via the ordered classifier; groups
+    carry exact counts/bytes plus drilldown selectors. Claims only:
+    no indexing, training-use or ranking inference.
+    """
+    if status_class not in ("3xx", "4xx", "5xx"):
+        raise ValueError(f"unknown status class: {status_class!r}")
+    clf = _classifier_for(filt, rules)
+    assert clf is not None
+    items, total = queries.seo_status_by_bot_path(conn, filt, clf, status_class=status_class)
+    return {
+        "site_id": filt.site_id,
+        "time_range": _window_dict(filt),
+        "filters": _filter_dict(filt),
+        "status_class": status_class,
+        "items": items,
+        "total_groups": total,
+        "limit": filt.limit,
+        "offset": filt.offset,
+        "coverage": coverage_summary(conn, filt, rules),
+        "limitations": [*LIMITATIONS_SEO, *LIMITATIONS_LOGS],
+    }
+
+
+def ai_only_paths(
+    conn: sqlite3.Connection,
+    filt: AnalyticsFilter,
+    rules: list[Rule],
+    *,
+    observation_time: datetime | None = None,
+) -> dict[str, object]:
+    """Paths observed only for configured AI-bot categories (with caveat).
+
+    Always reports the comparison scope, universe coverage and the
+    absence caveat; a filter that would trivially prove absence (no
+    non-AI traffic in the universe) is flagged ``vacuous``, never
+    hidden. Bot/category/traffic selectors are removed when building
+    the comparison universe (reported under
+    ``comparison.selectors_removed``). No indexing, training-use or
+    SEO-rank claim is ever made.
+    """
+    clf = _classifier_for(filt, rules)
+    assert clf is not None
+    observed = datetime.now(UTC) if observation_time is None else observation_time
+    result = queries.ai_only_paths(conn, filt, clf)
+    return {
+        "site_id": filt.site_id,
+        "time_range": _window_dict(filt),
+        "generated_at": observed.isoformat(),
+        "filters": _filter_dict(filt),
+        **result,
+        "coverage": coverage_summary(conn, filt, rules),
+        "limitations": [*LIMITATIONS_SEO, *LIMITATIONS_LOGS],
+    }
+
+
+def referrer_404s(
+    conn: sqlite3.Connection, filt: AnalyticsFilter, rules: list[Rule] | None = None
+) -> dict[str, object]:
+    """External referrer-path -> target-404 report over sanitized fields.
+
+    The configured own domain/aliases (site hostname plus stored source
+    aliases) separate internal from external referrers; only the
+    sanitized scheme+host+path travels (no query values, userinfo,
+    secrets or clickable dangerous schemes). Ordinary host-level
+    referrer reports stay unchanged.
+    """
+    clf = _classifier_for(filt, rules)
+    own_hosts = queries.own_hosts_for_scope(conn, filt)
+    items, total = queries.referrer_404_targets(conn, filt, clf, own_hosts=own_hosts)
+    return {
+        "site_id": filt.site_id,
+        "time_range": _window_dict(filt),
+        "filters": _filter_dict(filt),
+        "own_hosts": sorted(own_hosts),
+        "host_matching": (
+            "lowercase hostname equality; ports, userinfo and query values are never stored; "
+            "IDN compares in stored encoded form; only http/https schemes are stored"
+        ),
+        "items": items,
+        "total_groups": total,
+        "limit": filt.limit,
+        "offset": filt.offset,
+        "coverage": coverage_summary(conn, filt, rules),
+        "limitations": [*LIMITATIONS_SEO, *LIMITATIONS_LOGS],
     }

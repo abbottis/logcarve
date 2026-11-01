@@ -82,6 +82,110 @@ def ensure_source(
     )
 
 
+def ensure_source_locked(
+    conn: sqlite3.Connection,
+    *,
+    source_id: str,
+    site_id: str,
+    server_type: str,
+    format_id: str,
+    path_alias: str,
+    enabled: bool = True,
+    allowed_hosts: list[str] | None = None,
+) -> None:
+    """Register a source inside the caller's write transaction (same lock).
+
+    The pre-write read check in the import/reprocess callers runs before
+    the writer lock is acquired, so a concurrent first registration of
+    the same source id for another site would slip past it: the plain
+    ``ON CONFLICT DO NOTHING`` insert would then silently reuse the
+    foreign row. This helper MUST run inside the same
+    :func:`app.db.database.writer_transaction` as the import/site rows:
+    after the no-op-safe insert it re-reads the stored ``site_id`` on
+    this connection (which holds the write lock) and raises
+    :class:`SourceBindingError` on mismatch. The exception rolls back
+    the whole transaction, so no site, import, event or private rows
+    from the rejected operation survive.
+    """
+    ensure_source(
+        conn,
+        source_id=source_id,
+        site_id=site_id,
+        server_type=server_type,
+        format_id=format_id,
+        path_alias=path_alias,
+        enabled=enabled,
+        allowed_hosts=allowed_hosts,
+    )
+    row = conn.execute("SELECT site_id FROM log_sources WHERE id = ?", (source_id,)).fetchone()
+    if row is None:  # pragma: no cover - insert just ran without error
+        raise RuntimeError("source registration vanished underfoot")
+    if str(row[0]) != site_id:
+        raise SourceBindingError()
+
+
+def check_source_binding_locked(conn: sqlite3.Connection, *, source_id: str, site_id: str) -> None:
+    """Re-read the stored source binding on a lock-holding connection.
+
+    Unlike the pre-lock read probe, this runs inside the caller's
+    writer transaction, so a concurrent first registration for another
+    site is visible here. Raises :class:`SourceBindingError` on
+    mismatch; callers let the transaction roll back. An unregistered
+    source id passes (nothing to contradict yet).
+    """
+    row = conn.execute("SELECT site_id FROM log_sources WHERE id = ?", (source_id,)).fetchone()
+    if row is not None and str(row[0]) != site_id:
+        raise SourceBindingError()
+
+
+def update_source_hosts(
+    conn: sqlite3.Connection,
+    *,
+    source_id: str,
+    site_id: str,
+    allowed_hosts: list[str] | None,
+) -> bool:
+    """Persist validated alias metadata for an already-bound source.
+
+    Updates ONLY the ``allowed_hosts`` column of the row, guarded by
+    both source id and site id, so core fields (server type, format,
+    path alias), site rows, auth, ledger and usage state are preserved
+    and a foreign-site row can never be touched. Hosts are normalized
+    exactly like new registrations (stripped, lowercased, sorted JSON).
+    ``None`` (hostless presets) leaves the stored value untouched and
+    returns ``False``. Returns ``True`` when the row was updated.
+    """
+    if allowed_hosts is None:
+        return False
+    cleaned = sorted({str(item).strip().lower() for item in allowed_hosts if str(item).strip()})
+    if not cleaned:
+        raise ValueError("allowed_hosts must not be empty when set")
+    for item in cleaned:
+        if len(item) > 253 or "\x00" in item or any(ch.isspace() for ch in item):
+            raise ValueError(f"invalid allowed host: {item[:32]!r}")
+    cursor = conn.execute(
+        "UPDATE log_sources SET allowed_hosts = ? WHERE id = ? AND site_id = ?",
+        (json.dumps(cleaned), source_id, site_id),
+    )
+    return cursor.rowcount == 1
+
+
+def fetch_source_allowed_hosts(conn: sqlite3.Connection, *, source_id: str) -> list[str] | None:
+    """Stored host aliases for one source, or ``None`` when unset/never registered."""
+    row = conn.execute(
+        "SELECT allowed_hosts FROM log_sources WHERE id = ?", (source_id,)
+    ).fetchone()
+    if row is None or row[0] is None:
+        return None
+    try:
+        hosts = json.loads(row[0])
+    except (ValueError, TypeError):
+        return None
+    if not isinstance(hosts, list):
+        return None
+    return [str(item) for item in hosts]
+
+
 def create_import(
     conn: sqlite3.Connection,
     *,

@@ -89,8 +89,70 @@ class AnalyticsFilter(BaseModel):
     category: str | None = Field(default=None, min_length=1, max_length=64)
     provider: str | None = Field(default=None, min_length=1, max_length=120)
     purpose: str | None = Field(default=None, min_length=1, max_length=120)
+    #: T2a measured-enrichment matchers (PAR-03). All optional so legacy
+    #: callers stay compatible; every value is normalized and bounded
+    #: here, then bound as a parameter (never interpolated) in queries.
+    server_host: str | None = Field(default=None, min_length=1, max_length=253)
+    http_version: str | None = Field(default=None, min_length=1, max_length=16)
+    mime_type: str | None = Field(default=None, min_length=1, max_length=128)
+    cache_status: str | None = Field(default=None, min_length=1, max_length=32)
+    tls_protocol: str | None = Field(default=None, min_length=1, max_length=32)
+    timing_available: bool | None = Field(default=None)
+    upstream_available: bool | None = Field(default=None)
+    timing_min_ms: float | None = Field(default=None, ge=0)
+    timing_max_ms: float | None = Field(default=None, ge=0)
     limit: int = Field(default=100, ge=1, le=MAX_LIMIT)
     offset: int = Field(default=0, ge=0)
+
+    @field_validator("server_host", "http_version", "mime_type", "cache_status", "tls_protocol")
+    @classmethod
+    def _normalize_enrichment(cls, value: str | None) -> str | None:
+        """Normalize enrichment matchers to their stored canonical form."""
+        if value is None:
+            return None
+        return value.strip()
+
+    @model_validator(mode="after")
+    def _enrichment_consistent(self) -> "AnalyticsFilter":
+        import math as _math
+        import re as _re
+
+        if self.server_host is not None:
+            host = self.server_host.strip().lower()
+            if not host or len(host) > 253 or "\x00" in host:
+                raise ValueError("server_host must be a hostname of 1..253 characters")
+            object.__setattr__(self, "server_host", host)
+        if self.http_version is not None:
+            version = self.http_version.strip()
+            if not _re.match(r"^HTTP/\d+(\.\d+)?$", version):
+                raise ValueError("http_version must look like HTTP/1.1 or HTTP/2")
+            object.__setattr__(self, "http_version", version)
+        if self.mime_type is not None:
+            media = self.mime_type.split(";", 1)[0].strip().lower()
+            if not _re.match(r"^[^/\s;]{1,64}/[^;\s]{1,64}$", media):
+                raise ValueError("mime_type must be a type/subtype media range")
+            object.__setattr__(self, "mime_type", media)
+        if self.cache_status is not None:
+            cache = self.cache_status.strip().upper()
+            if not _re.match(r"^[A-Z_]{1,32}$", cache):
+                raise ValueError("cache_status must be an uppercase cache token")
+            object.__setattr__(self, "cache_status", cache)
+        if self.tls_protocol is not None:
+            tls = self.tls_protocol.strip()
+            if not _re.match(r"^[A-Za-z0-9._-]{1,32}$", tls):
+                raise ValueError("tls_protocol must be a 1..32 character token")
+            object.__setattr__(self, "tls_protocol", tls)
+        for name in ("timing_min_ms", "timing_max_ms"):
+            bound = getattr(self, name)
+            if bound is not None and not _math.isfinite(bound):
+                raise ValueError(f"{name} must be finite")
+        if (
+            self.timing_min_ms is not None
+            and self.timing_max_ms is not None
+            and self.timing_min_ms > self.timing_max_ms
+        ):
+            raise ValueError("timing_min_ms must not exceed timing_max_ms")
+        return self
 
     @model_validator(mode="after")
     def _status_consistent(self) -> "AnalyticsFilter":
@@ -111,6 +173,16 @@ class TopPathsQuery(BaseModel):
 class TopReferrersQuery(BaseModel):
     filt: AnalyticsFilter
     sort: TopReferrerSort = "requests_desc"
+
+
+SlowEndpointSort = Literal["avg_desc", "p95_desc", "requests_desc", "max_desc"]
+
+
+class SlowEndpointsQuery(BaseModel):
+    """Slow measured endpoints: one allowlisted server sort, stable paging."""
+
+    filt: AnalyticsFilter
+    sort: SlowEndpointSort = "avg_desc"
 
 
 class BotTableQuery(BaseModel):

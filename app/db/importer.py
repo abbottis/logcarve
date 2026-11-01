@@ -338,7 +338,11 @@ def run_import(
             hostname=site_hostname,
             created_at=started,
         )
-        repositories.ensure_source(
+        # Same-lock immutable binding: the pre-lock read check above
+        # cannot see a concurrent first registration, so the guard
+        # inside this transaction re-reads the stored site under the
+        # write lock and rolls the whole transaction back on mismatch.
+        repositories.ensure_source_locked(
             conn,
             source_id=source.source_id,
             site_id=site_id,
@@ -349,6 +353,18 @@ def run_import(
                 sorted(effective_filter.hosts) if effective_filter is not None else None
             ),
         )
+        # Persist alias metadata for already-bound sources: their row
+        # predates the allowed_hosts column (ON CONFLICT ignores it), so
+        # without this later internal/external referrer reports would
+        # keep using stale aliases. Core/site/auth/ledger fields stay
+        # untouched; only the validated alias column is rewritten.
+        if effective_filter is not None:
+            repositories.update_source_hosts(
+                conn,
+                source_id=source.source_id,
+                site_id=site_id,
+                allowed_hosts=sorted(effective_filter.hosts),
+            )
         import_id = repositories.create_import(
             conn,
             source_id=source.source_id,

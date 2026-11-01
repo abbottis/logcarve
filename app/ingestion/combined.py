@@ -236,17 +236,28 @@ def normalize_multi_seconds_to_ms(value: str) -> tuple[float | None, int | None]
     """Normalize a quoted upstream timing to ``(total_ms, component_count)``.
 
     ``-`` means absent and yields ``(None, None)``: no components were
-    logged, so no count is inferred. A comma/colon/space
-    separated multi-value list (Nginx ``$upstream_response_time`` with
-    several upstreams tried) is summed explicitly and the component count
-    is returned alongside; any unparseable, negative or overflowing
-    component raises :class:`TimingInvalid`.
+    logged, so no count is inferred. A comma/colon/space separated
+    multi-value list (Nginx ``$upstream_response_time`` with several
+    upstreams tried) is summed explicitly and the component count is
+    returned alongside.
+
+    A ``-`` component inside an otherwise valid list (for example
+    ``"0.100, -"``) means one upstream leg logged no timing: the
+    complete total is then unavailable and yields ``(None, None)`` --
+    the missing leg is never turned into zero, and the event itself
+    stays valid so a separately measured request duration on the same
+    line is preserved. Truly unparseable, negative or overflowing
+    components still raise :class:`TimingInvalid` and reject the line.
     """
     if value == "-":
         return None, None
     parts = [item for item in _MULTI_SEP_RE.split(value.strip()) if item]
     if not parts:
         raise TimingInvalid("empty upstream timing")
+    if any(part == "-" for part in parts):
+        # Partial upstream timing: at least one leg is missing, so no
+        # complete total and no component count can be reported.
+        return None, None
     total = 0.0
     for part in parts:
         if not _NUMBER_RE.match(part):
@@ -337,32 +348,64 @@ def enrichment_policy(format_id: str, custom_format: object = None) -> str:
     return f"{PARSER_POLICY_VERSION}+custom:{digest.hexdigest()[:16]}"
 
 
-@dataclass(frozen=True, slots=True)
 class CapturedOriginal:
     """Transient SecretStr-safe capture of one validated original address.
 
-    The plaintext lives only in the private ``_plaintext`` slot and is
-    revealed solely through :meth:`reveal`, called immediately inside
-    proven encryption/admin-private functions. ``repr``/``str`` (and
-    therefore tuples, lists, logs and exception text carrying this
-    value) show only a fixed withheld marker, and the value is not
-    JSON-serializable, so routine ``repr``/``asdict``/serialization
-    paths cannot expose the original address. Use
-    ``capture_original=True`` parse paths only to route into the
-    encrypted private channel.
+    Deliberately NOT a dataclass: :func:`dataclasses.asdict` on a
+    dataclass would emit its fields as plaintext (``{'_plaintext':
+    '192.0.2.44'}``), including nested inside another dataclass. As a
+    plain slotted class holding a Pydantic ``SecretStr``, ``asdict``
+    raises ``TypeError`` on a bare capture, and nested ``asdict``/
+    ``deepcopy``/``pickle`` paths keep only a withheld marker -- never
+    the address text. The plaintext is revealed solely through
+    :meth:`reveal`, called immediately inside proven
+    encryption/admin-private functions. ``repr``/``str`` (and therefore
+    tuples, lists, logs and exception text carrying this value) show
+    only a fixed withheld marker, and the value is not
+    JSON-serializable. Use ``capture_original=True`` parse paths only
+    to route into the encrypted private channel.
     """
 
-    _plaintext: str
+    __slots__ = ("_secret",)
+
+    def __init__(self, plaintext: str) -> None:
+        from pydantic import SecretStr as _SecretStr
+
+        if not isinstance(plaintext, str) or not plaintext:
+            raise ValueError("captured address must be a non-empty string")
+        self._secret = _SecretStr(plaintext)
 
     def reveal(self) -> str:
         """Return the captured address text for immediate encryption."""
-        return self._plaintext
+        return self._secret.get_secret_value()
 
     def __repr__(self) -> str:
         return "CapturedOriginal(<withheld>)"
 
     def __str__(self) -> str:
         return "CapturedOriginal(<withheld>)"
+
+    def __eq__(self, other: object) -> bool:
+        if not isinstance(other, CapturedOriginal):
+            return NotImplemented
+        return self.reveal() == other.reveal()
+
+    def __hash__(self) -> int:
+        return hash(self.reveal())
+
+    def __copy__(self, memo: object = None) -> "CapturedOriginal":
+        return CapturedOriginal(self.reveal())
+
+    def __deepcopy__(self, memo: object = None) -> "CapturedOriginal":
+        return CapturedOriginal(self.reveal())
+
+    def __getstate__(self) -> dict[str, str]:
+        # Pickle/copyreg paths keep only the withheld marker, never the
+        # address text. Encryption inputs use the live object directly.
+        return {"withheld": "CapturedOriginal(<withheld>)"}
+
+    def __setstate__(self, state: object) -> None:
+        raise ValueError("CapturedOriginal cannot be restored from serialized state")
 
 
 def validate_original_ip(text: str) -> str | None:

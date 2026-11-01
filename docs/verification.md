@@ -1894,3 +1894,38 @@ cross-site test now asserts the mandated `source_site_mismatch`
 rejection (no extra site) instead of the old silent reuse. No
 web/API changes; admin IP display stays schema/helpers until T4.
 Stopping for independent review; T2 and later stages await it.
+
+## 2026-11-01 — Parity T2a shared analytics C/D + T1b preflight closeout
+
+Authorized LogWerk parity build on `feature/logwerk-parity-2026-11-01`,
+exact model `muse-spark-1.3-contributor`/medium/Contributor ON; sandbox +
+approval ON, sole writer, no subagents. Public/synthetic checkout only:
+no parent private files/keys/product calls/Docker/push/main/deployment.
+All code/tests by the implementer. No web/import UI/translations in this
+slice. Metric definitions and provenance: `docs/logwerk-parity-metrics.md`.
+
+T1b preflight (frozen `9b61423` findings, rechecked and fixed first):
+`CapturedOriginal` is a SecretStr-backed non-dataclass (`asdict` raises,
+nested/pickle/JSON carry no plaintext); source binding re-checked inside
+the write transaction with a deterministic injected-race regression
+(foreign registration after precheck rolls back site/import/rows/private);
+already-bound sources gain validated alias metadata via
+`update_source_hosts` (alias-column only, site-guarded), persisted on
+import and reprocess. Probes: partial upstream `"0.100, -"` keeps the
+event with total unavailable (helper/line/import/reprocess/service
+agree); ~1e308 ms pairs overflow `AVG` honestly (`None` + warning,
+quantiles finite, JSON-safe, no `Inf`/`NaN`).
+
+| Check | Result | Evidence |
+| --- | --- | --- |
+| New `tests/integration/test_parity_t2a.py` | PASS | 21 passed: preflight (asdict/race/alias), probes (partial/overflow), hand-counted 24-row C fixture, D reports, 5100-row beyond-cap proof (project `.venv`) |
+| Full `tests/unit tests/integration` | PASS | 682 passed, 2 skipped (loopback sockets unavailable in sandbox; pre-existing env category) |
+| `ruff check` + `ruff format --check` | PASS | Both clean over `app` + `tests` |
+| `uv lock --check --offline` | PASS | `UV_CACHE_DIR=/tmp/uvcache`: resolved 42 packages, no manifest/lock delta |
+| 120-row fixture / HMAC / ledger / 77-rule catalog | PASS | Untouched: new tests generate tmp fixtures only; catalog count asserted 77 in-test |
+
+Acceptance impact: PAR-03/PAR-04 implemented at the shared
+service/query layer (deterministic, parameterized, bounded SQL; no
+original-IP joins; legacy Combined honestly unavailable). Actual HTTP
+wiring stays T3; request journeys stay T2b; no sessions/landings
+invented. Stopping for independent review.

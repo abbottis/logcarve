@@ -6,6 +6,7 @@ cardinality scans (distinct agents/paths) are bounded with explicit
 truncation flags so reads never load the whole database into memory.
 """
 
+import math
 import sqlite3
 from datetime import datetime, timedelta
 
@@ -18,6 +19,7 @@ from app.analytics.contracts import (
     AnalyticsFilter,
     BucketSize,
     ExplorerQuery,
+    SlowEndpointsQuery,
     TopPathsQuery,
     TopReferrersQuery,
 )
@@ -118,6 +120,35 @@ def _where(filt: AnalyticsFilter, classifier: Classifier | None = None) -> tuple
     if filt.referer_host is not None:
         clauses.append("referer_host = ?")
         params.append(filt.referer_host)
+    if filt.server_host is not None:
+        clauses.append("server_host = ?")
+        params.append(filt.server_host)
+    if filt.http_version is not None:
+        clauses.append("http_version = ?")
+        params.append(filt.http_version)
+    if filt.mime_type is not None:
+        clauses.append("mime_type = ?")
+        params.append(filt.mime_type)
+    if filt.cache_status is not None:
+        clauses.append("cache_status = ?")
+        params.append(filt.cache_status)
+    if filt.tls_protocol is not None:
+        clauses.append("tls_protocol = ?")
+        params.append(filt.tls_protocol)
+    if filt.timing_available is True:
+        clauses.append("request_time_ms IS NOT NULL")
+    elif filt.timing_available is False:
+        clauses.append("request_time_ms IS NULL")
+    if filt.upstream_available is True:
+        clauses.append("upstream_time_ms IS NOT NULL")
+    elif filt.upstream_available is False:
+        clauses.append("upstream_time_ms IS NULL")
+    if filt.timing_min_ms is not None:
+        clauses.append("request_time_ms >= ?")
+        params.append(filt.timing_min_ms)
+    if filt.timing_max_ms is not None:
+        clauses.append("request_time_ms <= ?")
+        params.append(filt.timing_max_ms)
     if filt.search is not None:
         # LogWerk-style explorer search over stored sanitized fields only:
         # query-stripped path, truncated-at-read user agent, minimized
@@ -1013,6 +1044,741 @@ def client_top(
                 "last_seen": last,
             }
             for ident, count, errors, paths, first, last in rows
+        ],
+        total,
+    )
+
+
+#: T2a measured-timing columns. Internal allowlist only: the column is
+#: always one of these literals, never caller input.
+_TIMING_COLUMNS = ("request_time_ms", "upstream_time_ms")
+
+
+def _ordered_timing_value(
+    conn: sqlite3.Connection,
+    where: str,
+    params: list[object],
+    column: str,
+    offset: int,
+) -> float | None:
+    """One order statistic over the entire filtered scope (no sampling).
+
+    ``column`` is an internal allowlist literal; ``offset``/``params``
+    are bound. Exactly one row is read per call, so percentile
+    computation never materializes millions of durations.
+    """
+    assert column in _TIMING_COLUMNS
+    row = conn.execute(
+        f"SELECT {column} FROM requests WHERE {where} AND {column} IS NOT NULL"
+        f" ORDER BY {column} ASC LIMIT 1 OFFSET ?",
+        [*params, offset],
+    ).fetchone()
+    return None if row is None else float(row[0])
+
+
+def timing_quantile(
+    conn: sqlite3.Connection,
+    filt: AnalyticsFilter,
+    classifier: Classifier | None,
+    column: str,
+    measured: int,
+    quantum: float,
+) -> float | None:
+    """Deterministic linear-interpolation quantile over measured values.
+
+    Sorted ascending ``v[0..n-1]`` (NULLs excluded: missing is never
+    zero), rank ``r = q * (n - 1)``, ``v[lo] + (v[hi] - v[lo]) * (r -
+    lo)``. The ``(hi - lo)`` form keeps the interpolation numerically
+    stable when individually finite large timings sit near the float
+    ceiling; a non-finite result maps to ``None`` (callers add an
+    overflow warning) instead of leaking ``Inf``/``NaN`` into JSON.
+    At most two single-row order-statistic reads per call.
+    """
+    assert column in _TIMING_COLUMNS
+    if measured <= 0:
+        return None
+    import math as _math
+
+    rank = quantum * (measured - 1)
+    low = _math.floor(rank)
+    high = _math.ceil(rank)
+    where, params = _where(filt, classifier)
+    first = _ordered_timing_value(conn, where, params, column, low)
+    if first is None:
+        return None
+    if high == low:
+        return first if _math.isfinite(first) else None
+    second = _ordered_timing_value(conn, where, params, column, high)
+    if second is None:
+        return None
+    value = first + (second - first) * (rank - low)
+    return value if _math.isfinite(value) else None
+
+
+def timing_stats(
+    conn: sqlite3.Connection,
+    filt: AnalyticsFilter,
+    classifier: Classifier | None,
+    column: str,
+) -> dict[str, object]:
+    """Exact measured-timing summary for one timing column (milliseconds).
+
+    ``request_time_ms`` is the measured request latency; zero is a
+    valid observation and missing (``NULL``) never contributes zero.
+    ``upstream_time_ms`` is the aggregated upstream total; a partial
+    multi-leg timing (``"0.100, -"``) stores ``NULL`` with no component
+    count, so it lands in ``missing`` here -- never as zero. The
+    average comes from SQL ``AVG`` with a finiteness guard: individually
+    finite large timings that overflow a naive ``SUM`` yield
+    ``average_ms: None`` plus an overflow warning, never ``Inf``/``NaN``.
+    Percentiles use :func:`timing_quantile` over the entire filtered
+    scope (exact order statistics, no sampling).
+    """
+    assert column in _TIMING_COLUMNS
+    where, params = _where(filt, classifier)
+    row = conn.execute(
+        f"SELECT COUNT({column}), COUNT(*) - COUNT({column}),"
+        f" MIN({column}), MAX({column}), AVG({column})"
+        f" FROM requests WHERE {where}",
+        params,
+    ).fetchone()
+    measured, missing, minimum, maximum, average = (
+        int(row[0]),
+        int(row[1]),
+        row[2],
+        row[3],
+        row[4],
+    )
+    warnings: list[str] = []
+    average_ms: float | None = None
+    if average is not None:
+        candidate = float(average)
+        if math.isfinite(candidate):
+            average_ms = candidate
+        else:
+            warnings.append(f"{column}_average_unavailable:overflow")
+    quantiles: dict[str, float | None] = {}
+    for name, quantum in (("p50", 0.50), ("p95", 0.95), ("p99", 0.99)):
+        value = timing_quantile(conn, filt, classifier, column, measured, quantum)
+        if value is None and measured > 0:
+            warnings.append(f"{column}_{name}_unavailable:overflow")
+        quantiles[name] = value
+    return {
+        "measured": measured,
+        "missing": missing,
+        "total": measured + missing,
+        "coverage": (measured / (measured + missing)) if (measured + missing) else None,
+        "min_ms": float(minimum) if minimum is not None else None,
+        "max_ms": float(maximum) if maximum is not None else None,
+        "average_ms": average_ms,
+        "median_ms": quantiles["p50"],
+        "p50_ms": quantiles["p50"],
+        "p95_ms": quantiles["p95"],
+        "p99_ms": quantiles["p99"],
+        "warnings": warnings,
+    }
+
+
+def _distribution(
+    conn: sqlite3.Connection,
+    filt: AnalyticsFilter,
+    classifier: Classifier | None,
+    column: str,
+) -> tuple[list[dict[str, object]], int]:
+    """Exact all-row value distribution with ``Unknown`` for missing.
+
+    ``column`` is an internal allowlist literal. Totals are exact
+    ``GROUP BY`` results over the entire filtered scope (never a capped
+    distinct scan); stable order is requests DESC, value ASC with NULLs
+    rendered as ``"Unknown"`` and sorted last.
+    """
+    where, params = _where(filt, classifier)
+    total = int(conn.execute(f"SELECT COUNT(*) FROM requests WHERE {where}", params).fetchone()[0])
+    rows = conn.execute(
+        f"SELECT {column}, COUNT(*) FROM requests WHERE {where}"
+        f" GROUP BY {column} ORDER BY COUNT(*) DESC, {column} ASC",
+        params,
+    ).fetchall()
+    items = [
+        {"value": ("Unknown" if value is None else str(value)), "requests": int(count)}
+        for value, count in rows
+    ]
+    items.sort(
+        key=lambda item: (
+            -int(item["requests"]),
+            str(item["value"]) != "Unknown",
+            str(item["value"]),
+        )
+    )
+    return items, total
+
+
+def cache_distribution(
+    conn: sqlite3.Connection, filt: AnalyticsFilter, classifier: Classifier | None = None
+) -> dict[str, object]:
+    """Cache-status distribution with a documented HIT ratio denominator.
+
+    ``hit_ratio = HIT / cache_measured`` where ``cache_measured`` counts
+    rows with a logged cache status (``Unknown``/absent rows are shown
+    separately and never enter the denominator). ``HIT`` matches the
+    stored uppercase token exactly. ``not_modified_304`` counts normal
+    HTTP cache validation (status 304) separately: 304s are protocol
+    behavior, never automatically crawl waste.
+    """
+    items, total = _distribution(conn, filt, classifier, "cache_status")
+    where, params = _where(filt, classifier)
+    measured = int(
+        conn.execute(
+            f"SELECT COUNT(*) FROM requests WHERE {where} AND cache_status IS NOT NULL",
+            params,
+        ).fetchone()[0]
+    )
+    hits = next((i["requests"] for i in items if i["value"] == "HIT"), 0)
+    validations = int(
+        conn.execute(
+            f"SELECT COUNT(*) FROM requests WHERE {where} AND status = 304", params
+        ).fetchone()[0]
+    )
+    return {
+        "items": items,
+        "total": total,
+        "cache_measured": measured,
+        "cache_missing": total - measured,
+        "hit_requests": int(hits),
+        "hit_ratio": (float(hits) / measured) if measured else None,
+        "hit_ratio_denominator": "requests with a logged cache_status (absent excluded)",
+        "not_modified_304": validations,
+        "not_modified_note": "status 304 is normal cache validation, not crawl waste",
+    }
+
+
+def mime_resource_breakdown(
+    conn: sqlite3.Connection, filt: AnalyticsFilter, classifier: Classifier | None = None
+) -> list[dict[str, object]]:
+    """Measured MIME type crossed with the extension-inferred resource kind.
+
+    The measured ``mime_type`` is what the origin logged; the resource
+    kind is the documented path-extension heuristic
+    (:data:`_RESOURCE_KIND_CASE`). ``Unknown`` marks absent MIME data.
+    Exact all-row ``GROUP BY`` with stable (requests DESC, mime ASC,
+    kind ASC) order.
+    """
+    where, params = _where(filt, classifier)
+    rows = conn.execute(
+        "SELECT COALESCE(mime_type, 'Unknown'),"
+        f" {_RESOURCE_KIND_CASE} AS kind, COUNT(*)"
+        f" FROM requests WHERE {where} GROUP BY mime_type, kind"
+        " ORDER BY COUNT(*) DESC, mime_type ASC, kind ASC",
+        params,
+    ).fetchall()
+    return [
+        {"mime_type": mime, "resource_kind": kind, "requests": int(count)}
+        for mime, kind, count in rows
+    ]
+
+
+def version_distribution(
+    conn: sqlite3.Connection, filt: AnalyticsFilter, classifier: Classifier | None = None
+) -> tuple[list[dict[str, object]], int]:
+    """HTTP version distribution with ``Unknown`` for missing versions."""
+    return _distribution(conn, filt, classifier, "http_version")
+
+
+def tls_distribution(
+    conn: sqlite3.Connection, filt: AnalyticsFilter, classifier: Classifier | None = None
+) -> tuple[list[dict[str, object]], int]:
+    """TLS protocol distribution with ``Unknown`` for missing protocols."""
+    return _distribution(conn, filt, classifier, "tls_protocol")
+
+
+def host_distribution(
+    conn: sqlite3.Connection, filt: AnalyticsFilter, classifier: Classifier | None = None
+) -> tuple[list[dict[str, object]], int]:
+    """Logged-host distribution with ``Unknown`` for hostless rows."""
+    return _distribution(conn, filt, classifier, "server_host")
+
+
+_SLOW_ENDPOINT_ORDER: dict[str, str] = {
+    "avg_desc": "avg_ms DESC, measured DESC, path ASC",
+    "requests_desc": "measured DESC, path ASC",
+    "max_desc": "max_ms DESC, measured DESC, path ASC",
+}
+
+#: Candidate bound for the ``p95_desc`` slow-endpoint ranking: per-path
+#: p95 needs order statistics per path, so the ranking covers the top
+#: N paths by measured count (reported explicitly), while every shown
+#: p95 itself is exact over that path's full rows -- never sampled.
+SLOW_P95_CANDIDATES = 200
+
+
+def slow_endpoints(
+    conn: sqlite3.Connection, query: SlowEndpointsQuery, classifier: Classifier | None = None
+) -> tuple[list[dict[str, object]], int, dict[str, object]]:
+    """Slow measured endpoints with counts and exact per-path percentiles.
+
+    Candidates are paths with at least one measured ``request_time_ms``
+    in the filtered scope. ``avg_desc``/``requests_desc``/``max_desc``
+    rank every candidate exactly in SQL (stable tie-breaks, NULL
+    averages last); ``p95_desc`` ranks the top-200 candidates by
+    measured count with exact per-path p95 values and reports the
+    candidate bound explicitly. Reported p50/p95 values are exact order
+    statistics over each path's full measured rows. Non-finite averages
+    (overflowed ``AVG``) show ``None`` with a warning instead of
+    ``Inf``/``NaN``.
+    """
+    filt = query.filt
+    where, params = _where(filt, classifier)
+    measured_scope = f"{where} AND request_time_ms IS NOT NULL"
+    total = int(
+        conn.execute(
+            f"SELECT COUNT(DISTINCT path) FROM requests WHERE {measured_scope}", params
+        ).fetchone()[0]
+    )
+    meta: dict[str, object] = {"candidate_paths": total, "ranking": query.sort}
+    if query.sort == "p95_desc":
+        candidates = conn.execute(
+            "SELECT path, COUNT(*) AS measured FROM requests"
+            f" WHERE {measured_scope} GROUP BY path"
+            " ORDER BY measured DESC, path ASC LIMIT ?",
+            [*params, SLOW_P95_CANDIDATES],
+        ).fetchall()
+        meta["p95_candidate_bound"] = SLOW_P95_CANDIDATES
+        meta["p95_candidates_shown"] = len(candidates)
+        enriched: list[dict[str, object]] = []
+        for path, measured in candidates:
+            stats = _path_timing(conn, filt, classifier, str(path), int(measured))
+            enriched.append(stats)
+        enriched.sort(
+            key=lambda e: (
+                -(e["p95_ms"] if e["p95_ms"] is not None else -1.0),
+                str(e["path"]) if e["p95_ms"] is not None else "~",
+            )
+        )
+        page = enriched[filt.offset : filt.offset + filt.limit]
+        return page, total, meta
+    try:
+        order = _SLOW_ENDPOINT_ORDER[query.sort]
+    except KeyError as exc:
+        raise ValueError(f"unknown slow-endpoint sort: {query.sort!r}") from exc
+    rows = conn.execute(
+        "SELECT path, COUNT(*) AS measured,"
+        " MIN(request_time_ms) AS min_ms, MAX(request_time_ms) AS max_ms,"
+        " AVG(request_time_ms) AS avg_ms FROM requests"
+        f" WHERE {measured_scope} GROUP BY path ORDER BY {order} LIMIT ? OFFSET ?",
+        [*params, filt.limit, filt.offset],
+    ).fetchall()
+    items: list[dict[str, object]] = []
+    warnings: list[str] = []
+    for path, measured, minimum, maximum, average in rows:
+        stats = _path_timing(
+            conn,
+            filt,
+            classifier,
+            str(path),
+            int(measured),
+            precomputed=(minimum, maximum, average),
+        )
+        items.append(stats)
+        if stats["average_ms"] is None:
+            warnings.append(f"path {path}: average unavailable (overflow)")
+    if warnings:
+        meta["warnings"] = warnings
+    return items, total, meta
+
+
+def _path_timing(
+    conn: sqlite3.Connection,
+    filt: AnalyticsFilter,
+    classifier: Classifier | None,
+    path: str,
+    measured: int,
+    precomputed: tuple[object, object, object] | None = None,
+) -> dict[str, object]:
+    """Exact timing summary for one path (full measured rows, no sampling)."""
+    if precomputed is None:
+        where, params = _where(filt, classifier)
+        row = conn.execute(
+            "SELECT MIN(request_time_ms), MAX(request_time_ms), AVG(request_time_ms)"
+            " FROM requests WHERE " + where + " AND path = ? AND request_time_ms IS NOT NULL",
+            [*params, path],
+        ).fetchone()
+        minimum, maximum, average = row
+    else:
+        minimum, maximum, average = precomputed
+    average_ms: float | None = None
+    if average is not None:
+        candidate = float(average)
+        average_ms = candidate if math.isfinite(candidate) else None
+    scoped = filt.model_copy(update={"path_prefix": None, "limit": 1, "offset": 0})
+    where, params = _where(scoped, classifier)
+    path_where = f"{where} AND path = ?"
+    path_params: list[object] = [*params, path]
+    p50 = _scoped_quantile(conn, path_where, path_params, measured, 0.50)
+    p95 = _scoped_quantile(conn, path_where, path_params, measured, 0.95)
+    return {
+        "path": path,
+        "measured": measured,
+        "min_ms": float(minimum) if minimum is not None else None,
+        "max_ms": float(maximum) if maximum is not None else None,
+        "average_ms": average_ms,
+        "p50_ms": p50,
+        "p95_ms": p95,
+    }
+
+
+def _scoped_quantile(
+    conn: sqlite3.Connection, where: str, params: list[object], measured: int, quantum: float
+) -> float | None:
+    """Linear-interpolation quantile over one pre-scoped measured set."""
+    if measured <= 0:
+        return None
+    rank = quantum * (measured - 1)
+    low = math.floor(rank)
+    high = math.ceil(rank)
+    first_row = conn.execute(
+        "SELECT request_time_ms FROM requests WHERE " + where + " AND request_time_ms IS NOT NULL"
+        " ORDER BY request_time_ms ASC LIMIT 1 OFFSET ?",
+        [*params, low],
+    ).fetchone()
+    if first_row is None:
+        return None
+    first = float(first_row[0])
+    if high == low:
+        return first if math.isfinite(first) else None
+    second_row = conn.execute(
+        "SELECT request_time_ms FROM requests WHERE " + where + " AND request_time_ms IS NOT NULL"
+        " ORDER BY request_time_ms ASC LIMIT 1 OFFSET ?",
+        [*params, high],
+    ).fetchone()
+    if second_row is None:
+        return None
+    value = first + (float(second_row[0]) - first) * (rank - low)
+    return value if math.isfinite(value) else None
+
+
+#: Rule categories treated as AI bots for AI-only path analysis. This
+#: is the configured category set from the versioned bot catalog, not a
+#: User-Agent sniff: only rows matching a configured ``ai_crawler``
+#: rule count as AI-observed.
+AI_CATEGORIES = frozenset({"ai_crawler"})
+
+
+def ai_rule_indexes(classifier: Classifier) -> set[int]:
+    """Ordered rule indexes whose configured category is an AI category."""
+    return {
+        index for index, category in enumerate(classifier.categories) if category in AI_CATEGORIES
+    }
+
+
+def _base_scope(filt: AnalyticsFilter) -> tuple[AnalyticsFilter, list[str]]:
+    """Comparison-universe scope: bot/category/traffic selectors removed.
+
+    AI-only analysis compares AI-observed paths against other traffic
+    in the SAME site/source/time/base scope. Bot, category, provider,
+    purpose and traffic selectors would trivially narrow one side of
+    the comparison (an AI-only filter must not prove absence by
+    construction), so they are removed here and every removal is
+    reported by the caller. All other narrowing (status, path, method,
+    enrichment matchers, window) applies equally to both sides.
+    """
+    removed: list[str] = []
+    updates: dict[str, object] = {}
+    for name in ("bot", "category", "provider", "purpose"):
+        if getattr(filt, name) is not None:
+            removed.append(name)
+            updates[name] = None
+    if filt.traffic != "all":
+        removed.append("traffic")
+        updates["traffic"] = "all"
+    return filt.model_copy(update=updates), removed
+
+
+def ai_only_paths(
+    conn: sqlite3.Connection, filt: AnalyticsFilter, classifier: Classifier
+) -> dict[str, object]:
+    """Paths observed ONLY by configured AI-bot rules in the base scope.
+
+    A path is AI-only when the base scope (site/source/time plus
+    content matchers, with bot/category/traffic selectors removed)
+    holds AI-category observations for it and NO other-traffic
+    observations. Exact single-``GROUP BY`` SQL over the whole scope:
+    totals never pass a capped distinct scan. The result always carries
+    the comparison scope, universe coverage and the absence caveat;
+    vacuously AI-only universes (no other traffic at all) are flagged,
+    never hidden. No indexing, training-use or ranking claim is made.
+    """
+    ai_indexes = ai_rule_indexes(classifier)
+    base, removed = _base_scope(filt)
+    where, params = _where(base, None)
+    universe_paths = int(
+        conn.execute(f"SELECT COUNT(DISTINCT path) FROM requests WHERE {where}", params).fetchone()[
+            0
+        ]
+    )
+    universe_requests = int(
+        conn.execute(f"SELECT COUNT(*) FROM requests WHERE {where}", params).fetchone()[0]
+    )
+    if not ai_indexes:
+        return {
+            "items": [],
+            "total_paths": 0,
+            "comparison": {
+                "universe_paths": universe_paths,
+                "universe_requests": universe_requests,
+                "ai_observed_paths": 0,
+                "other_observed_paths": 0,
+                "selectors_removed": removed,
+            },
+            "vacuous": universe_requests == 0,
+            "warnings": ["no configured AI-bot categories: nothing can be AI-only"],
+            "limit": base.limit,
+            "offset": base.offset,
+        }
+    ordered = sorted(ai_indexes)
+    placeholders = ", ".join("?" for _ in ordered)
+    ai_match = f"{_MATCH} IN ({placeholders})"
+    ai_params: list[object] = [classifier.spec, *ordered]
+    ai_paths = int(
+        conn.execute(
+            f"SELECT COUNT(DISTINCT path) FROM requests WHERE {where} AND {ai_match}",
+            [*params, *ai_params],
+        ).fetchone()[0]
+    )
+    other_paths = int(
+        conn.execute(
+            f"SELECT COUNT(DISTINCT path) FROM requests WHERE {where} AND ({_MATCH} IS NULL OR {_MATCH} NOT IN ({placeholders}))",
+            [*params, classifier.spec, classifier.spec, *ordered],
+        ).fetchone()[0]
+    )
+    total = int(
+        conn.execute(
+            "SELECT COUNT(*) FROM (SELECT path FROM requests WHERE "
+            + where
+            + f" GROUP BY path HAVING SUM(CASE WHEN {ai_match} THEN 1 ELSE 0 END) > 0"
+            + f" AND SUM(CASE WHEN {_MATCH} IS NULL OR {_MATCH} NOT IN ({placeholders}) THEN 1 ELSE 0 END) = 0)",
+            [*params, *ai_params, classifier.spec, classifier.spec, *ordered],
+        ).fetchone()[0]
+    )
+    # NOTE: the WHERE clause stays on the whole base scope (no AI
+    # pre-filter): the HAVING below must still see each path's
+    # non-AI rows, otherwise every AI-observed path would wrongly
+    # qualify. AI counts use conditional aggregates over the full
+    # per-path groups instead.
+    rows = conn.execute(
+        "SELECT path,"
+        f" SUM(CASE WHEN {ai_match} THEN 1 ELSE 0 END) AS ai_requests,"
+        f" COALESCE(SUM(CASE WHEN {ai_match} THEN bytes ELSE 0 END), 0),"
+        f" GROUP_CONCAT(DISTINCT CASE WHEN {ai_match} THEN {_MATCH} END)"
+        f" FROM requests WHERE {where}"
+        " GROUP BY path"
+        f" HAVING SUM(CASE WHEN {ai_match} THEN 1 ELSE 0 END) > 0"
+        " AND SUM(CASE WHEN "
+        + _MATCH
+        + " IS NULL OR "
+        + _MATCH
+        + f" NOT IN ({placeholders}) THEN 1 ELSE 0 END) = 0"
+        " ORDER BY ai_requests DESC, path ASC LIMIT ? OFFSET ?",
+        [
+            *ai_params,
+            *ai_params,
+            *ai_params,
+            classifier.spec,
+            *params,
+            *ai_params,
+            classifier.spec,
+            classifier.spec,
+            *ordered,
+            base.limit,
+            base.offset,
+        ],
+    ).fetchall()
+    by_id = {rule_id: rule for rule_id, rule in zip(classifier.rule_ids, classifier.rules)}
+    index_to_id = {index: rule_id for index, rule_id in enumerate(classifier.rule_ids)}
+    items: list[dict[str, object]] = []
+    for path, count, nbytes, raw_indexes in rows:
+        indexes = sorted({int(part) for part in str(raw_indexes).split(",") if part.strip()})
+        rules = [index_to_id[i] for i in indexes if i in index_to_id]
+        providers = sorted({by_id[r].provider for r in rules if by_id[r].provider})
+        items.append(
+            {
+                "path": path,
+                "ai_requests": int(count),
+                "ai_bytes": int(nbytes),
+                "rules": rules,
+                "providers": providers,
+                "drilldown": {"path_prefix": path, "category": "ai_crawler"},
+            }
+        )
+    vacuous = other_paths == 0 and universe_requests > 0
+    warnings: list[str] = []
+    if vacuous:
+        warnings.append(
+            "comparison universe holds no non-AI traffic: every path is trivially AI-only"
+        )
+    if universe_requests == 0:
+        warnings.append("comparison universe is empty: no paths observed at all")
+    return {
+        "items": items,
+        "total_paths": total,
+        "comparison": {
+            "universe_paths": universe_paths,
+            "universe_requests": universe_requests,
+            "ai_observed_paths": ai_paths,
+            "other_observed_paths": other_paths,
+            "selectors_removed": removed,
+        },
+        "vacuous": vacuous,
+        "warnings": warnings,
+        "limit": base.limit,
+        "offset": base.offset,
+    }
+
+
+def seo_status_by_bot_path(
+    conn: sqlite3.Connection,
+    filt: AnalyticsFilter,
+    classifier: Classifier,
+    *,
+    status_class: str,
+) -> tuple[list[dict[str, object]], int]:
+    """Bot 3xx/4xx/5xx grouped by normalized path and responsible rule.
+
+    One exact all-row ``GROUP BY`` over the filtered scope: rows match
+    the ordered versioned classifier (first match wins), so every row
+    attributes to exactly one configured rule/provider. Groups carry
+    exact counts/bytes plus drilldown selectors (``bot`` + ``path`` +
+    status class) for the future UI/API. Sort is stable: requests DESC,
+    path ASC, rule ASC. ``status_class`` is an internal literal.
+    """
+    try:
+        low, high = _STATUS_CLASS_RANGE[status_class]
+    except KeyError as exc:
+        raise ValueError(f"unknown status class: {status_class!r}") from exc
+    where, params = _where(filt, classifier)
+    top = len(classifier.rule_ids) - 1
+    match_scoped = f"{where} AND status BETWEEN ? AND ? AND {_MATCH} BETWEEN 0 AND {top}"
+    match_params: list[object] = [*params, low, high, classifier.spec]
+    total = int(
+        conn.execute(
+            f"SELECT COUNT(DISTINCT path || CHAR(31) || {_MATCH}) FROM requests"
+            f" WHERE {match_scoped}",
+            [classifier.spec, *match_params],
+        ).fetchone()[0]
+    )
+    rule_case, rule_params = rule_id_case_sql(classifier)
+    rows = conn.execute(
+        "SELECT path,"
+        f" {rule_case} AS rule_id, COUNT(*) AS requests, COALESCE(SUM(bytes), 0) AS bytes_total"
+        f" FROM requests WHERE {match_scoped}"
+        " GROUP BY path, rule_id ORDER BY requests DESC, path ASC, rule_id ASC"
+        " LIMIT ? OFFSET ?",
+        [*rule_params, *match_params, filt.limit, filt.offset],
+    ).fetchall()
+    by_id = {rule_id: rule for rule_id, rule in zip(classifier.rule_ids, classifier.rules)}
+    items: list[dict[str, object]] = []
+    for path, rule_id, count, nbytes in rows:
+        rule = by_id.get(str(rule_id))
+        items.append(
+            {
+                "path": path,
+                "status_class": status_class,
+                "rule_id": rule_id,
+                "category": rule.category if rule else None,
+                "provider": rule.provider if rule else None,
+                "purpose": rule.purpose if rule else None,
+                "requests": int(count),
+                "bytes_total": int(nbytes),
+                "drilldown": {"bot": rule_id, "path_prefix": path, "status_class": status_class},
+            }
+        )
+    return items, total
+
+
+def own_hosts_for_scope(conn: sqlite3.Connection, filt: AnalyticsFilter) -> set[str]:
+    """Configured own hosts (site hostname + stored source aliases).
+
+    Internal/external referrer classification compares the stored
+    lowercase referrer hostname against this set. Sources bound before
+    the alias column existed contribute the site hostname; sources with
+    stored aliases contribute hostname plus aliases. Matching rules
+    (documented): hosts compare lowercased; ports are never stored
+    (``urlsplit().hostname`` drops them); userinfo is never stored;
+    IDN compares in its stored encoded form on both sides.
+    """
+    hosts: set[str] = set()
+    site_row = conn.execute("SELECT hostname FROM sites WHERE id = ?", (filt.site_id,)).fetchone()
+    if site_row is not None and site_row[0]:
+        hosts.add(str(site_row[0]).strip().lower())
+    if filt.source_id is not None:
+        rows = conn.execute(
+            "SELECT allowed_hosts FROM log_sources WHERE id = ?", (filt.source_id,)
+        ).fetchall()
+    else:
+        rows = conn.execute(
+            "SELECT allowed_hosts FROM log_sources WHERE site_id = ?", (filt.site_id,)
+        ).fetchall()
+    import json as _json
+
+    for (raw,) in rows:
+        if not raw:
+            continue
+        try:
+            stored = _json.loads(raw)
+        except (ValueError, TypeError):
+            continue
+        if isinstance(stored, list):
+            hosts.update(str(item).strip().lower() for item in stored if str(item).strip())
+    return hosts
+
+
+def referrer_404_targets(
+    conn: sqlite3.Connection,
+    filt: AnalyticsFilter,
+    classifier: Classifier | None,
+    own_hosts: set[str] | None = None,
+) -> tuple[list[dict[str, object]], int]:
+    """External referrer-path -> target-404 report over sanitized fields.
+
+    Keys use ONLY the minimized stored referrer (lowercase host without
+    port/userinfo, ``http``/``https`` scheme or ``None``, secret-masked
+    path without query values) plus the normalized target path. Rows
+    whose referrer host is a configured own host/alias are labelled
+    internal; everything else is external. Dangerous schemes can never
+    appear (only ``http``/``https``/``None`` are stored), and no query
+    values, userinfo or secrets are emitted. Exact all-row ``GROUP BY``
+    with stable (requests DESC, host ASC, target ASC) order; ordinary
+    host-level reports are untouched.
+    """
+    hosts = own_hosts if own_hosts is not None else own_hosts_for_scope(conn, filt)
+    lowered = {h.lower() for h in hosts}
+    where, params = _where(filt, classifier)
+    scoped = f"{where} AND status = 404 AND referer_host IS NOT NULL"
+    total = int(
+        conn.execute(
+            "SELECT COUNT(DISTINCT referer_host || CHAR(31) || COALESCE(referer_scheme, '')"
+            " || CHAR(31) || COALESCE(referer_path, '') || CHAR(31) || path)"
+            f" FROM requests WHERE {scoped}",
+            params,
+        ).fetchone()[0]
+    )
+    rows = conn.execute(
+        "SELECT referer_host, referer_scheme, referer_path, path, COUNT(*) AS requests"
+        f" FROM requests WHERE {scoped}"
+        " GROUP BY referer_host, referer_scheme, referer_path, path"
+        " ORDER BY requests DESC, referer_host ASC, path ASC LIMIT ? OFFSET ?",
+        [*params, filt.limit, filt.offset],
+    ).fetchall()
+    return (
+        [
+            {
+                "referer_host": host,
+                "referer_scheme": scheme,
+                "referer_path": ref_path,
+                "target_path": target,
+                "requests": int(count),
+                "internal": str(host).lower() in lowered,
+            }
+            for host, scheme, ref_path, target, count in rows
         ],
         total,
     )

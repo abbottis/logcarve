@@ -273,6 +273,36 @@ def run_reprocess(
     finally:
         probe.close()
 
+    # Same-lock binding recheck plus alias persistence: the probe above
+    # runs without the writer lock, so a concurrent foreign registration
+    # could land between probe and flush. Re-asserting inside a writer
+    # transaction closes that race (mismatch rolls back, nothing is
+    # written), and already-bound sources gain the new validated alias
+    # metadata (core/site/auth/ledger fields untouched) so later
+    # internal/external referrer reports classify correctly. Row writes
+    # stay additionally guarded per row by stored identity.
+    try:
+        with writer_transaction(db_path, lock_timeout_s=lock_timeout_s) as guard_conn:
+            # Read-only recheck under the write lock: no source row is
+            # created here (the probe already proved our rows exist).
+            repositories.check_source_binding_locked(
+                guard_conn, source_id=source.source_id, site_id=site_id
+            )
+            if effective_filter is not None:
+                repositories.update_source_hosts(
+                    guard_conn,
+                    source_id=source.source_id,
+                    site_id=site_id,
+                    allowed_hosts=sorted(effective_filter.hosts),
+                )
+    except repositories.SourceBindingError:
+        return ReprocessResult(
+            source_id=source.source_id,
+            file_fingerprint=fingerprint,
+            status=REPROCESS_REJECTED_STATUS,
+            error_summary=repositories.SOURCE_SITE_MISMATCH_CODE,
+        )
+
     policy = enrichment_policy(source.format_id, custom_format)
     page_limit = max(1, min(batch_size, repositories.REPROCESS_PAGE_MAX))
     # Keyset merge-join state: stored rows are paged in byte_offset
