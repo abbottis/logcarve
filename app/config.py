@@ -7,7 +7,9 @@ insecure values. Product AI stays disabled until a later slice
 explicitly enables it.
 """
 
-from pydantic import Field, SecretStr, model_validator
+from zoneinfo import ZoneInfo, ZoneInfoNotFoundError, available_timezones
+
+from pydantic import Field, SecretStr, field_validator, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -49,6 +51,29 @@ class Settings(BaseSettings):
     open_model_base_url: str = ""
     open_model_id: str = "meta-models/muse-spark-open-1026"
     open_model_api_key: SecretStr = SecretStr("")
+
+    @field_validator("default_timezone")
+    @classmethod
+    def _validate_default_timezone(cls, value: str) -> str:
+        """The display default must be an installed IANA key.
+
+        This validates the configured server default only; per-request
+        `tz` values are validated separately against the cached catalogue.
+        """
+        name = (value or "").strip()
+        if not name:
+            raise ValueError("default_timezone must be a valid IANA timezone name")
+        try:
+            supported = name in available_timezones()
+        except OSError:
+            supported = True
+        try:
+            ZoneInfo(name)
+        except (ZoneInfoNotFoundError, ValueError) as exc:
+            raise ValueError(f"unknown timezone: {name}") from exc
+        if not supported:
+            raise ValueError(f"unknown timezone: {name}")
+        return name
 
     @model_validator(mode="after")
     def _budget_ordering(self) -> "Settings":

@@ -34,11 +34,10 @@ from app.api.deps import read_store, require_admin_session
 from app.config import load_settings
 from app.web.evidence import evidence_url as _evidence_url
 from app.web.locales import t
+from app.web.timezones import display_options, resolve_request_timezone
 
 router = APIRouter()
 templates = Jinja2Templates(directory=str(Path(__file__).resolve().parent / "templates"))
-
-DISPLAY_TIMEZONES = ("UTC", "Europe/Berlin")
 RANGE_PRESETS = {
     "24h": timedelta(hours=24),
     "7d": timedelta(days=7),
@@ -80,13 +79,29 @@ def _session_or_none(request: Request):
     return None if isinstance(session, JSONResponse) else session
 
 
+def _configured_default() -> str | None:
+    """Validated configured default timezone, or None when unusable.
+
+    Settings stay the authority; any load/validation failure falls back
+    to UTC downstream instead of breaking the filter parse.
+    """
+    try:
+        candidate = load_settings().default_timezone
+    except (ValidationError, OSError, ValueError):
+        return None
+    return candidate if isinstance(candidate, str) and candidate else None
+
+
 def _parse_view_params(request: Request, now: datetime, default_limit: int = 20):
     """Shared filter-bar parameters; returns (params, error_key)."""
     q = request.query_params
     site = (q.get("site") or "").strip() or None
     preset = (q.get("range") or DEFAULT_RANGE).strip()
-    tz_name = (q.get("tz") or "UTC").strip()
-    if tz_name not in DISPLAY_TIMEZONES:
+    # Explicit valid `tz` wins; a blank value falls back to the validated
+    # configured default (never a guessed host location). Unknown zones
+    # fail safely without touching the filesystem.
+    tz_name = resolve_request_timezone(q.get("tz"), _configured_default())
+    if tz_name is None:
         return None, "error.bad_params"
     try:
         tz = ZoneInfo(tz_name)
@@ -632,6 +647,7 @@ def _base_context(request: Request, params, site: str, sites, path: str, rules=N
         "site": site,
         "range": params["range"],
         "tz_name": params["tz_name"],
+        "display_timezones": display_options(_configured_default()),
         "display_from": params["display_from"],
         "display_to": params["display_to"],
         "window_from": filt.window.time_from.isoformat(),

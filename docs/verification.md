@@ -1101,3 +1101,58 @@ Acceptance impact: UI-05, ANA-04/05 and API-05 local gates are satisfied
 at `e81d2d0` per the independent runner; deferred scope and the
 incomplete three-case AI demonstration are unchanged. No paid replay or
 new product calls were made for this documentation closeout.
+
+## 2026-11-01 — Stage A display-timezone catalogue (acceptance-readiness plan)
+
+Owner-authorized bounded work on clean `5ff5f22`, branch
+`feature/acceptance-polish-2026-11-01`. Sole writer, exact model
+`muse-spark-1.3-contributor`/medium, Contributor ON. Public source +
+synthetic fixtures only; sandbox, approval judge, CSP and product
+Standard fail-closed egress unchanged. No provider/product calls, pushes,
+`main` merge, production deployment, extra dependencies or unrelated
+features. No parent/private runtime, secrets, traces, tokens, real usage
+or model-key inspection.
+
+Change: the hardcoded UTC/Berlin pair became the cached server-installed
+IANA catalogue (`app/web/timezones.py`: `available_timezones` once per
+process; every supported key retained and validated server-side plus a
+`ZoneInfo` construction check). Stable order: validated configured
+default first, UTC next, then regions alphabetically with zone/city names
+alphabetical inside each region; readable labels (underscores to spaces),
+exact IANA values, no duplicates, native `<select>` kept. Precedence:
+explicit valid `tz` wins; blank uses validated `DEFAULT_TIMEZONE`
+(demo: `Europe/Berlin`); only an exact installed key from operator `TZ`
+counts as a local server name — abbreviations/offsets are never guessed,
+anything unusable falls back to UTC. Unknown/filesystem-style zones fail
+safe (`error.bad_params`). UTC storage, UTC time bounds, existing
+query roundtrip/nav/settings/evidence URLs and the public API UTC contract
+are untouched. `Settings.default_timezone` must be an installed IANA key.
+Fractional-offset zones keep truthful heatmap-unavailable behavior; no
+invented counts, no analytics scope change. No asset-source change, so no
+npm rebuild (avoids unrelated generated noise).
+
+Tests: new `tests/integration/test_web_timezones.py` (12 tests:
+completeness vs installed DB, order/labels, default precedence, explicit
+override, invalid/traversal rejection, cross-region display with identical
+UTC instants, timeline shift, fractional heatmap truthfulness, summer/
+winter DST acceptance, nav preservation, settings validation, catalogue
+caching) and new `tests/e2e/test_timezone_select.py` (native default/
+explicit Pacific zones in both themes at 390px with Apply/reload/nav,
+Asian-zone explorer + nav preservation).
+
+| Check | Result | Evidence |
+| --- | --- | --- |
+| Focused `pytest tests/integration/test_web_timezones.py` | PASS | 12 passed |
+| Full `pytest tests/unit tests/integration` (clean env) | PASS | 438 passed, 2 skipped (pre-existing loopback-bind skips) |
+| Same suite with `DEFAULT_TIMEZONE=Nope/Zone AI_ENABLED=true LLM_WARN_AT_USD=999` | PASS | 438 passed, 2 skipped; hermetic isolation holds |
+| `ruff check .` | PASS | All checks passed |
+| `ruff format --check .` | PASS | 156 files already formatted |
+| `uv lock --check` | PASS | 40 packages, lockfile current, no new dependency |
+| `pytest tests/e2e --collect-only` | PASS | 24 collected (22 + 2 new) |
+| `pytest tests/e2e/test_timezone_select.py` execution | BLOCKED | Protected chromium launch fails inside this macOS shell sandbox (`TargetClosedError` during launch); protections kept, coordinator runs `uv run --locked pytest tests/e2e -q` outside |
+| npm build / Docker / x86-64 | NOT RUN | No asset sources changed (template-only); no socket access; ARM64 only |
+
+Acceptance impact: UI-01 (full catalogue, explicit display timezone,
+stable order), UI-02/UI-05 (Apply/nav/reload preservation, server-side
+proof; browser proof coordinator-owned). Independent reinspection required
+before stage B. No paid/live gates claimed or passed.
