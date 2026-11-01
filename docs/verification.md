@@ -35,6 +35,52 @@ and `slice-b-scope-check.md`. Directly observed in this session unless noted.
 - Privacy/egress/cost gates unchanged: no new model calls, no provider
   traffic, shared analytics layer only, synthetic fixtures only.
 
+## 2026-11-01 — Slice B final correction B (reinspection pending)
+
+Prior independent protected-Chromium run, honestly recorded: `tests/e2e/test_slice_b.py`
+6 PASS + 1 FAIL (`test_timeline_charts_match_tables_and_json`: Chart.js
+request/error/bytes-vs-JSON asserts passed, then `int(r[1])` read `""` from
+the timeline table `innerText` immediately after opening the native
+`details`/collapse; the later failure screenshot showed visible numeric rows).
+All 9 `tests/integration/test_web_slice_b2.py` tests PASS in that run.
+
+Diagnosis (readiness, not rendering): daisyUI animates the collapse open, so
+`innerText` stays `""` until the rows paint; the immediate post-click
+`evaluate` raced that transition. The data was always in the DOM and the
+product rendering was correct, so no product change was made for this.
+
+Exact changes on `d891bb2` (no scope expansion, no unrelated fixes):
+- `tests/e2e/test_slice_b.py`: after each `summary.click()`, a deterministic
+  `wait_for_function` waits for the opened table's first data cell to be
+  populated (no sleep, no skipped blank rows, no weakened assertions); every
+  timeline cell (label/requests/errors/bytes) is now verified against the
+  embedded JSON and live Chart.js datasets; hand-counted fixture totals
+  14 requests / 3 errors / 6093 known bytes replace the weak `bytes>0`
+  assertion; the already-opened status table is verified against its JSON,
+  live chart and a 14-request total.
+- `app/web/routes.py`: heatmap quantization is now ceiling scaling with level
+  0 reserved for zero (`0 if value == 0 else min(4, -(-value * 4 // peak))`),
+  so positive cells below 25% of the peak no longer wear the no-request shade.
+  Numeric counts, CSP-safe classes and local styles are unchanged.
+- `tests/integration/test_web_slice_b2.py`: new
+  `test_heatmap_low_positive_never_level_zero` (larger peak required, a
+  low-positive cell below 25% of peak required, `level == "0"` iff count is
+  zero). It FAILS pre-fix (`1 requests must never use the no-request shade`)
+  and passes post-fix. Both-theme computed-color proof stays in the e2e test.
+
+Directly observed in this session (synthetic data only):
+- `pytest tests/integration/test_web_slice_b2.py`: 10/10 PASS.
+- `pytest tests/unit tests/integration`: 394 passed + 2 sandbox loopback skips.
+- `ruff check .` clean (one RUF015 in the new e2e code fixed as suggested);
+  `ruff format --check .` clean; `npm run build` + `check:external` clean.
+- `uv lock --check` BLOCKED (sandbox denies uv cache writes;
+  `pyproject.toml`/`uv.lock` untouched, no new dependency).
+- E2E execution BLOCKED in this sandbox: project-local
+  `chromium_headless_shell-1248` exists under `artifacts/`, but launch fails
+  here (`Target page, context or browser has been closed`); the file collects
+  cleanly (7 tests). Coordinator reruns
+  `uv run --locked pytest tests/e2e -q` outside the sandbox.
+
 ## 2026-10-28 — scaffold
 
 Product status: **NOT IMPLEMENTED**. pytest, API integration, Playwright, Docker, benchmarks and real Meta calls are **NOT RUN** because no product/runtime implementation exists. No account credit, effective service tier or provider credential has been verified.

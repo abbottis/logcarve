@@ -87,6 +87,23 @@ def test_heatmap_shading_levels_and_legend(web):
         assert f'class="heat-swatch heat-{level}"' in page, "legend needs every swatch"
 
 
+def test_heatmap_low_positive_never_level_zero(web):
+    client, _ = web
+    _login(client)
+    page = client.get(f"/?site=default&{WINDOW_QS}&tz=UTC").text
+    cells = re.findall(r'data-heat-level="(\d)">(\d+)</td>', page)
+    assert len(cells) == 7 * 24, "every weekday/hour cell carries a level and a count"
+    peak = max(int(count) for _, count in cells)
+    assert peak > 4, "this regression needs a larger peak than the level count"
+    small = [(level, count) for level, count in cells if 0 < int(count) * 4 < peak]
+    assert small, "fixture needs a low-positive cell below 25% of the peak"
+    for level, count in cells:
+        if int(count) == 0:
+            assert level == "0", "empty cells keep the no-request shade"
+        else:
+            assert level != "0", f"{count} requests must never use the no-request shade"
+
+
 def test_explorer_columns_timezone_and_sanitization(web):
     client, _ = web
     _login(client)

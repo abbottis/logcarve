@@ -248,9 +248,25 @@ def test_timeline_charts_match_tables_and_json(page, slice_base, observed):
     page.goto(f"{slice_base}/?site=default&{W1}&tz=UTC")
     page.get_by_role("heading", name="Traffic timeline").wait_for(timeout=10000)
     for name in ("Requests per time bucket", "Requests per status code"):
-        summary = page.locator("details", has_text=name).locator("summary")
+        detail = page.locator("details", has_text=name)
+        summary = detail.locator("summary")
         if not page.evaluate("(el) => el.closest('details').open", summary.element_handle()):
             summary.click()
+        # Readiness, not rendering: daisyUI animates the collapse open, so
+        # innerText reads "" until the rows actually paint. Wait for the
+        # opened table's first data cell to be populated: no sleep, no
+        # skipped blank rows, no weakened assertions.
+        page.wait_for_function(
+            """(caption) => {
+              const t = Array.from(document.querySelectorAll("table")).filter(
+                (t) => t.caption && t.caption.textContent.trim() === caption)[0];
+              if (!t) return false;
+              const first = t.querySelector("tbody tr td");
+              return first !== null && first.innerText.trim() !== "";
+            }""",
+            arg=name,
+            timeout=10000,
+        )
     values = page.evaluate(
         """() => {
           const data = (id) => JSON.parse(document.getElementById(id).textContent);
@@ -266,22 +282,39 @@ def test_timeline_charts_match_tables_and_json(page, slice_base, observed):
             timeline: data("traffic-timeline-data"),
             liveTimeline: live("traffic-timeline"),
             timelineRows: rows("Requests per time bucket"),
+            status: data("status-distribution-data"),
+            liveStatus: live("status-distribution"),
+            statusRows: rows("Requests per status code"),
           };
         }"""
     )
     timeline = values["timeline"]
     assert len(timeline["buckets"]) > 0
-    assert sum(b["requests"] for b in timeline["buckets"]) == 14
-    assert sum(b["errors"] for b in timeline["buckets"]) == 3
-    assert sum(b["bytes_total"] for b in timeline["buckets"]) > 0
+    expected_requests = [b["requests"] for b in timeline["buckets"]]
+    expected_errors = [b["errors"] for b in timeline["buckets"]]
+    expected_bytes = [b["bytes_total"] for b in timeline["buckets"]]
+    # Hand-counted fixture totals (14 rows above); the old weak bytes>0
+    # assertion could not catch a dropped bucket.
+    assert sum(expected_requests) == 14
+    assert sum(expected_errors) == 3
+    assert sum(expected_bytes) == 6093
     live = {d["label"]: d["values"] for d in values["liveTimeline"]}
     labels = list(live)
-    assert live[labels[0]] == [b["requests"] for b in timeline["buckets"]]
-    assert live[labels[1]] == [b["errors"] for b in timeline["buckets"]]
-    assert live[labels[2]] == [b["bytes_total"] for b in timeline["buckets"]]
-    table_requests = [int(r[1]) for r in values["timelineRows"]]
-    assert table_requests == [b["requests"] for b in timeline["buckets"]]
-    assert [int(r[2]) for r in values["timelineRows"]] == [b["errors"] for b in timeline["buckets"]]
+    assert live[labels[0]] == expected_requests
+    assert live[labels[1]] == expected_errors
+    assert live[labels[2]] == expected_bytes
+    # Every timeline table cell (label/requests/errors/bytes) matches JSON.
+    assert [r[0] for r in values["timelineRows"]] == [b["label"] for b in timeline["buckets"]]
+    assert [int(r[1]) for r in values["timelineRows"]] == expected_requests
+    assert [int(r[2]) for r in values["timelineRows"]] == expected_errors
+    assert [int(r[3]) for r in values["timelineRows"]] == expected_bytes
+    # The status table opened above matches its JSON and live chart too.
+    status = values["status"]
+    assert [r[0] for r in values["statusRows"]] == [str(r["status"]) for r in status["rows"]]
+    assert [int(r[1]) for r in values["statusRows"]] == [r["requests"] for r in status["rows"]]
+    live_status = {d["label"]: d["values"] for d in values["liveStatus"]}
+    assert live_status[next(iter(live_status))] == [r["requests"] for r in status["rows"]]
+    assert sum(r["requests"] for r in status["rows"]) == 14
     _assert_clean(observed, slice_base)
 
 

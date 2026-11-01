@@ -485,8 +485,10 @@ def _overview_context(request, conn, rules, params) -> tuple[dict | None, str | 
         for b in series["buckets"]
     ]
     # Heatmap intensity levels 0-4, scaled to the busiest cell so the
-    # quantitative shading stays comparable within one view. Levels
-    # render through external CSS classes (never inline styles) to
+    # quantitative shading stays comparable within one view. Level 0 is
+    # reserved for no requests; any positive count starts at level 1
+    # (ceiling scaling), so quiet cells never wear the no-request shade.
+    # Levels render through external CSS classes (never inline styles) to
     # keep the style-src 'self' CSP without unsafe-inline.
     heatmap_max = 0
     heatmap_levels: list[list[int]] | None = None
@@ -494,7 +496,8 @@ def _overview_context(request, conn, rules, params) -> tuple[dict | None, str | 
         heatmap_max = max((max(row) for row in heatmap["matrix"]), default=0)
         if heatmap_max > 0:
             heatmap_levels = [
-                [min(4, (value * 4) // heatmap_max) for value in row] for row in heatmap["matrix"]
+                [0 if value == 0 else min(4, -(-value * 4 // heatmap_max)) for value in row]
+                for row in heatmap["matrix"]
             ]
         else:
             heatmap_levels = [[0] * 24 for _ in range(7)]
