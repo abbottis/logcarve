@@ -166,6 +166,16 @@ def _kpi_requests(page) -> str:
     return page.locator(".stats .stat-value").first.inner_text().strip()
 
 
+def _status_code(label: str) -> str:
+    """Numeric status code from a chart/table label.
+
+    Labels read human-friendly (`200 · OK`); the numeric identity is
+    the text before the middle dot, while the phrase after it must be
+    asserted separately, never dropped.
+    """
+    return label.split("·")[0].strip()
+
+
 def test_traffic_selection_survives_sidebar_navigation(page, slice_base, observed):
     _login(page, slice_base)
     page.goto(f"{slice_base}/?site=default&{W1}&tz=UTC")
@@ -183,7 +193,10 @@ def test_traffic_selection_survives_sidebar_navigation(page, slice_base, observe
     )
     assert "traffic=claimed_bot" in page.url
     # Sidebar navigation keeps the selection: no silent widening to 14.
-    page.get_by_role("navigation").get_by_role("link", name="Crawlers").click()
+    # Two navs render now (Main navigation + Quick views presets).
+    page.get_by_role("navigation", name="Main navigation").get_by_role(
+        "link", name="Crawlers"
+    ).click()
     page.get_by_role("heading", name="Named bots").wait_for(timeout=10000)
     assert "traffic=claimed_bot" in page.url
     # The named-bot table itself narrows (the filter dropdown still
@@ -202,7 +215,9 @@ def test_settings_roundtrip_keeps_matchers(page, slice_base, observed):
     _login(page, slice_base)
     page.goto(f"{slice_base}/?site=default&{W1}&tz=UTC&traffic=claimed_bot&status=404")
     page.get_by_role("heading", name="Traffic timeline").wait_for(timeout=10000)
-    page.get_by_role("navigation").get_by_role("link", name="Settings").click()
+    page.get_by_role("navigation", name="Main navigation").get_by_role(
+        "link", name="Settings"
+    ).click()
     page.wait_for_function("() => location.pathname === '/settings'", timeout=10000)
     assert "traffic=claimed_bot" in page.url
     page.go_back()
@@ -278,12 +293,15 @@ def test_timeline_charts_match_tables_and_json(page, slice_base, observed):
             (t) => t.caption && t.caption.textContent.trim() === caption)[0];
           const rows = (caption) => Array.from(table(caption).querySelectorAll("tbody tr")).map(
             (tr) => Array.from(tr.querySelectorAll("td")).map((td) => td.innerText.trim()));
+          const statusInst = window.Chart.getChart(
+            document.getElementById("status-distribution"));
           return {
             timeline: data("traffic-timeline-data"),
             liveTimeline: live("traffic-timeline"),
             timelineRows: rows("Requests per time bucket"),
             status: data("status-distribution-data"),
             liveStatus: live("status-distribution"),
+            statusAxisLabels: Array.from(statusInst.data.labels),
             statusRows: rows("Requests per status code"),
           };
         }"""
@@ -309,9 +327,23 @@ def test_timeline_charts_match_tables_and_json(page, slice_base, observed):
     assert [int(r[2]) for r in values["timelineRows"]] == expected_errors
     assert [int(r[3]) for r in values["timelineRows"]] == expected_bytes
     # The status table opened above matches its JSON and live chart too.
+    # Status identity is numeric AND human: table cells read `200 · OK`,
+    # so compare parsed codes while keeping the phrase assertions.
     status = values["status"]
-    assert [r[0] for r in values["statusRows"]] == [str(r["status"]) for r in status["rows"]]
+    status_labels = [r[0] for r in values["statusRows"]]
+    assert [_status_code(label) for label in status_labels] == [
+        str(r["status"]) for r in status["rows"]
+    ]
+    assert all("·" in label for label in status_labels), status_labels
+    assert any("· OK" in label for label in status_labels), status_labels
+    assert any("Not Found" in label for label in status_labels), status_labels
+    assert any("Internal Server Error" in label for label in status_labels)
     assert [int(r[1]) for r in values["statusRows"]] == [r["requests"] for r in status["rows"]]
+    # Live chart axis labels agree on the same numeric codes (parsed so
+    # the `200 · OK` phrasing never breaks the identity comparison).
+    assert [_status_code(str(v)) for v in values["statusAxisLabels"]] == [
+        str(r["status"]) for r in status["rows"]
+    ]
     live_status = {d["label"]: d["values"] for d in values["liveStatus"]}
     assert live_status[next(iter(live_status))] == [r["requests"] for r in status["rows"]]
     assert sum(r["requests"] for r in status["rows"]) == 14
@@ -394,49 +426,85 @@ def test_paths_sort_bytes_and_heatmap_colors_both_themes(page, slice_base, obser
 
 
 def test_explorer_columns_sanitized_and_timezone_aware(page, slice_base, observed):
+    import re
+
     _login(page, slice_base)
     page.set_viewport_size({"width": 390, "height": 844})
     page.goto(f"{slice_base}/requests?site=default&{W1}&tz=Europe%2FBerlin")
     page.get_by_role("heading", name="Sanitized request rows").wait_for(timeout=10000)
+    # Eight readable columns in front order: Client, Access, Time
+    # (zone-aware), Method, Path, Status, Bytes, Details. Referrer,
+    # rule and full User-Agent live in the expandable row details.
     headers = page.evaluate(
-        """() => Array.from(document.querySelectorAll("table caption"))
-          .filter((c) => c.textContent.trim() === "Sanitized request rows")[0]
-          .parentElement.querySelectorAll("thead th").length"""
+        """() => Array.from(document.querySelectorAll("table")).filter(
+          (t) => t.caption && t.caption.textContent.trim() === "Sanitized request rows")[0]
+          .querySelectorAll("thead th").length"""
     )
-    assert headers >= 9, "bytes/referrer/rule columns must render"
+    assert headers == 8, "the explorer renders exactly eight columns"
+    header_texts = page.evaluate(
+        """() => Array.from(Array.from(document.querySelectorAll("table")).filter(
+          (t) => t.caption && t.caption.textContent.trim() === "Sanitized request rows")[0]
+          .querySelectorAll("thead th")).map((th) => th.innerText.trim())"""
+    )
+    assert header_texts[0].startswith("Client"), header_texts
+    assert header_texts[1] == "Access", header_texts
+    assert header_texts[2].startswith("Time (Europe/Berlin)"), header_texts
+    assert header_texts[3].startswith("Method"), header_texts
+    assert header_texts[4].startswith("Path"), header_texts
+    assert header_texts[5].startswith("Status"), header_texts
+    assert header_texts[6].startswith("Bytes"), header_texts
+    assert header_texts[7] == "Details", header_texts
+    time_idx = next(index for index, text in enumerate(header_texts) if text.startswith("Time ("))
     content = page.content()
     assert "<script>alert(1)" not in content, "hostile UA must stay escaped"
     assert "&lt;script&gt;" in content
-    agents = page.evaluate(
-        """() => Array.from(document.querySelectorAll("table")).filter(
-          (t) => t.caption && t.caption.textContent.trim() === "Sanitized request rows")[0]
-          .querySelectorAll("tbody tr")"""
-    )
-    assert len(agents) > 0
-    # Display times follow Europe/Berlin while the UTC instant stays in title.
-    cells = page.evaluate(
-        """() => Array.from(document.querySelectorAll("table")).filter(
-          (t) => t.caption && t.caption.textContent.trim() === "Sanitized request rows")[0]
-          .querySelector("tbody tr td").innerText"""
-    )
-    assert "CET" in cells
-    assert page.evaluate(
-        """() => Array.from(document.querySelectorAll("table")).filter(
-          (t) => t.caption && t.caption.textContent.trim() === "Sanitized request rows")[0]
-          .querySelector("tbody tr td").title"""
-    ).endswith("+00:00")
-    # Oldest/newest sort actually reorders rows.
-    newest_first = page.evaluate(
-        """() => Array.from(document.querySelectorAll("table")).filter(
-          (t) => t.caption && t.caption.textContent.trim() === "Sanitized request rows")[0]
-          .querySelector("tbody tr td").innerText"""
-    )
-    page.get_by_role("link", name="Oldest first").click()
+    main_rows = page.locator("table tbody tr:not(.req-detail)")
+    assert main_rows.count() > 0
+
+    def _time_cells():
+        return page.evaluate(
+            """(idx) => Array.from(Array.from(document.querySelectorAll("table")).filter(
+              (t) => t.caption && t.caption.textContent.trim() === "Sanitized request rows")[0]
+              .querySelectorAll("tbody tr:not(.req-detail)")).map(
+              (tr) => ({text: tr.querySelectorAll("td")[idx].innerText,
+                       title: tr.querySelectorAll("td")[idx].title}))""",
+            time_idx,
+        )
+
+    # Display times follow Europe/Berlin while the UTC instant stays typed
+    # in the cell title (Time-header semantics, not the first Client cell).
+    time_cells = _time_cells()
+    assert "CET" in time_cells[0]["text"], time_cells[0]
+    assert time_cells[0]["title"].endswith("+00:00"), time_cells[0]
+    # The Time sort header toggles newest/oldest and actually reorders.
+    newest_first_title = time_cells[0]["title"]
+    page.get_by_role("link", name=re.compile(r"Time \(Europe/Berlin\)")).click()
+    page.wait_for_function("() => window.location.href.includes('sort=oldest')", timeout=10000)
     page.get_by_role("heading", name="Sanitized request rows").wait_for(timeout=10000)
-    oldest_first = page.evaluate(
-        """() => Array.from(document.querySelectorAll("table")).filter(
-          (t) => t.caption && t.caption.textContent.trim() === "Sanitized request rows")[0]
-          .querySelector("tbody tr td").innerText"""
-    )
-    assert newest_first != oldest_first
+    assert "sorted ascending" in page.content()
+    oldest_cells = _time_cells()
+    assert oldest_cells[0]["text"] != time_cells[0]["text"]
+    assert oldest_cells[0]["title"] <= newest_first_title
+    page.get_by_role("link", name=re.compile(r"Time \(Europe/Berlin\)")).click()
+    page.wait_for_function("() => window.location.href.includes('sort=newest')", timeout=10000)
+    assert "sorted descending" in page.content()
+    assert _time_cells()[0]["title"] == newest_first_title
+    # Expanded row details carry referrer, rule and full User-Agent plus
+    # the honest timing-unavailable note; the hostile UA stays escaped.
+    row = page.locator("tbody tr", has_text="/docs/a").first
+    toggle = row.locator("button[data-detail-toggle]")
+    panel_id = toggle.get_attribute("aria-controls")
+    assert panel_id and toggle.get_attribute("aria-expanded") == "false"
+    toggle.click()
+    page.wait_for_selector(f"tr#{panel_id}:not([hidden])", timeout=10000)
+    panel = page.locator(f"tr#{panel_id}")
+    assert "User-Agent" in panel.inner_text()
+    assert "Referring domain" in panel.inner_text()
+    assert "Rule" in panel.inner_text()
+    assert "Response-time data unavailable" in panel.inner_text()
+    assert "<script>alert(1)" not in (panel.evaluate("el => el.innerHTML") or "")
+    toggle.focus()
+    page.keyboard.press("Enter")
+    page.wait_for_selector(f"tr#{panel_id}[hidden]", timeout=10000)
+    assert toggle.get_attribute("aria-expanded") == "false"
     _assert_clean(observed, slice_base)

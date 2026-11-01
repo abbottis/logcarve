@@ -164,18 +164,36 @@ def test_native_select_default_and_explicit_zone(page, tz_base, observed):
     _assert_clean(observed, tz_base)
 
 
+def _time_column_cells(page):
+    """Time-column display text + UTC titles for the explorer table.
+
+    The first column is the Client pseudonym now, so times must be read
+    through the Time-header semantic column, never the first cell.
+    """
+    return page.evaluate(
+        """() => {
+          const table = Array.from(document.querySelectorAll("table")).filter(
+            (t) => t.caption && t.caption.textContent.trim() === "Sanitized request rows")[0];
+          const heads = Array.from(table.querySelectorAll("thead th")).map(
+            (th) => th.innerText.trim());
+          const idx = heads.findIndex((h) => h.startsWith("Time ("));
+          return Array.from(table.querySelectorAll("tbody tr:not(.req-detail)")).map(
+            (tr) => ({text: tr.querySelectorAll("td")[idx].innerText,
+                     title: tr.querySelectorAll("td")[idx].title}));
+        }"""
+    )
+
+
 def test_asian_zone_explorer_and_nav_preservation(page, tz_base, observed):
     _login(page, tz_base)
     page.set_viewport_size({"width": 390, "height": 844})
     page.goto(f"{tz_base}/requests?site=default&{W1}&tz=Asia%2FTokyo")
     page.get_by_role("heading", name="Sanitized request rows").wait_for(timeout=10000)
     assert "Time (Asia/Tokyo)" in page.content()
-    first_cell = page.evaluate(
-        """() => Array.from(document.querySelectorAll("table")).filter(
-          (t) => t.caption && t.caption.textContent.trim() === "Sanitized request rows")[0]
-          .querySelector("tbody tr td").innerText"""
-    )
-    assert "JST" in first_cell
+    time_cells = _time_column_cells(page)
+    assert len(time_cells) > 0
+    assert "JST" in time_cells[0]["text"], time_cells[0]
+    assert time_cells[0]["title"].endswith("+00:00"), time_cells[0]
     # Sidebar navigation keeps the explicit zone on data pages: open the
     # real narrow overlay menu, then follow the actual scoped visible link.
     menu = page.get_by_role("button", name="Menu")
@@ -188,3 +206,65 @@ def test_asian_zone_explorer_and_nav_preservation(page, tz_base, observed):
     assert _params(page.url).get("tz") == ["Asia/Tokyo"]
     assert "Times shown in Asia/Tokyo" in page.content()
     _assert_clean(observed, tz_base)
+
+
+def _berlin_option_label(page) -> str:
+    return page.eval_on_selector(
+        "#f-tz",
+        "el => Array.from(el.options).filter(o => o.value === 'Europe/Berlin')[0].text",
+    )
+
+
+def test_berlin_option_labels_follow_dst_across_apply(page, tz_base, observed):
+    """Europe/Berlin option labels track DST at the applied window start.
+
+    Late-October (standard time) reads UTC+01:00; applying a July window
+    relabels the SAME selected option to UTC+02:00 without changing the
+    selection or duplicating the control. A failed Apply keeps the labels.
+    """
+    _login(page, tz_base)
+    page.set_viewport_size({"width": 390, "height": 844})
+    page.goto(f"{tz_base}/?site=default&{W1}&tz=Europe%2FBerlin")
+    page.get_by_role("heading", name="Traffic timeline").wait_for(timeout=10000)
+    assert page.eval_on_selector("#f-tz", "el => el.value") == "Europe/Berlin"
+    assert page.locator("#f-tz").count() == 1
+    winter_label = _berlin_option_label(page)
+    assert "UTC+01:00" in winter_label, winter_label
+    # Apply a summer window through the real controls: the option labels
+    # refresh out-of-band at the new window start (DST, +02:00) while the
+    # selected zone stays Europe/Berlin with exactly one control.
+    page.fill("#f-from", "2026-07-15T00:00")
+    page.fill("#f-to", "2026-07-16T00:00")
+    with page.expect_response(
+        lambda r: "/partials/overview" in r.url and r.status == 200, timeout=10000
+    ):
+        page.get_by_role("button", name="Apply").click()
+    page.wait_for_function("() => window.location.href.includes('from=2026-07-15')", timeout=10000)
+    page.wait_for_function(
+        "() => document.querySelector('#f-tz').textContent.includes('UTC+02:00')",
+        timeout=10000,
+    )
+    assert page.eval_on_selector("#f-tz", "el => el.value") == "Europe/Berlin"
+    assert page.locator("#f-tz").count() == 1
+    summer_label = _berlin_option_label(page)
+    assert "UTC+02:00" in summer_label, summer_label
+    assert summer_label != winter_label
+    assert "Times shown in Europe/Berlin" in page.content()
+    # A failed Apply (reversed window) keeps the summer labels, the
+    # selection and the single control; only the banner is new.
+    page.fill("#f-from", "2026-07-15T13:00")
+    page.fill("#f-to", "2026-07-15T12:00")
+    with page.expect_response(
+        lambda r: "/partials/overview" in r.url and r.status == 400, timeout=10000
+    ):
+        page.get_by_role("button", name="Apply").click()
+    page.locator("[data-filter-error]").wait_for(state="visible", timeout=10000)
+    assert _berlin_option_label(page) == summer_label
+    assert page.eval_on_selector("#f-tz", "el => el.value") == "Europe/Berlin"
+    assert page.locator("#f-tz").count() == 1
+    # The deliberate 400 is the only console noise: Chromium's native
+    # failed-resource notice plus htmx's own response error.
+    for url in observed["requests"]:
+        assert url.startswith(tz_base), url
+    assert len(observed["errors"]) == 2, observed["errors"]
+    assert any("400" in text for text in observed["errors"]), observed["errors"]

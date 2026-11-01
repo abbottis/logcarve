@@ -327,7 +327,9 @@ def test_narrow_menu_overlay_without_overflow(page, live_base, observed):
         assert menu.get_attribute("aria-expanded") == "false"
         menu.click()
         assert menu.get_attribute("aria-expanded") == "true"
-        assert page.get_by_role("navigation").is_visible()
+        # Two navs render now (Main navigation + Quick views presets):
+        # name the main one explicitly instead of an ambiguous lookup.
+        assert page.get_by_role("navigation", name="Main navigation").is_visible()
         # Overlay panel: no document overflow, content not compressed.
         assert page.evaluate("document.documentElement.scrollWidth") <= 360
         assert page.evaluate("document.getElementById('main').offsetWidth") >= 300
@@ -430,6 +432,16 @@ def _assert_contrast(page, text_selector: str, bg_selector: str, minimum: float 
     assert ratio >= minimum, ratio
 
 
+def _status_code(label: str) -> str:
+    """Numeric status code from a chart/table label.
+
+    Labels read human-friendly (`200 · OK`); the numeric identity is
+    the text before the middle dot, while the phrase after it must be
+    asserted separately, never dropped.
+    """
+    return label.split("·")[0].strip()
+
+
 def _assert_chart_matches_tables(page):
     """Chart datasets must equal the accessible data tables row for row."""
     # The data tables live inside closed <details> disclosure widgets,
@@ -478,9 +490,18 @@ def _assert_chart_matches_tables(page):
     assert table_counts == list(series["liveTimeline"]["values"])
     status_labels = [row[0] for row in series["statusRows"]]
     status_counts = [int(row[1]) for row in series["statusRows"]]
-    assert status_labels == [str(r["status"]) for r in status["rows"]]
+    # Status identity is numeric AND human: table cells read `200 · OK`,
+    # so compare parsed codes while keeping the phrase assertions.
+    assert [_status_code(label) for label in status_labels] == [
+        str(r["status"]) for r in status["rows"]
+    ]
+    assert all("·" in label for label in status_labels), status_labels
+    assert any("Not Found" in label for label in status_labels), status_labels
+    assert any("Internal Server Error" in label for label in status_labels), status_labels
     assert status_counts == [r["requests"] for r in status["rows"]]
-    assert status_labels == [str(v) for v in series["liveStatus"]["labels"]]
+    assert [_status_code(str(v)) for v in series["liveStatus"]["labels"]] == [
+        str(r["status"]) for r in status["rows"]
+    ]
     assert status_counts == list(series["liveStatus"]["values"])
     assert sum(table_counts) > 0
     assert sum(table_counts) == sum(status_counts)
@@ -532,10 +553,20 @@ def test_ask_starter_fills_input_and_disabled_send_is_honest(page, live_base, ob
     page.goto(f"{live_base}/ask?site=default&{W1}&tz=UTC")
     page.get_by_role("heading", name="Ask AI").first.wait_for(timeout=10000)
     starters = page.locator("[data-starter-prompt]")
-    assert starters.count() == 8
+    assert starters.count() == 9
     # Starter questions only populate the input; nothing is sent.
     first_prompt = starters.first.get_attribute("data-starter-prompt")
     assert first_prompt
+    # The ninth Security starter drafts firewall rules for MANUAL REVIEW
+    # only: it fills the input like every other starter, never sends.
+    security = page.locator("[data-starter-prompt]", has_text="Help me create firewall rules")
+    assert security.count() == 1
+    security_prompt = security.get_attribute("data-starter-prompt")
+    assert security_prompt is not None and "MANUAL REVIEW" in security_prompt
+    security.click()
+    assert page.input_value("#ask-input") == security_prompt
+    assert page.locator("[data-ask-status]").is_hidden()
+    assert page.locator("[data-ask-answer]").inner_text().strip() == ""
     starters.first.click()
     assert page.input_value("#ask-input") == first_prompt
     # With no real transport configured, Send reports the honest
@@ -555,7 +586,8 @@ def test_errors_apply_preserves_matchers_source_and_nav(page, live_base, observe
     page.goto(f"{live_base}/errors?site=default&{W1}&tz=UTC&status=404&source=example-combined")
     page.get_by_role("heading", name="Errors").wait_for(timeout=10000)
     # Evidence scope survives in the filter bar as resubmitted state.
-    assert page.get_attribute('#filter-bar input[name="status"]', "value") == "404"
+    # Status is a native select now (not the old hidden/text input).
+    assert page.eval_on_selector("#f-status", "el => el.value") == "404"
     assert page.get_attribute('#filter-bar input[name="source"]', "value") == "example-combined"
     # Narrow the window through actual controls and Apply, awaiting the
     # real partial response and the swapped DOM.
@@ -754,7 +786,7 @@ def test_ask_apply_updates_scope_for_later_posts(page, live_base, observed):
     assert "2026-10-27T10" in (ask_root.get_attribute("data-from") or "")
     assert "2026-10-27T12" in (ask_root.get_attribute("data-to") or "")
     assert ask_root.get_attribute("data-source") == "example-combined"
-    assert page.locator("[data-starter-prompt]").count() == 8
+    assert page.locator("[data-starter-prompt]").count() == 9
     # Sending still works against the applied scope (honest disabled
     # state here; the POST would carry the attrs above).
     page.locator("[data-starter-prompt]").first.click()

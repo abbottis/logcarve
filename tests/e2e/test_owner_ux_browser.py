@@ -243,12 +243,19 @@ def test_requests_sort_headers_and_details(page, ux_base, observed):
         )
         assert page.locator("td.req-path").first.inner_text(timeout=10000) == first_before
         # Details open and close on the real button, keyboard included.
-        toggle = page.get_by_role("button", name="Show row details").first
-        panel_id = toggle.get_attribute("aria-controls")
-        assert toggle.get_attribute("aria-expanded") == "false"
-        toggle.click()
+        # The accessible name flips to "Hide row details" once open, so a
+        # later name lookup would retarget the NEXT row: bind the SAME
+        # button by its stable aria-controls panel id instead.
+        first_toggle = page.get_by_role("button", name="Show row details").first
+        panel_id = first_toggle.get_attribute("aria-controls")
+        assert panel_id, "the details button must own a stable panel id"
+        assert first_toggle.get_attribute("aria-expanded") == "false"
+        first_toggle.click()
         page.wait_for_selector(f"tr#{panel_id}:not([hidden])", timeout=10000)
+        toggle = page.locator(f'button[aria-controls="{panel_id}"]')
+        assert toggle.count() == 1, "aria-controls stays bound to one button"
         assert toggle.get_attribute("aria-expanded") == "true"
+        assert "Hide row details" in (toggle.get_attribute("aria-label") or "")
         toggle.focus()
         page.keyboard.press("Enter")
         page.wait_for_selector(f"tr#{panel_id}[hidden]", timeout=10000)

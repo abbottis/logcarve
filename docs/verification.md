@@ -1,5 +1,59 @@
 # Verification record
 
+## 2026-11-01 — Stage B3bcb915 browser-test maintenance (9 stale expectations, test-only)
+
+Owner-authorized TEST CORRECTION ONLY on `feature/owner-ux-review-2026-11-01`
+after `ffaf737`, exact model `muse-spark-1.3-contributor`/medium/Contributor ON;
+sandbox + approval ON, no agents/product calls/screenshots/secrets/Docker/
+push/main/deploy. Implements the maintained-test corrections enumerated in the
+appended section "Actual protected Chromium full diagnostic at Stage B3bcb915"
+of `artifacts/task-inputs/owner-ux-b-review.md` (28 tests: 19 PASS / 9 FAIL).
+No app/config/asset/fixture change: no confirmed application defect found, so
+nothing was reported for coordinator review and scope stayed tests + docs.
+
+Corrections (all in `tests/e2e`, semantic assertions preserved/strengthened):
+
+- Ambiguous navigation (fail 1): `test_dashboard::test_narrow_menu_overlay_without_overflow`
+  and two `test_slice_b` sidebar uses now name "Main navigation" explicitly
+  (Quick views renders a second nav); overlay-geometry/keyboard checks kept.
+- Status identity (fail 2): new `_status_code()` in `test_dashboard`/`test_slice_b`
+  parses numeric codes from `200 · OK` labels; table/JSON/live-chart-axis codes
+  are compared AND human phrases asserted (middle-dot separator, OK / Not Found
+  / Internal Server Error) — no dropped comparison. Slice B additionally captures
+  live chart axis labels.
+- Starters 8→9 (fail 3): both dashboard Ask tests expect 9; the new Security
+  "Help me create firewall rules" starter asserts its MANUAL-REVIEW prompt fills
+  the input only (no send, status hidden, answer empty); disabled-Send, scope and
+  error assertions preserved.
+- Status select (fail 4): `test_errors_apply_preserves_matchers_source_and_nav`
+  reads the native `#f-status` select value instead of the removed
+  `input[name=status]`; Apply/URL/nav/scope assertions preserved.
+- Details binding (fail 5): `test_requests_sort_headers_and_details` rebinds the
+  SAME toggle by its stable aria-controls panel id (the accessible name flips
+  Show→Hide on open); same-button/panel/keyboard-close/Apply/paging-reuse kept.
+- Explorer columns (fail 6): `test_explorer_columns_sanitized_and_timezone_aware`
+  asserts the actual 8-column header semantics, reads CET display + UTC title
+  through the Time-column index, toggles the Time sort header oldest/newest with
+  ISO-title ordering, and checks expanded details (User-Agent, Referring domain,
+  Rule, timing-unavailable) with the hostile UA escaped.
+- Asian zone (fail 7): JST is read from the Time semantic column instead of the
+  first (Client) cell; narrow-overlay/Tokyo/URL/nav/reload checks preserved.
+- New `test_berlin_option_labels_follow_dst_across_apply`: winter Apply option
+  label UTC+01:00 → summer UTC+02:00 on the same selected Europe/Berlin option,
+  exactly one `#f-tz` control, and a failed Apply keeps the labels (deliberate
+  400 recorded as exactly 2 console errors, never suppressed).
+
+Actual results (project `.venv`, same session):
+
+| Check | Result | Evidence |
+| --- | --- | --- |
+| `pytest tests/e2e --collect-only` | PASS | 29 collected (28 + 1 new Berlin test) |
+| `ruff check tests/e2e/` | PASS | All checks passed |
+| `ruff format --check tests/e2e/` | PASS | 6 files already formatted (3 reformatted by the check run) |
+| `pytest tests/e2e` execution (this sandbox) | BLOCKED | Protections ON; sandbox launch never retried per authorization; coordinator runs `uv run --locked pytest tests/e2e -q` outside |
+| Full unit/integration suites | NOT RUN | Test-only change; coordinator runs the final full suite |
+| Real product model/provider calls | NOT RUN | No product calls made |
+
 ## 2026-11-01 — Slice C targeted performance gate: batched per-client path sampling (plan)
 
 Bounded optimization only, on clean `ca491c2` (`feature/traffic-analytics`).

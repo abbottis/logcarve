@@ -267,3 +267,21 @@ no schema migration, 120-row fixtures/digests/seeds untouched.
   changes, or product/provider calls. No Stage B analytics (explorer
   sorting/details, bot-identity signal). No upload/import UX, no
   firewall execution, no GeoIP, no fifth traffic bucket.
+
+## 2026-11-01 addendum — Stage B3bcb915 browser-test maintenance (test-only)
+
+Date: 2026-11-01. Reason: the coordinator's protected-Chromium diagnostic at
+Stage B `3bcb915` (28 tests: 19 PASS / 9 FAIL, recorded in
+`artifacts/task-inputs/owner-ux-b-review.md`) enumerated 9 stale/unstable
+maintained-test expectations against the actual UI. This bounded correction
+updates only `tests/e2e/test_dashboard.py`, `tests/e2e/test_slice_b.py`,
+`tests/e2e/test_timezone_select.py` and `tests/e2e/test_owner_ux_browser.py`
+(no app/config/asset/fixture change; no confirmed application defect found):
+named Main navigation (Quick views is a second nav), numeric+phrase status
+agreement via parsed `200 · OK` codes, 9 starters with the Security
+MANUAL-REVIEW prompt kept input-only, native `#f-status` select value, stable
+aria-controls detail binding, actual 8-column + expanded-details explorer with
+Time-header sort semantics, Time-column JST, and a new winter→summer
+Europe/Berlin option-label (UTC+01:00→UTC+02:00) Apply test. Evidence:
+`docs/verification.md` entry of the same date; browser execution stays
+coordinator-owned.
