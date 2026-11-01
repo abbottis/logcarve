@@ -2170,3 +2170,60 @@ Acceptance impact: PAR-03/PAR-04 corrected at the shared layer with the
 same privacy/parameterization boundaries (no original-IP joins, no
 schema migration, no new indexes). Stopping for independent reinspection
 before T2b journeys/security.
+
+## 2026-11-01 — Parity T3a export-lifecycle fix + T3b assistant/client slice (implementer run)
+
+Authorized parity T3 work on `feature/logwerk-parity-2026-11-01`,
+exact model `muse-spark-1.3-contributor`/medium/Contributor ON; sandbox +
+approval ON, sole writer, no subagents. Public/synthetic checkout only:
+no parent private files/keys/real logs/product calls/Docker/push/main/deployment.
+All code/tests by the implementer. Full T4 UI and country/follow work stay next.
+
+Fix-first (independent T3a runtime probe): actual Starlette
+`StreamingResponse.__call__` (spec 2.4) converts a `send` `OSError`
+at the first `http.response.body` into `ClientDisconnect` and skips
+the background task, while an unstarted row generator has no
+executing `finally` — the prepared snapshot leaked. New
+`ExportStreamingResponse` releases the owned `ExportStream` in an
+unconditional ASGI-call `finally` (both wire protocols, cancellation,
+renderer errors); generator `finally` and background stay idempotent
+layers. `close_prepared` plus the stream context-manager give an
+unused prepared response its deterministic close contract.
+
+T3b (bounded assistant + client): one new allowlisted tool
+`get_report` with an explicit enum (performance, slow_endpoints,
+seo_redirects/client_errors/server_errors, seo_ai_only,
+referrer_404s, journeys, journey_entries, comparison) over the shared
+deterministic layer — no raw rows/timelines/exports; server-fixed
+rankings and a server-derived previous window. Full selector set
+(`path_exact`, host/HTTP/MIME/cache/TLS, timing/upstream
+availability, finite ranges) propagates through ChatBody,
+ValidatedScope, trusted merge, ToolArguments, evidence and links;
+`false`/`0` stay real, contradictions fail safe. Tool reads hold ONE
+snapshot released before any provider dispatch (proven by a
+deterministic mid-read commit hook and a fake-provider
+closed-connection assertion). Egress allowlist/projection cover the
+new aggregates with measured-vs-missing honesty (zero measured, never
+missing) and exact totals; stdlib client gains report operations and
+a metadata-verified bounded streaming export download. No new locale
+keys: no new visible messages (existing codes/messages reused;
+client diagnostics are not locale-managed). No browser import UI, no
+translations.
+
+| Check | Result | Evidence |
+| --- | --- | --- |
+| New `tests/integration/test_export_disconnect.py` | PASS | 14 passed: actual response invocation, both formats, pre-body/first-body/mid-body send failure, cancellation, older protocol, renderer error, unused-prepared close; old pattern proven leaking (`closed: False` control) |
+| New `tests/integration/test_assistant_stage_c.py` | PASS | 28 passed: selector propagation, False/0 selections, contradictions, one-snapshot commit hook, no-open-txn dispatch assertion, all 10 reports, measured-vs-null, sentinels, poison fail-closed, native-wire replay/pairing, chat-route e2e, client verify helpers |
+| Full `tests/unit tests/integration` clean | PASS | 819 passed, 2 skipped (loopback sockets unavailable in sandbox; pre-existing env category) |
+| Full suites conflicting env (`AI_ENABLED=true LLM_WARN_AT_USD=999`) | PASS | 819 passed, 2 skipped |
+| `ruff check` + `ruff format --check` | PASS | Both clean over `app` + `clients` + `tests` |
+| `uv lock --check --offline` | PASS | `UV_CACHE_DIR=/tmp/uvcache`: resolved 42 packages, no manifest/lock delta |
+| 120-row fixture / HMAC / 77-rule catalog | PASS | Untouched: no fixture/rule/config changes in tree; new tests use tmp stores only |
+| Real AI / smoke allowance | NOT RUN | No production transport, key, account or paid call; real allowance untouched (isolated temp DBs only) |
+
+Acceptance impact: PAR-07 lifecycle hardened (deterministic cleanup
+on every disconnect path, pre-header safe envelopes preserved);
+AI-03/AI-04/PRIV-01-03/COST-01-02 extended to the report surface at
+the fake/stubbed-wire scope with sockets denied. AI-01/02 stay NOT
+RUN. Stopping for independent reinspection; no merge, push or
+deployment.

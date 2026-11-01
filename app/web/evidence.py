@@ -18,6 +18,25 @@ TOOL_PAGE_MAP = {
     "get_crawler_claims": "/crawlers",
     "get_security_findings": "/security",
     "get_error_groups": "/errors",
+    "get_report": "/",
+}
+
+#: Report pages for the aggregate-only ``get_report`` tool. Every
+#: report maps to the closest existing dashboard page (full report
+#: pages arrive with T4): performance, slow-endpoint, comparison and
+#: journey aggregates reproduce on the overview, SEO errors on the
+#: error groups page, AI-candidate paths with the crawler claims.
+REPORT_PAGE_MAP = {
+    "performance": "/",
+    "slow_endpoints": "/",
+    "seo_redirects": "/errors",
+    "seo_client_errors": "/errors",
+    "seo_server_errors": "/errors",
+    "seo_ai_only": "/crawlers",
+    "referrer_404s": "/",
+    "journeys": "/",
+    "journey_entries": "/",
+    "comparison": "/",
 }
 
 
@@ -42,6 +61,7 @@ def evidence_url(page_path: str, envelope_filters: dict, tz_name: str = "UTC") -
         "status",
         "status_class",
         "path_prefix",
+        "path_exact",
         "referer_host",
         "search",
         "traffic",
@@ -49,6 +69,16 @@ def evidence_url(page_path: str, envelope_filters: dict, tz_name: str = "UTC") -
         "category",
         "provider",
         "purpose",
+        "server_host",
+        "http_version",
+        "mime_type",
+        "cache_status",
+        "tls_protocol",
+        "timing_available",
+        "upstream_available",
+        "timing_min_ms",
+        "timing_max_ms",
+        "report",
         "limit",
         "offset",
         "bucket",
@@ -65,4 +95,11 @@ def envelope_href(tool_name: object, envelope_filters: dict, tz_name: str = "UTC
         return None
     if not isinstance(envelope_filters, dict):
         return None
+    if tool_name == "get_report":
+        report = envelope_filters.get("report")
+        page_path = REPORT_PAGE_MAP.get(report) if isinstance(report, str) else None
+        if page_path is None:
+            # Tool-level default: the envelope always carries a valid
+            # report, but the tool itself stays linkable without one.
+            page_path = TOOL_PAGE_MAP["get_report"]
     return evidence_url(page_path, envelope_filters, tz_name)

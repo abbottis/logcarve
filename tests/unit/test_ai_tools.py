@@ -90,7 +90,8 @@ def _run(store, name, args):
 
 def test_all_allowlisted_tools_execute(store):
     for name in tools.TOOL_NAMES:
-        envelope = _run(store, name, _args())
+        args = _args(report="performance") if name == "get_report" else _args()
+        envelope = _run(store, name, args)
         assert envelope["tool_call_id"] == "tc1"
         assert envelope["filters"]["site_id"] == "default"
         assert "observation_time" in envelope

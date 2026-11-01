@@ -175,6 +175,50 @@ _EVIDENCE_FIELDS: dict[str, frozenset[str]] = {
     "get_crawler_claims": frozenset({"items", "total"}),
     "get_security_findings": frozenset({"items", "total"}),
     "get_error_groups": frozenset({"items", "total_groups"}),
+    # Aggregate-only reports: every value stays a server-computed
+    # aggregate (counts, named timing scalars that may be None,
+    # bounded item samples). Timelines, raw rows and full exports
+    # have no fields here and cannot cross.
+    "get_report": frozenset(
+        {
+            "site_id",
+            "time_range",
+            "generated_at",
+            "filters",
+            "sort",
+            "limit",
+            "offset",
+            "min_requests",
+            "latency_available",
+            "latency_ms",
+            "upstream_ms",
+            "units",
+            "items",
+            "total_groups",
+            "total_paths",
+            "total",
+            "meta",
+            "status_class",
+            "comparison",
+            "candidate",
+            "vacuous",
+            "warnings",
+            "current_window",
+            "previous_window",
+            "selectors",
+            "window_seconds",
+            "window_seconds_us",
+            "metrics",
+            "comparable",
+            "comparable_reasons",
+            "gap_definition",
+            "partial_caveat",
+            "limitations",
+            "relation",
+            "own_hosts",
+            "host_matching",
+        }
+    ),
 }
 
 _EVIDENCE_ITEM_LIMIT = 10
@@ -271,6 +315,26 @@ def _int_or(value: object, default: int = 0) -> int:
     return value if isinstance(value, int) and not isinstance(value, bool) else default
 
 
+def _float_or_none(value: object) -> float | None:
+    """A measured scalar that stays ``None`` when missing, never zero.
+
+    Missing timing is unavailable, never zero latency: ``None``
+    survives the projection instead of collapsing to ``0`` or
+    ``0.0``. Non-finite values cannot cross either.
+    """
+    import math as _math
+
+    if isinstance(value, bool):
+        return None
+    if isinstance(value, (int, float)) and _math.isfinite(value):
+        return float(value)
+    return None
+
+
+def _bool_or_none(value: object) -> bool | None:
+    return value if isinstance(value, bool) else None
+
+
 def _full_buckets(full: dict | None) -> list | None:
     """Untruncated bucket rows for exact totals, or None when absent."""
     if not isinstance(full, dict):
@@ -279,7 +343,177 @@ def _full_buckets(full: dict | None) -> list | None:
     return list(buckets) if isinstance(buckets, (list, tuple)) else None
 
 
-def _project_result(tool_name: str, minimized: dict, full: dict | None = None) -> str:
+def _project_report(report: object, minimized: dict, full: dict | None) -> str:
+    """Compact typed projection for one ``get_report`` value.
+
+    Aggregates only: exact all-row totals from the untruncated
+    ``full`` result (falling back to the minimized rows), bounded
+    display samples from the scrubbed minimized rows, every
+    remainder marked explicitly. Measured scalars keep ``None``
+    when missing — never zero. Unknown reports fail closed.
+    """
+    source = full if isinstance(full, dict) else minimized
+    if not isinstance(source, dict) or not isinstance(report, str):
+        raise EgressViolation("unknown_tool", "Tool evidence is malformed.")
+    if report == "performance":
+        latency = source.get("latency_ms")
+        latency = latency if isinstance(latency, dict) else {}
+        upstream = source.get("upstream_ms")
+        upstream = upstream if isinstance(upstream, dict) else {}
+        cache = source.get("cache")
+        cache = cache if isinstance(cache, dict) else {}
+        payload = {
+            "latency_available": _bool_or_none(source.get("latency_available")),
+            "requests": _int_or(latency.get("total")),
+            "measured": _int_or(latency.get("measured")),
+            "missing": _int_or(latency.get("missing")),
+            "p50_ms": _float_or_none(latency.get("p50_ms")),
+            "p95_ms": _float_or_none(latency.get("p95_ms")),
+            "average_ms": _float_or_none(latency.get("average_ms")),
+            "upstream_measured": _int_or(upstream.get("measured")),
+            "upstream_average_ms": _float_or_none(upstream.get("average_ms")),
+            "cache_measured": _int_or(cache.get("cache_measured")),
+            "cache_hits": _int_or(cache.get("hit_requests")),
+            "hit_ratio": _float_or_none(cache.get("hit_ratio")),
+        }
+        return _compact_json(payload)
+    if report == "slow_endpoints":
+        items = minimized.get("items")
+        rows = list(items) if isinstance(items, (list, tuple)) else []
+        total = _int_or(source.get("total_paths"), len(rows))
+        shown = [
+            {
+                "path": _clip_projection_text(row.get("path", "?")),
+                "measured": _int_or(row.get("measured")),
+                "p95_ms": _float_or_none(row.get("p95_ms")),
+                "average_ms": _float_or_none(row.get("average_ms")),
+            }
+            for row in rows[:EVIDENCE_PROJECTION_ITEMS]
+            if isinstance(row, dict)
+        ]
+        return _compact_json({"paths": total, "more": max(0, total - len(shown)), "top": shown})
+    if report in ("seo_redirects", "seo_client_errors", "seo_server_errors"):
+        items = minimized.get("items")
+        rows = list(items) if isinstance(items, (list, tuple)) else []
+        total = _int_or(source.get("total_groups"), len(rows))
+        shown = [
+            {
+                "path": _clip_projection_text(row.get("path", "?")),
+                "rule": row.get("rule_id", "?"),
+                "requests": _int_or(row.get("requests")),
+            }
+            for row in rows[:EVIDENCE_PROJECTION_ITEMS]
+            if isinstance(row, dict)
+        ]
+        return _compact_json({"groups": total, "more": max(0, total - len(shown)), "top": shown})
+    if report == "seo_ai_only":
+        items = minimized.get("items")
+        rows = list(items) if isinstance(items, (list, tuple)) else []
+        total = _int_or(source.get("total_paths"), len(rows))
+        comparison = source.get("comparison")
+        comparison = comparison if isinstance(comparison, dict) else {}
+        shown = [
+            {
+                "path": _clip_projection_text(row.get("path", "?")),
+                "ai_requests": _int_or(row.get("ai_requests")),
+            }
+            for row in rows[:EVIDENCE_PROJECTION_ITEMS]
+            if isinstance(row, dict)
+        ]
+        return _compact_json(
+            {
+                "paths": total,
+                "more": max(0, total - len(shown)),
+                "top": shown,
+                "universe_requests": _int_or(comparison.get("universe_requests")),
+                "ai_paths": _int_or(comparison.get("ai_observed_paths")),
+                "other_paths": _int_or(comparison.get("other_observed_paths")),
+                "vacuous": _bool_or_none(source.get("vacuous")),
+            }
+        )
+    if report == "referrer_404s":
+        items = minimized.get("items")
+        rows = list(items) if isinstance(items, (list, tuple)) else []
+        total = _int_or(source.get("total_groups"), len(rows))
+        shown = [
+            {
+                "referrer": _clip_projection_text(row.get("referer_host", "?")),
+                "target": _clip_projection_text(row.get("target_path", "?")),
+                "requests": _int_or(row.get("requests")),
+                "internal": _bool_or_none(row.get("internal")),
+            }
+            for row in rows[:EVIDENCE_PROJECTION_ITEMS]
+            if isinstance(row, dict)
+        ]
+        return _compact_json({"groups": total, "more": max(0, total - len(shown)), "top": shown})
+    if report == "journeys":
+        items = minimized.get("items")
+        rows = list(items) if isinstance(items, (list, tuple)) else []
+        total = _int_or(source.get("total_groups"), len(rows))
+        shown = [
+            {
+                "entry": _clip_projection_text(row.get("entry_path", "?")),
+                "requests_total": _int_or(row.get("requests_total")),
+                "requests_shown": _int_or(row.get("requests_shown")),
+                "completeness": row.get("completeness", "?"),
+            }
+            for row in rows[:EVIDENCE_PROJECTION_ITEMS]
+            if isinstance(row, dict)
+        ]
+        return _compact_json(
+            {"groups": total, "more": max(0, total - len(shown)), "journeys": shown}
+        )
+    if report == "journey_entries":
+        items = minimized.get("items")
+        rows = list(items) if isinstance(items, (list, tuple)) else []
+        total = _int_or(source.get("total_groups"), len(rows))
+        shown = [
+            {
+                "entry": _clip_projection_text(row.get("entry_path", "?")),
+                "journeys": _int_or(row.get("journeys")),
+                "complete": _int_or(row.get("complete_journeys")),
+                "partial": _int_or(row.get("partial_journeys")),
+            }
+            for row in rows[:EVIDENCE_PROJECTION_ITEMS]
+            if isinstance(row, dict)
+        ]
+        return _compact_json({"groups": total, "more": max(0, total - len(shown)), "top": shown})
+    if report == "comparison":
+        metrics = source.get("metrics")
+        rows = list(metrics) if isinstance(metrics, (list, tuple)) else []
+        shown = [
+            {
+                # Current and previous cross exactly (ints stay ints);
+                # the absolute change is their exact difference, so only
+                # the non-derivable ratio status travels alongside.
+                "name": row.get("name", "?"),
+                "current": row.get("current"),
+                "previous": row.get("previous"),
+                "ratio_status": row.get("ratio_status", "?"),
+            }
+            for row in rows
+            if isinstance(row, dict)
+        ]
+        previous_window = source.get("previous_window")
+        previous_window = previous_window if isinstance(previous_window, dict) else {}
+        return _compact_json(
+            {
+                "comparable": _bool_or_none(source.get("comparable")),
+                "metrics": shown,
+                "previous_from": previous_window.get("time_from", "?"),
+                "previous_to": previous_window.get("time_to", "?"),
+            }
+        )
+    raise EgressViolation("unknown_tool", f"No evidence contract for {report!r}.")
+
+
+def _project_result(
+    tool_name: str,
+    minimized: dict,
+    full: dict | None = None,
+    *,
+    report: object = None,
+) -> str:
     """Compact typed per-tool result over allowlisted minimized fields.
 
     Display strings always come from the validated, masked minimized
@@ -403,6 +637,8 @@ def _project_result(tool_name: str, minimized: dict, full: dict | None = None) -
             if isinstance(row, dict)
         ]
         return _compact_json({"groups": total, "more": max(0, total - len(shown)), "top": shown})
+    if tool_name == "get_report":
+        return _project_report(report, minimized, full)
     raise EgressViolation("unknown_tool", f"No evidence contract for {tool_name}.")
 
 
@@ -425,7 +661,13 @@ def _project_scope(filters: dict) -> str:
         if isinstance(value, str):
             check_outgoing(value, context="tool evidence scope")
             exact[str(key)] = value
-        elif isinstance(value, (int, bool)) or value is None:
+        elif isinstance(value, bool) or value is None:
+            exact[str(key)] = value
+        elif isinstance(value, (int, float)):
+            import math as _math
+
+            if isinstance(value, float) and not _math.isfinite(value):
+                raise EgressViolation("unknown_tool", "Tool evidence scope is malformed.")
             exact[str(key)] = value
         else:
             raise EgressViolation("unknown_tool", "Tool evidence scope is malformed.")
@@ -493,9 +735,10 @@ def project_evidence_summary(
         },
         context="tool evidence metadata",
     )
+    report = filters.get("report") if isinstance(filters, dict) else None
     summary = (
         f"[evidence {tool_call_id}] {tool_name} "
-        f"result={_project_result(tool_name, minimized, full_result)} "
+        f"result={_project_result(tool_name, minimized, full_result, report=report)} "
         f"scope={_project_scope(filters)} "
         f"observed={observation_time} "
         f"coverage={_compact_json(coverage_payload)}"

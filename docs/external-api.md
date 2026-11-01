@@ -61,6 +61,8 @@ curl -s -H "Authorization: Bearer $LOGCARVE_API_TOKEN" \
   "$BASE/api/v1/summary?site_id=default&from=2026-10-27T00:00:00%2B00:00&to=2026-10-28T00:00:00%2B00:00"
 curl -s -H "Authorization: Bearer $LOGCARVE_API_TOKEN" \
   "$BASE/api/v1/security/findings?site_id=default&from=2026-10-27T00:00:00%2B00:00&to=2026-10-28T00:00:00%2B00:00"
+curl -s -H "Authorization: Bearer $LOGCARVE_API_TOKEN" \
+  "$BASE/api/v1/performance/slow-endpoints?site_id=default&from=2026-10-27T00:00:00%2B00:00&to=2026-10-28T00:00:00%2B00:00"
 ```
 
 ### Python client
@@ -71,6 +73,10 @@ curl -s -H "Authorization: Bearer $LOGCARVE_API_TOKEN" \
 LOGCARVE_API_TOKEN="lc_..." python clients/logcarve_api_client.py \
   --base-url http://127.0.0.1:8080 --site default \
   --from 2026-10-27T00:00:00+00:00 --to 2026-10-28T00:00:00+00:00
+LOGCARVE_API_TOKEN="lc_..." python clients/logcarve_api_client.py \
+  --base-url http://127.0.0.1:8080 --site default \
+  --from 2026-10-27T00:00:00+00:00 --to 2026-10-28T00:00:00+00:00 \
+  --endpoint slow-endpoints
 ```
 
 ### n8n sketch
@@ -162,8 +168,69 @@ curl -s -H "Authorization: Bearer $LOGCARVE_API_TOKEN" \
 
 Clients parse CSV with any standard CSV reader (header row first)
 and read reproducibility metadata from the response headers; JSON
-clients read the `metadata` envelope. Assistant/tool and stdlib
-client expansion stays a separately orchestrated slice (not T3a).
+clients read the `metadata` envelope.
+
+Response lifecycle (T3a fix): the streaming response releases its
+owned read snapshot in an unconditional ASGI-call `finally` —
+normal completion, renderer error, task cancellation, older-protocol
+disconnect and a send failure before the first body byte all close
+the cursor and snapshot exactly once, without relying on the row
+generator or the background task. A caller that prepares an export
+but never sends it closes the prepared handle explicitly instead of
+dropping it.
+
+### Stdlib client streaming download (T3b)
+
+`clients/logcarve_api_client.py` (stdlib only, token from
+`LOGCARVE_API_TOKEN` or `--token`, never from a URL) streams the
+download to `--out` in bounded chunks and verifies it against the
+response metadata instead of trusting a truncated file: the schema
+header must read `export/1`, the row-count header must parse, JSON
+must decode with `"complete": true` and a matching row count, and
+CSV must hold the header row plus exactly the advertised records.
+Any incomplete or over-cap body removes the partial file and exits
+nonzero with a safe message (no token, no log content):
+
+```bash
+LOGCARVE_API_TOKEN="lc_..." python clients/logcarve_api_client.py \
+  --base-url http://127.0.0.1:8080 --site default \
+  --from 2026-10-27T00:00:00+00:00 --to 2026-10-28T00:00:00+00:00 \
+  --endpoint export-json --out /tmp/export.json
+```
+
+### n8n sketch (export)
+
+HTTP Request node: GET `{{$json.baseUrl}}/api/v1/exports/requests`
+with query `site_id`, `from`, `to`, `export_format=json` and header
+`Authorization: Bearer {{$credentials.logcarveApi.token}}`. Follow
+with an IF node asserting the `X-Logcarve-Export-Rows` header is
+present and the parsed body has `"complete": true` with a matching
+row count; treat any mismatch as a failed (never complete) download.
+
+## Report operations (T3b)
+
+The deterministic read-only report routes behind the assistant's
+bounded `get_report` tool (aggregates only; timelines, raw rows and
+the streaming export stay outside the tool surface) are available to
+external callers with the same scoped token contract:
+
+- `/api/v1/performance`, `/api/v1/performance/overview`, `/api/v1/performance/slow-endpoints`
+- `/api/v1/seo/bot-statuses`, `/api/v1/seo/ai-only-paths`, `/api/v1/referrers/404-targets`
+- `/api/v1/journeys`, `/api/v1/journeys/entry-paths`, `/api/v1/comparison`
+- `/api/v1/traffic/breakdown`, `/api/v1/traffic/resources`, `/api/v1/traffic/browsers`, `/api/v1/traffic/heatmap`
+
+The stdlib client exposes each as a typed `--endpoint` operation
+(`--endpoint slow-endpoints`, `--endpoint comparison`, ...) in
+addition to `summary`/`crawlers`/`findings`, and the two download
+operations (`--endpoint export-csv|export-json --out PATH`) with the
+completeness checks above. The internal assistant additionally
+enforces the trusted chat scope on every report (selected parent
+matchers cannot be widened by model arguments; `false`/`0` are real
+selections; comparison always reads the server-derived previous
+window), holds one read snapshot per tool read released before any
+provider dispatch, and projects bounded evidence with measured
+timing carried as available/count (never a hardcoded unavailable
+answer when enriched timing exists).
 
 ## Verified usage (T5)
 

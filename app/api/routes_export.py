@@ -12,17 +12,28 @@ Snapshot ownership (:class:`ExportStream`): the endpoint thread
 opens ONE dedicated read-only snapshot and runs the row-cap
 pre-count, the metadata queries AND the row-cursor open plus
 first-chunk prime BEFORE any byte streams, so store/query failures
-map to safe envelopes (503/400 with ``request_id``) instead of a
-200 prefix, and a writer committing between preparation and
+map to safe envelopes (503/413/400 with ``request_id``) instead of
+a 200 prefix, and a writer committing between preparation and
 streaming can neither inflate rows past the cap nor split
 count/metadata/rows across generations. The same snapshot stays
 open across Starlette's streaming worker threads (a documented
 sequential handoff on this one owned handle — never a global
-thread-safety switch, never ``fetchall``) and closes
-deterministically on normal EOF, renderer error, cancellation,
-header-only/no-consumption (explicit close) and mid-stream
-disconnect, without waiting for GC. A post-header read failure
+thread-safety switch, never ``fetchall``). The streaming response
+itself (:class:`ExportStreamingResponse`) releases the snapshot in
+an unconditional ASGI-``__call__`` ``finally`` — normal EOF,
+renderer error, task cancellation, older-protocol disconnect and a
+send failure before the first body byte all close cursor and
+snapshot deterministically, without waiting for GC and without
+relying on the row generator's ``finally`` (an unstarted generator
+has no executing ``finally``) or the background task (skipped
+when the superclass streaming raises). A post-header read failure
 aborts the body — never a ``complete: true`` footer.
+
+A caller that prepares an export but never sends its response owns
+the same deterministic contract explicitly: close
+``info["stream"]`` (via :func:`close_prepared` or
+:meth:`ExportStream.close`, or the ``with`` statement) instead of
+dropping the prepared handle.
 
 Execution limits (documented, never silent truncation):
 
@@ -46,7 +57,7 @@ import unicodedata
 from collections.abc import Iterator
 from datetime import datetime
 from pathlib import Path
-from typing import Annotated, Literal
+from typing import Annotated, Literal, Self
 
 from fastapi import APIRouter, Query, Request
 from fastapi.responses import StreamingResponse
@@ -334,8 +345,12 @@ class ExportStream:
     normal EOF, renderer error, generator cancellation, an
     explicit close without consumption, and mid-stream disconnect
     all release cursor and connection without waiting for GC. The
-    streaming response additionally carries :meth:`close` as its
-    background safety net.
+    streaming response owns the same release in its ASGI
+    ``__call__`` ``finally`` (:class:`ExportStreamingResponse`)
+    and additionally carries :meth:`close` as its background
+    safety net. Supports the context-manager protocol so a
+    prepared-but-unsent export can release deterministically
+    with ``with`` or :func:`close_prepared`.
     """
 
     def __init__(self, db_path: Path) -> None:
@@ -446,6 +461,14 @@ class ExportStream:
                     yield queries.export_row_to_dict(raw)
         finally:
             self.close()
+
+    def __enter__(self) -> Self:
+        """Context-manager entry: the stream itself (already opened)."""
+        return self
+
+    def __exit__(self, *exc_info: object) -> None:
+        """Context-manager exit: always release cursor and snapshot."""
+        self.close()
 
     def close(self) -> None:
         """Idempotent deterministic release of cursor and snapshot."""
@@ -572,7 +595,49 @@ def prepare_session_export(
     return (filt, rules, sort, export_format, info), None
 
 
-def export_response(prepared, filename: str) -> StreamingResponse:
+class ExportStreamingResponse(StreamingResponse):
+    """Streaming download that always releases its owned export snapshot.
+
+    Starlette's ``StreamingResponse.__call__`` skips its background
+    task whenever the superclass streaming raises (for example an
+    ``OSError`` from ``send`` at the first body byte becomes
+    ``ClientDisconnect`` before the background runs), and an
+    unstarted row generator has no executing ``finally`` — so
+    neither the background task nor the generator ``finally`` can be
+    the sole owner of the snapshot. This subclass releases the
+    :class:`ExportStream` in an unconditional ASGI-``__call__``
+    ``finally`` covering both wire protocols (current and older
+    disconnect handling), task cancellation and renderer errors.
+    The background re-close stays as an idempotent no-op safety net
+    for paths that complete without raising.
+    """
+
+    def __init__(self, *args, stream: ExportStream, **kwargs) -> None:
+        super().__init__(*args, **kwargs)
+        self._export_stream = stream
+
+    async def __call__(self, scope, receive, send) -> None:  # type: ignore[no-untyped-def]
+        try:
+            await super().__call__(scope, receive, send)
+        finally:
+            self._export_stream.close()
+
+
+def close_prepared(info: dict) -> None:
+    """Deterministically release a prepared-but-unsent export.
+
+    A caller that ran :func:`prepare_export` (or
+    :func:`prepare_session_export`) and then decided not to send the
+    response — for example a renderer that rejects the prepared
+    handle before streaming — must call this (or close
+    ``info["stream"]`` directly, or use the stream as a context
+    manager) instead of dropping the handle: an unused prepared
+    response holds its read snapshot open until closed.
+    """
+    info["stream"].close()
+
+
+def export_response(prepared, filename: str) -> ExportStreamingResponse:
     """Build the streaming download from validated export preparation."""
     _, _, _, export_format, info = prepared
     stream = info["stream"]
@@ -585,13 +650,16 @@ def export_response(prepared, filename: str) -> StreamingResponse:
     else:
         body = json_chunks(metadata, stream.rows())
         media_type = _JSON_MEDIA_TYPE
-    # Safety net: the row generator's finally already releases the
-    # snapshot on EOF, renderer error, cancellation and disconnect;
-    # the background re-close is an idempotent no-op otherwise.
-    return StreamingResponse(
+    # Ownership: ExportStreamingResponse.__call__ always releases the
+    # snapshot (even when the superclass streaming raises before the
+    # row generator starts or the background task runs); the row
+    # generator's finally and the background re-close stay as
+    # idempotent no-op layers for the paths they do cover.
+    return ExportStreamingResponse(
         body,
         media_type=media_type,
         headers=headers,
+        stream=stream,
         background=BackgroundTask(stream.close),
     )
 

@@ -67,6 +67,7 @@ class ChatBody(BaseModel):
     method: str | None = Field(default=None, min_length=1, max_length=32)
     status: int | None = Field(default=None, ge=100, le=599)
     path_prefix: str | None = Field(default=None, min_length=1, max_length=1024)
+    path_exact: str | None = Field(default=None, min_length=1, max_length=1024)
     referer_host: str | None = Field(default=None, min_length=1, max_length=253)
     traffic: str = Field(default="all", max_length=32)
     bot: str | None = Field(default=None, min_length=1, max_length=64)
@@ -75,6 +76,15 @@ class ChatBody(BaseModel):
     purpose: str | None = Field(default=None, min_length=1, max_length=120)
     status_class: str | None = Field(default=None, min_length=1, max_length=8)
     search: str | None = Field(default=None, min_length=1, max_length=128)
+    server_host: str | None = Field(default=None, min_length=1, max_length=253)
+    http_version: str | None = Field(default=None, min_length=1, max_length=16)
+    mime_type: str | None = Field(default=None, min_length=1, max_length=128)
+    cache_status: str | None = Field(default=None, min_length=1, max_length=32)
+    tls_protocol: str | None = Field(default=None, min_length=1, max_length=32)
+    timing_available: bool | None = Field(default=None)
+    upstream_available: bool | None = Field(default=None)
+    timing_min_ms: float | None = Field(default=None, ge=0)
+    timing_max_ms: float | None = Field(default=None, ge=0)
 
 
 def _chat_allowed(session_id: str) -> bool:
@@ -167,6 +177,7 @@ def post_chat(request: Request, body: ChatBody):
                 method=body.method,
                 status=body.status,
                 path_prefix=body.path_prefix,
+                path_exact=body.path_exact,
                 referer_host=body.referer_host,
                 traffic=body.traffic,
                 bot=body.bot,
@@ -175,6 +186,15 @@ def post_chat(request: Request, body: ChatBody):
                 purpose=body.purpose,
                 status_class=body.status_class,
                 search=body.search,
+                server_host=body.server_host,
+                http_version=body.http_version,
+                mime_type=body.mime_type,
+                cache_status=body.cache_status,
+                tls_protocol=body.tls_protocol,
+                timing_available=body.timing_available,
+                upstream_available=body.upstream_available,
+                timing_min_ms=body.timing_min_ms,
+                timing_max_ms=body.timing_max_ms,
             )
         except InvestigationError as exc:
             return error_response(_ERROR_STATUS.get(exc.code, 500), exc.code, str(exc), request_id)

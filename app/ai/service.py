@@ -59,7 +59,14 @@ from app.ai.providers.meta_responses import (
 from app.ai.tools.definitions import TOOL_NAMES, execute_tool, response_tool_definitions
 from app.analytics.classification import build_classifier, resolve_selector_indexes
 from app.analytics.contracts import TimeWindow
-from app.analytics.service import LIMITATIONS_BOT, LIMITATIONS_LOGS, LIMITATIONS_SECURITY
+from app.analytics.service import (
+    LIMITATIONS_BOT,
+    LIMITATIONS_JOURNEYS,
+    LIMITATIONS_LOGS,
+    LIMITATIONS_PERFORMANCE,
+    LIMITATIONS_SECURITY,
+    LIMITATIONS_SEO,
+)
 from app.db.database import connect
 
 SYSTEM_PROMPT_PATH = Path(__file__).resolve().parent / "prompts" / "assistant_system.md"
@@ -137,6 +144,10 @@ class ValidatedScope:
     same shared stored analytics the dashboard and API read. Search covers
     sanitized indexed fields only (path, UA, referrer host, pseudonym);
     the raw-row explorer itself stays a UI/API read, never a model tool.
+    Enrichment matchers (host, HTTP version, MIME, cache, TLS, timing
+    availability and finite ranges) and the exact-path selector travel
+    the same trusted path; a selected ``False``/``0`` is a real
+    selection, never an omitted dimension.
     """
 
     site_id: str
@@ -147,6 +158,7 @@ class ValidatedScope:
     status: int | None = None
     status_class: str | None = None
     path_prefix: str | None = None
+    path_exact: str | None = None
     referer_host: str | None = None
     traffic: str = "all"
     bot: str | None = None
@@ -154,6 +166,15 @@ class ValidatedScope:
     provider_claim: str | None = None
     purpose: str | None = None
     search: str | None = None
+    server_host: str | None = None
+    http_version: str | None = None
+    mime_type: str | None = None
+    cache_status: str | None = None
+    tls_protocol: str | None = None
+    timing_available: bool | None = None
+    upstream_available: bool | None = None
+    timing_min_ms: float | None = None
+    timing_max_ms: float | None = None
 
 
 _TRAFFIC_VALUES = ("all", "browser_like", "claimed_bot", "other_automation", "unknown")
@@ -276,6 +297,7 @@ def validate_scope(
     status: int | None = None,
     status_class: str | None = None,
     path_prefix: str | None = None,
+    path_exact: str | None = None,
     referer_host: str | None = None,
     traffic: str = "all",
     bot: str | None = None,
@@ -283,6 +305,15 @@ def validate_scope(
     provider_claim: str | None = None,
     purpose: str | None = None,
     search: str | None = None,
+    server_host: str | None = None,
+    http_version: str | None = None,
+    mime_type: str | None = None,
+    cache_status: str | None = None,
+    tls_protocol: str | None = None,
+    timing_available: bool | None = None,
+    upstream_available: bool | None = None,
+    timing_min_ms: float | None = None,
+    timing_max_ms: float | None = None,
 ) -> ValidatedScope:
     """Validate the trusted actor/site/source/window/selector contract first.
 
@@ -306,18 +337,58 @@ def validate_scope(
         ("provider", provider_claim, 120),
         ("purpose", purpose, 120),
         ("path_prefix", path_prefix, 1024),
+        ("path_exact", path_exact, 1024),
         ("referer_host", referer_host, 253),
         ("search", search, 128),
+        ("server_host", server_host, 253),
+        ("http_version", http_version, 16),
+        ("mime_type", mime_type, 128),
+        ("cache_status", cache_status, 32),
+        ("tls_protocol", tls_protocol, 32),
     ):
         if value is not None and (not isinstance(value, str) or not 1 <= len(value) <= bound):
             raise InvestigationError(
                 "invalid_request", f"The requested {name} selector is invalid."
             )
-    if status is not None and (not isinstance(status, int) or not 100 <= status <= 599):
+    if status is not None and (
+        not isinstance(status, int) or isinstance(status, bool) or not 100 <= status <= 599
+    ):
         raise InvestigationError("invalid_request", "The requested status selector is invalid.")
     if status is not None and status_class is not None and f"{status // 100}xx" != status_class:
         raise InvestigationError(
             "invalid_request", "The requested status selectors contradict each other."
+        )
+    if (
+        path_exact is not None
+        and path_prefix is not None
+        and not path_exact.startswith(path_prefix)
+    ):
+        raise InvestigationError(
+            "invalid_request", "The requested path selectors contradict each other."
+        )
+    for name, value in (
+        ("timing_available", timing_available),
+        ("upstream_available", upstream_available),
+    ):
+        if value is not None and not isinstance(value, bool):
+            raise InvestigationError(
+                "invalid_request", f"The requested {name} selector is invalid."
+            )
+    import math as _math
+
+    for name, value in (("timing_min_ms", timing_min_ms), ("timing_max_ms", timing_max_ms)):
+        if value is not None and (
+            isinstance(value, bool)
+            or not isinstance(value, (int, float))
+            or not _math.isfinite(value)
+            or value < 0
+        ):
+            raise InvestigationError(
+                "invalid_request", f"The requested {name} selector is invalid."
+            )
+    if timing_min_ms is not None and timing_max_ms is not None and timing_min_ms > timing_max_ms:
+        raise InvestigationError(
+            "invalid_request", "The requested timing range contradicts itself."
         )
     try:
         window = TimeWindow(time_from=time_from, time_to=time_to)
@@ -354,6 +425,7 @@ def validate_scope(
         status=status,
         status_class=status_class,
         path_prefix=path_prefix,
+        path_exact=path_exact,
         referer_host=referer_host,
         traffic=traffic,
         bot=bot,
@@ -361,6 +433,15 @@ def validate_scope(
         provider_claim=provider_claim,
         purpose=purpose,
         search=search,
+        server_host=server_host,
+        http_version=http_version,
+        mime_type=mime_type,
+        cache_status=cache_status,
+        tls_protocol=tls_protocol,
+        timing_available=timing_available,
+        upstream_available=upstream_available,
+        timing_min_ms=timing_min_ms,
+        timing_max_ms=timing_max_ms,
     )
 
 
@@ -506,6 +587,7 @@ def run_investigation(
     status: int | None = None,
     status_class: str | None = None,
     path_prefix: str | None = None,
+    path_exact: str | None = None,
     referer_host: str | None = None,
     traffic: str = "all",
     bot: str | None = None,
@@ -513,6 +595,15 @@ def run_investigation(
     provider_claim: str | None = None,
     purpose: str | None = None,
     search: str | None = None,
+    server_host: str | None = None,
+    http_version: str | None = None,
+    mime_type: str | None = None,
+    cache_status: str | None = None,
+    tls_protocol: str | None = None,
+    timing_available: bool | None = None,
+    upstream_available: bool | None = None,
+    timing_min_ms: float | None = None,
+    timing_max_ms: float | None = None,
     max_steps: int = MAX_STEPS,
     timeout_s: float = PROVIDER_TIMEOUT_S,
     cancel: threading.Event | None = None,
@@ -568,6 +659,7 @@ def run_investigation(
         status=status,
         status_class=status_class,
         path_prefix=path_prefix,
+        path_exact=path_exact,
         referer_host=referer_host,
         traffic=traffic,
         bot=bot,
@@ -575,6 +667,15 @@ def run_investigation(
         provider_claim=provider_claim,
         purpose=purpose,
         search=search,
+        server_host=server_host,
+        http_version=http_version,
+        mime_type=mime_type,
+        cache_status=cache_status,
+        tls_protocol=tls_protocol,
+        timing_available=timing_available,
+        upstream_available=upstream_available,
+        timing_min_ms=timing_min_ms,
+        timing_max_ms=timing_max_ms,
     )
     try:
         gate.validate_for_real_data(settings)
@@ -666,6 +767,7 @@ def run_investigation(
             status=scope.status,
             status_class=scope.status_class,
             path_prefix=scope.path_prefix,
+            path_exact=scope.path_exact,
             referer_host=scope.referer_host,
             traffic=scope.traffic,
             bot=scope.bot,
@@ -673,6 +775,15 @@ def run_investigation(
             provider_claim=scope.provider_claim,
             purpose=scope.purpose,
             search=scope.search,
+            server_host=scope.server_host,
+            http_version=scope.http_version,
+            mime_type=scope.mime_type,
+            cache_status=scope.cache_status,
+            tls_protocol=scope.tls_protocol,
+            timing_available=scope.timing_available,
+            upstream_available=scope.upstream_available,
+            timing_min_ms=scope.timing_min_ms,
+            timing_max_ms=scope.timing_max_ms,
         )
         if is_real:
             # Real dispatch: decoded body from already-gated values,
@@ -693,6 +804,7 @@ def run_investigation(
                 status=scope.status,
                 status_class=scope.status_class,
                 path_prefix=scope.path_prefix,
+                path_exact=scope.path_exact,
                 referer_host=scope.referer_host,
                 traffic=scope.traffic,
                 bot=scope.bot,
@@ -700,6 +812,15 @@ def run_investigation(
                 provider_claim=scope.provider_claim,
                 purpose=scope.purpose,
                 search=scope.search,
+                server_host=scope.server_host,
+                http_version=scope.http_version,
+                mime_type=scope.mime_type,
+                cache_status=scope.cache_status,
+                tls_protocol=scope.tls_protocol,
+                timing_available=scope.timing_available,
+                upstream_available=scope.upstream_available,
+                timing_min_ms=scope.timing_min_ms,
+                timing_max_ms=scope.timing_max_ms,
             )
             try:
                 body_dict = build_dispatch_body(
@@ -869,6 +990,7 @@ def run_investigation(
                         status=scope.status,
                         status_class=scope.status_class,
                         path_prefix=scope.path_prefix,
+                        path_exact=scope.path_exact,
                         referer_host=scope.referer_host,
                         traffic=scope.traffic,
                         bot=scope.bot,
@@ -876,6 +998,15 @@ def run_investigation(
                         provider_claim=scope.provider_claim,
                         purpose=scope.purpose,
                         search=scope.search,
+                        server_host=scope.server_host,
+                        http_version=scope.http_version,
+                        mime_type=scope.mime_type,
+                        cache_status=scope.cache_status,
+                        tls_protocol=scope.tls_protocol,
+                        timing_available=scope.timing_available,
+                        upstream_available=scope.upstream_available,
+                        timing_min_ms=scope.timing_min_ms,
+                        timing_max_ms=scope.timing_max_ms,
                         tool_index=tool_total,
                         investigation_id=investigation_id,
                         observation_time=observed,
@@ -1022,6 +1153,7 @@ def _compose_user_text(
     status: int | None = None,
     status_class: str | None = None,
     path_prefix: str | None = None,
+    path_exact: str | None = None,
     referer_host: str | None = None,
     traffic: str = "all",
     bot: str | None = None,
@@ -1029,6 +1161,15 @@ def _compose_user_text(
     provider_claim: str | None = None,
     purpose: str | None = None,
     search: str | None = None,
+    server_host: str | None = None,
+    http_version: str | None = None,
+    mime_type: str | None = None,
+    cache_status: str | None = None,
+    tls_protocol: str | None = None,
+    timing_available: bool | None = None,
+    upstream_available: bool | None = None,
+    timing_min_ms: float | None = None,
+    timing_max_ms: float | None = None,
 ) -> str:
     """User message: scope, question and evidence text (no system prompt)."""
     lines = [
@@ -1041,6 +1182,7 @@ def _compose_user_text(
         f"status: {status if status is not None else '-'}",
         f"status_class: {status_class or '-'}",
         f"path_prefix: {path_prefix or '-'}",
+        f"path_exact: {path_exact or '-'}",
         f"referer_host: {referer_host or '-'}",
         f"traffic: {traffic}",
         f"bot: {bot or '-'}",
@@ -1048,6 +1190,15 @@ def _compose_user_text(
         f"provider: {provider_claim or '-'}",
         f"purpose: {purpose or '-'}",
         f"search: {search or '-'}",
+        f"server_host: {server_host or '-'}",
+        f"http_version: {http_version or '-'}",
+        f"mime_type: {mime_type or '-'}",
+        f"cache_status: {cache_status or '-'}",
+        f"tls_protocol: {tls_protocol or '-'}",
+        f"timing_available: {'-' if timing_available is None else str(timing_available)}",
+        f"upstream_available: {'-' if upstream_available is None else str(upstream_available)}",
+        f"timing_min_ms: {'-' if timing_min_ms is None else timing_min_ms}",
+        f"timing_max_ms: {'-' if timing_max_ms is None else timing_max_ms}",
         f"tools: {', '.join(TOOL_NAMES)}",
         "",
         f"Operator question: {question}",
@@ -1076,6 +1227,7 @@ def _compose_prompt(
     status: int | None = None,
     status_class: str | None = None,
     path_prefix: str | None = None,
+    path_exact: str | None = None,
     referer_host: str | None = None,
     traffic: str = "all",
     bot: str | None = None,
@@ -1083,6 +1235,15 @@ def _compose_prompt(
     provider_claim: str | None = None,
     purpose: str | None = None,
     search: str | None = None,
+    server_host: str | None = None,
+    http_version: str | None = None,
+    mime_type: str | None = None,
+    cache_status: str | None = None,
+    tls_protocol: str | None = None,
+    timing_available: bool | None = None,
+    upstream_available: bool | None = None,
+    timing_min_ms: float | None = None,
+    timing_max_ms: float | None = None,
 ) -> str:
     prompt = (
         system_prompt
@@ -1098,6 +1259,7 @@ def _compose_prompt(
             status=status,
             status_class=status_class,
             path_prefix=path_prefix,
+            path_exact=path_exact,
             referer_host=referer_host,
             traffic=traffic,
             bot=bot,
@@ -1105,6 +1267,15 @@ def _compose_prompt(
             provider_claim=provider_claim,
             purpose=purpose,
             search=search,
+            server_host=server_host,
+            http_version=http_version,
+            mime_type=mime_type,
+            cache_status=cache_status,
+            tls_protocol=tls_protocol,
+            timing_available=timing_available,
+            upstream_available=upstream_available,
+            timing_min_ms=timing_min_ms,
+            timing_max_ms=timing_max_ms,
         )
     )
     try:
@@ -1149,6 +1320,12 @@ def _projection_quality(tool_name: str, envelope: dict) -> dict:
     duration = result.get("duration")
     if isinstance(duration, dict):
         quality["timing"] = "available" if duration.get("available") else "unavailable"
+    elif isinstance(result.get("latency_available"), bool):
+        # Performance reports carry measured latency directly:
+        # available exactly when enriched request_time_ms exists.
+        quality["timing"] = "available" if result["latency_available"] else "unavailable"
+        if isinstance(result.get("latency_ms"), dict):
+            quality["measured"] = result["latency_ms"].get("measured")
     warnings: list[str] = []
     raw_warnings = result.get("warnings")
     if isinstance(raw_warnings, list):
@@ -1206,6 +1383,27 @@ def _projection_quality(tool_name: str, envelope: dict) -> dict:
         quality["limitations"] = [*LIMITATIONS_SECURITY, *LIMITATIONS_LOGS]
     elif tool_name == "get_crawler_claims":
         quality["limitations"] = [*LIMITATIONS_BOT, *LIMITATIONS_LOGS]
+    elif tool_name == "get_report":
+        report = ""
+        filters = envelope.get("filters")
+        if isinstance(filters, dict) and isinstance(filters.get("report"), str):
+            report = filters["report"]
+        if report in ("performance", "slow_endpoints"):
+            quality["limitations"] = [*LIMITATIONS_PERFORMANCE, *LIMITATIONS_LOGS]
+        elif report in (
+            "seo_redirects",
+            "seo_client_errors",
+            "seo_server_errors",
+            "seo_ai_only",
+            "referrer_404s",
+        ):
+            quality["limitations"] = [*LIMITATIONS_SEO, *LIMITATIONS_LOGS]
+        elif report in ("journeys", "journey_entries"):
+            quality["limitations"] = [*LIMITATIONS_JOURNEYS, *LIMITATIONS_LOGS]
+        elif report == "comparison":
+            quality["limitations"] = [*LIMITATIONS_BOT, *LIMITATIONS_LOGS]
+        else:
+            quality["limitations"] = list(LIMITATIONS_LOGS)
     else:
         quality["limitations"] = list(LIMITATIONS_LOGS)
     return quality
@@ -1225,6 +1423,7 @@ def _execute_bounded_tool(
     status: int | None = None,
     status_class: str | None = None,
     path_prefix: str | None = None,
+    path_exact: str | None = None,
     referer_host: str | None = None,
     traffic: str = "all",
     bot: str | None = None,
@@ -1232,6 +1431,15 @@ def _execute_bounded_tool(
     provider_claim: str | None = None,
     purpose: str | None = None,
     search: str | None = None,
+    server_host: str | None = None,
+    http_version: str | None = None,
+    mime_type: str | None = None,
+    cache_status: str | None = None,
+    tls_protocol: str | None = None,
+    timing_available: bool | None = None,
+    upstream_available: bool | None = None,
+    timing_min_ms: float | None = None,
+    timing_max_ms: float | None = None,
     tool_index: int,
     investigation_id: str,
     observation_time: datetime,
@@ -1240,7 +1448,9 @@ def _execute_bounded_tool(
     # scope. Every other selector is enforced when the parent selected it
     # and left to bounded model narrowing otherwise; the merged arguments
     # still cross the typed tool contract, so invalid or contradictory
-    # combinations fail closed instead of widening.
+    # combinations fail closed instead of widening. Selected ``False``
+    # and ``0``/``0.0`` travel as real selections via ``is None``
+    # narrowing only — they are never treated as omitted dimensions.
     model = dict(arguments) if isinstance(arguments, dict) else {}
     scoped = dict(model)
     scoped["site_id"] = site_id
@@ -1251,6 +1461,7 @@ def _execute_bounded_tool(
     scoped["status"] = _inherit_narrowing(status, model.get("status"), None)
     scoped["status_class"] = _inherit_narrowing(status_class, model.get("status_class"), None)
     scoped["path_prefix"] = _inherit_narrowing(path_prefix, model.get("path_prefix"), None)
+    scoped["path_exact"] = _inherit_narrowing(path_exact, model.get("path_exact"), None)
     scoped["referer_host"] = _inherit_narrowing(referer_host, model.get("referer_host"), None)
     scoped["traffic"] = _inherit_narrowing(traffic, model.get("traffic"), "all")
     scoped["bot"] = _inherit_narrowing(bot, model.get("bot"), None)
@@ -1258,6 +1469,19 @@ def _execute_bounded_tool(
     scoped["provider"] = _inherit_narrowing(provider_claim, model.get("provider"), None)
     scoped["purpose"] = _inherit_narrowing(purpose, model.get("purpose"), None)
     scoped["search"] = _inherit_narrowing(search, model.get("search"), None)
+    scoped["server_host"] = _inherit_narrowing(server_host, model.get("server_host"), None)
+    scoped["http_version"] = _inherit_narrowing(http_version, model.get("http_version"), None)
+    scoped["mime_type"] = _inherit_narrowing(mime_type, model.get("mime_type"), None)
+    scoped["cache_status"] = _inherit_narrowing(cache_status, model.get("cache_status"), None)
+    scoped["tls_protocol"] = _inherit_narrowing(tls_protocol, model.get("tls_protocol"), None)
+    scoped["timing_available"] = _inherit_narrowing(
+        timing_available, model.get("timing_available"), None
+    )
+    scoped["upstream_available"] = _inherit_narrowing(
+        upstream_available, model.get("upstream_available"), None
+    )
+    scoped["timing_min_ms"] = _inherit_narrowing(timing_min_ms, model.get("timing_min_ms"), None)
+    scoped["timing_max_ms"] = _inherit_narrowing(timing_max_ms, model.get("timing_max_ms"), None)
     tool_call_id = f"{investigation_id[:8]}-tc{tool_index}"
     conn = connect(Path(db_path), read_only=True)
     try:
