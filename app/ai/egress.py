@@ -211,6 +211,8 @@ _EVIDENCE_FIELDS: dict[str, frozenset[str]] = {
             "metrics",
             "comparable",
             "comparable_reasons",
+            "definition",
+            "parent_window",
             "gap_definition",
             "partial_caveat",
             "limitations",
@@ -343,6 +345,14 @@ def _full_buckets(full: dict | None) -> list | None:
     return list(buckets) if isinstance(buckets, (list, tuple)) else None
 
 
+def _window_edge(source: dict, window_key: str, edge: str) -> str:
+    """One exact window edge (ISO string) from a comparison envelope."""
+    window = source.get(window_key)
+    window = window if isinstance(window, dict) else {}
+    edge_value = window.get(edge)
+    return edge_value if isinstance(edge_value, str) else "?"
+
+
 def _project_report(report: object, minimized: dict, full: dict | None) -> str:
     """Compact typed projection for one ``get_report`` value.
 
@@ -391,7 +401,17 @@ def _project_report(report: object, minimized: dict, full: dict | None) -> str:
             for row in rows[:EVIDENCE_PROJECTION_ITEMS]
             if isinstance(row, dict)
         ]
-        return _compact_json({"paths": total, "more": max(0, total - len(shown)), "top": shown})
+        sort = source.get("sort")
+        sort = sort if isinstance(sort, str) else "?"
+        return _compact_json(
+            {
+                "paths": total,
+                "more": max(0, total - len(shown)),
+                "sort": sort,
+                "sort_definition": "server avg rank; not a p95 rank",
+                "top": shown,
+            }
+        )
     if report in ("seo_redirects", "seo_client_errors", "seo_server_errors"):
         items = minimized.get("items")
         rows = list(items) if isinstance(items, (list, tuple)) else []
@@ -481,6 +501,9 @@ def _project_report(report: object, minimized: dict, full: dict | None) -> str:
     if report == "comparison":
         metrics = source.get("metrics")
         rows = list(metrics) if isinstance(metrics, (list, tuple)) else []
+        # The per-hour rate is derivable from requests and the exact
+        # windows below, so it stays out of the bounded projection;
+        # the full envelope (and API/UI) keeps all seven metrics.
         shown = [
             {
                 # Current and previous cross exactly (ints stay ints);
@@ -489,21 +512,33 @@ def _project_report(report: object, minimized: dict, full: dict | None) -> str:
                 "name": row.get("name", "?"),
                 "current": row.get("current"),
                 "previous": row.get("previous"),
-                "ratio_status": row.get("ratio_status", "?"),
+                "status": row.get("ratio_status", "?"),
             }
             for row in rows
-            if isinstance(row, dict)
+            if isinstance(row, dict) and row.get("name") != "requests_per_hour"
         ]
-        previous_window = source.get("previous_window")
-        previous_window = previous_window if isinstance(previous_window, dict) else {}
-        return _compact_json(
-            {
-                "comparable": _bool_or_none(source.get("comparable")),
-                "metrics": shown,
-                "previous_from": previous_window.get("time_from", "?"),
-                "previous_to": previous_window.get("time_to", "?"),
-            }
-        )
+        statuses = {row.get("status", "?") for row in shown}
+        payload: dict[str, object] = {
+            "comparable": _bool_or_none(source.get("comparable")),
+            "metrics": shown,
+            "definition": "inside halves: baseline first, current second",
+            "current": [
+                _window_edge(source, "current_window", "time_from"),
+                _window_edge(source, "current_window", "time_to"),
+            ],
+            "previous": [
+                _window_edge(source, "previous_window", "time_from"),
+                _window_edge(source, "previous_window", "time_to"),
+            ],
+        }
+        if len(statuses) == 1:
+            # Uniform verdict (e.g. every ratio limited): hoist the one
+            # shared status instead of repeating it on every metric.
+            only = next(iter(statuses))
+            payload["status"] = only
+            for row in shown:
+                del row["status"]
+        return _compact_json(payload)
     raise EgressViolation("unknown_tool", f"No evidence contract for {report!r}.")
 
 

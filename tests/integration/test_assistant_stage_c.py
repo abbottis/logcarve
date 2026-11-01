@@ -198,7 +198,8 @@ def cenv(tmp_path, monkeypatch):
             "-",
             "-",
         ),
-        # Previous-window rows for the server-derived comparison baseline.
+        # Rows outside the selected window: the model comparison must
+        # never read them (inside-split baseline stays in-window).
         (
             "27/Oct/2026:09:30:00",
             "GET",
@@ -691,17 +692,23 @@ def test_journey_reports_are_aggregates_only(cenv):
     assert "export" not in " ".join(REPORT_NAMES)
 
 
-def test_comparison_reads_server_derived_previous_window(cenv):
+def test_comparison_reads_inside_split_windows(cenv):
     envelope = _run(cenv, "get_report", _args(report="comparison"))
     result = envelope["result"]
+    mid = FROM + (TO - FROM) / 2
     assert result["previous_window"] == {
-        "time_from": PREV_FROM.isoformat(),
-        "time_to": FROM.isoformat(),
+        "time_from": FROM.isoformat(),
+        "time_to": mid.isoformat(),
     }
     assert result["current_window"] == {
+        "time_from": mid.isoformat(),
+        "time_to": TO.isoformat(),
+    }
+    assert result["parent_window"] == {
         "time_from": FROM.isoformat(),
         "time_to": TO.isoformat(),
     }
+    assert "inside" in result["definition"] and "never outside" in result["definition"]
     assert result["selectors"]["traffic"] == "all"
     assert result["filters"]["current"]["site_id"] == "default"
     names = [metric["name"] for metric in result["metrics"]]
@@ -716,7 +723,9 @@ def test_comparison_reads_server_derived_previous_window(cenv):
         coverage={},
         full_result=result,
     )
-    assert PREV_FROM.isoformat() in summary  # previous window is explicit, never invented
+    assert FROM.isoformat() in summary  # baseline start is explicit, never invented
+    assert mid.isoformat() in summary  # current start is explicit, never invented
+    assert "definition" in summary
 
 
 # ---------------------------------------------------------------------------
@@ -787,8 +796,13 @@ def test_investigation_scope_overrides_hostile_model_args(cenv, no_network):
     assert filters["path_exact"] == "/measured-fast"
     assert filters["timing_available"] is True
     assert filters["timing_min_ms"] == 0
-    # The comparison baseline stays server-derived: never model history.
-    assert result.evidence[0]["result"]["previous_window"]["time_from"] == PREV_FROM.isoformat()
+    # The comparison baseline stays server-derived inside the trusted
+    # window: never model history, never outside the selected scope.
+    mid = FROM + (TO - FROM) / 2
+    assert result.evidence[0]["result"]["previous_window"]["time_from"] == FROM.isoformat()
+    assert result.evidence[0]["result"]["previous_window"]["time_to"] == mid.isoformat()
+    assert result.evidence[0]["result"]["current_window"]["time_from"] == mid.isoformat()
+    assert result.evidence[0]["result"]["current_window"]["time_to"] == TO.isoformat()
 
 
 def test_investigation_rejects_contradictory_scope_before_dispatch(cenv, no_network):

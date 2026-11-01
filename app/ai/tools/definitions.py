@@ -40,9 +40,10 @@ TOOL_NAMES = (
 
 #: Bounded aggregate reports behind the single ``get_report`` tool.
 #: Timelines, raw rows and full exports are deliberately absent: the
-#: assistant gets aggregates only. Comparison reads the validated
-#: scope against its own server-derived previous window — models
-#: never supply a historical window.
+#: assistant gets aggregates only. Comparison compares equal halves
+#: INSIDE the validated scope (baseline first half, current second
+#: half) — models never supply a historical window and nothing
+#: outside the selected window is read.
 REPORT_NAMES = (
     "performance",
     "slow_endpoints",
@@ -121,11 +122,17 @@ class ReportArguments(ToolArguments):
     Fixed server-side rankings and windows keep the surface small:
     slow endpoints rank by average, journeys list by request count,
     referrer 404s cover both relations with labels, and comparison
-    always reads the server-derived previous window.
+    compares equal halves INSIDE the selected window (baseline first
+    half, current second half), never outside it.
     """
 
     report: str = Field(
-        pattern="^(performance|slow_endpoints|seo_redirects|seo_client_errors|seo_server_errors|seo_ai_only|referrer_404s|journeys|journey_entries|comparison)$"
+        pattern="^(performance|slow_endpoints|seo_redirects|seo_client_errors|seo_server_errors|seo_ai_only|referrer_404s|journeys|journey_entries|comparison)$",
+        description=(
+            "Aggregate report selector. comparison compares equal halves "
+            "INSIDE the selected window (baseline first half, current "
+            "second half); it never reads outside the selected window."
+        ),
     )
 
 
@@ -282,7 +289,7 @@ def execute_tool(
             raise ToolError("store_unavailable", "The data store is unavailable.") from exc
     try:
         try:
-            return _execute_validated(
+            envelope = _execute_validated(
                 conn,
                 rules,
                 name=name,
@@ -309,12 +316,15 @@ def execute_tool(
             except sqlite3.Error:
                 pass
         raise ToolError("store_unavailable", "The data store is unavailable.") from exc
-    else:
-        if held:
+    if held:
+        try:
+            conn.execute("COMMIT")
+        except sqlite3.Error:
             try:
-                conn.execute("COMMIT")
+                conn.execute("ROLLBACK")
             except sqlite3.Error:
                 pass
+    return envelope
 
 
 def _execute_validated(conn, rules, *, name, filt, args, tool_call_id, observed) -> dict:
@@ -350,9 +360,9 @@ def _execute_report(conn, rules, *, report: str, filt, observed) -> dict:
     """Run one bounded aggregate report on the shared deterministic layer.
 
     Rankings and windows are server-fixed (slow endpoints by
-    average, journeys by request count, comparison against the
-    server-derived previous window): models select the report, never
-    a ranking, a timeline key or a historical window. Unknown
+    average, journeys by request count, comparison of equal halves
+    INSIDE the selected trusted window): models select the report,
+    never a ranking, a timeline key or a historical window. Unknown
     reports fail closed here and at the schema boundary.
     """
     if report == "performance":
@@ -377,8 +387,19 @@ def _execute_report(conn, rules, *, report: str, filt, observed) -> dict:
     if report == "journey_entries":
         return service.journey_entry_paths(conn, filt, rules, observation_time=observed)
     if report == "comparison":
-        previous = service.previous_window_filter(filt)
-        return service.compare_windows(conn, filt, previous, rules, observation_time=observed)
+        current, previous = service.split_trusted_window_filter(filt)
+        compared = service.compare_windows(
+            conn, current, previous, rules, observation_time=observed
+        )
+        compared["definition"] = (
+            "equal trusted-window halves: baseline is the first half, "
+            "current is the second half; both stay inside, never outside"
+        )
+        compared["parent_window"] = {
+            "time_from": filt.window.time_from.isoformat(),
+            "time_to": filt.window.time_to.isoformat(),
+        }
+        return compared
     raise ValueError(f"unknown report: {report!r}")
 
 

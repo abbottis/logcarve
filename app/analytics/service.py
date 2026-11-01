@@ -899,6 +899,14 @@ def previous_window_filter(filt: AnalyticsFilter) -> AnalyticsFilter:
     Only the window slides back by exactly its own duration; every
     other selector (site, source, matchers) is preserved so the
     comparison never widens the authorized scope.
+
+    NOTE: this helper is for the EXPLICIT deterministic API/UI
+    comparison, where the caller supplies and authorizes both
+    windows. The model assistant must NOT use it: an untrusted
+    model report selector would otherwise read outside the trusted
+    investigation interval. Model comparison uses
+    :func:`split_trusted_window_filter` (both halves inside the
+    selected window) instead.
     """
     duration = filt.window.time_to - filt.window.time_from
     return filt.model_copy(
@@ -911,6 +919,36 @@ def previous_window_filter(filt: AnalyticsFilter) -> AnalyticsFilter:
             "offset": 0,
         }
     )
+
+
+def split_trusted_window_filter(
+    filt: AnalyticsFilter,
+) -> tuple[AnalyticsFilter, AnalyticsFilter]:
+    """Split the selected trusted window into equal inside halves.
+
+    Returns ``(current, previous)`` where ``previous`` is the first
+    half ``[time_from, mid)`` and ``current`` is the second half
+    ``[mid, time_to)`` with ``mid = time_from + duration / 2``. Both
+    halves stay strictly inside the selected trusted interval, so a
+    model-selected ``comparison`` report never reads outside it. All
+    other selectors (site, source, matchers) and paging are preserved
+    on both sides so the comparison never widens or narrows the
+    authorized population. The total window must span a positive even
+    number of microseconds (real investigation windows do); anything
+    else raises ``ValueError`` and the tool fails closed.
+    """
+    total_us = _window_micros(filt)
+    if total_us < 2 or total_us % 2 != 0:
+        raise ValueError("trusted window cannot be split into equal halves")
+    half = timedelta(microseconds=total_us // 2)
+    mid = filt.window.time_from + half
+    previous = filt.model_copy(
+        update={"window": TimeWindow(time_from=filt.window.time_from, time_to=mid)}
+    )
+    current = filt.model_copy(
+        update={"window": TimeWindow(time_from=mid, time_to=filt.window.time_to)}
+    )
+    return current, previous
 
 
 def _comparison_metric(

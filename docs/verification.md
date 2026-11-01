@@ -1,5 +1,90 @@
 # Verification record
 
+## 2026-11-01 — Parity T3b assistant/client corrections (4 findings)
+
+Owner-authorized bounded continuation on
+`feature/logwerk-parity-2026-11-01` (prior HEAD `fbc1433`
+preserved, no amend), exact model `muse-spark-1.3-contributor` /
+medium / Contributor ON; sandbox + approval ON, sole writer, no
+subagents, no extra approval loop, no parent files/keys/private
+history/real logs, no Docker/product/provider calls/push/main/
+deployment. All code/tests by the implementer. Public/synthetic
+data only; the 120 fixtures, 77 bot rules, HMAC/auth/usage and
+all previous commits preserved. No UI import, no translations.
+Independent review stays required before T4a.
+
+Reproduced first on the frozen tree (venv python, synthetic
+stores only): owned `BEGIN` left `conn.in_transaction True` after
+a successful `get_summary`; `get_report(report=comparison)` for
+28Oct00Z–29Oct00Z returned `previous_window` 27Oct00Z–28Oct00Z
+(outside the selected interval); `_verify_export_file` called
+unbounded `handle.read()`; `open(dest, "wb")` overwrote existing
+targets; the default `HTTPRedirectHandler` forwarded
+`Authorization` cross-origin (coordinator Request-only probe).
+No finding was already fixed.
+
+Correction gates (each re-probed before fixing, then covered by
+controlled tests):
+
+1. Tool snapshot ownership (`app/ai/tools/definitions.py`): the
+   envelope is now computed inside the `try`, the owned snapshot
+   commits BEFORE `return` on success and rolls back on
+   `ToolError`/store failures, while caller-owned transactions
+   stay intact (no commit/rollback by the tool).
+   `_execute_bounded_tool` still closes its handle before any
+   provider await.
+2. Trusted comparison (`app/analytics/service.py`,
+   `app/ai/tools/definitions.py`, `app/ai/egress.py`): the model
+   `comparison` report now compares equal halves INSIDE the
+   selected window (`split_trusted_window_filter`: baseline first
+   half, current second half; odd/sub-microsecond windows fail
+   closed), with explicit `definition` + `parent_window` metadata.
+   The explicit deterministic API/UI comparison
+   (`baseline_from`/`baseline_to`) is unchanged. Model evidence
+   carries both exact windows plus the definition; the bounded
+   projection nests window pairs, hoists a uniform verdict, and
+   omits only the derivable per-hour rate (full envelope and
+   API/UI keep all seven metrics). Slow-endpoint evidence now
+   carries the server `sort` (`avg_desc`) with an explicit
+   rank label, so an average-ranked sample cannot read as a
+   global p95 ranking. 1600-char/65 KiB bounds unchanged (no
+   budget raised).
+3. Client hardening (`clients/logcarve_api_client.py`, stdlib
+   only): `_SafeRedirectHandler` keeps `Authorization` on
+   same-origin/upgraded redirects and rejects cross-origin, port
+   change and `https`→`http` downgrade with a safe error for
+   BOTH `fetch` and `download_export` (fake-transport covered,
+   no network/key). Downloads refuse pre-existing targets
+   (including symlinks) before any request, create owned `0600`
+   outputs via `O_EXCL`/`O_NOFOLLOW`, and remove ONLY the
+   run-owned partial on every failure (`IncompleteRead`,
+   timeouts included); messages never carry tokens or bodies.
+   Verification streams from disk (no unbounded `read()`):
+   CSV rows via the stdlib `csv` reader (quoted newlines and
+   multibyte splits stay in-record), JSON incrementally with a
+   bounded decoder buffer and per-row state (exact
+   `metadata.row_count`/row count/`complete: true`,
+   numeric/null/formula semantics preserved).
+   `ExportStreamingResponse` ASGI `finally` cleanup, the
+   12-case CSV/JSON matrix, 2.3/2.4 headers/first-body/row-body
+   matrix (all closed), single-snapshot metadata/count/cap/rows
+   and pre-header safe 503 are retained with no regressions to
+   private-data, source/time/site scope, rule-version or schema
+   safety.
+
+| Check | Result | Evidence |
+| --- | --- | --- |
+| New `tests/unit/test_t3b_corrections.py` | PASS | 24 passed: owned/caller-owned/error/ghost-writer snapshots; inside-split windows, outside-edge exclusion, hostile-time override, unsplittable fail-closed; bounded CSV/JSON verification (refusing wrappers, chunk splits, 8 bad bodies, numeric/null/formula); existing/symlink refusal, owned-0600 + midstream cleanup; redirect matrix + safe-opener fetch/download; ranking/windows evidence within 1600 chars |
+| Updated `tests/integration/test_assistant_stage_c.py` | PASS | 28 passed: comparison asserts the inside split (baseline `[FROM, MID)`, current `[MID, TO)`, `parent_window`, definition) and hostile-time override inside the window; 09:30 rows kept as never-read outside edges |
+| AI/egress/native-wire fake tests, outbound sockets denied | PASS | 206 passed, 2 skipped (loopback-only socket guard plugin in `/tmp`, not committed) |
+| Full `tests/unit tests/integration` clean | PASS | 843 passed, 2 skipped |
+| Full suites conflicting env (`AI_ENABLED=true LLM_WARN_AT_USD=999`) | PASS | 843 passed, 2 skipped |
+| External client regressions | PASS | Covered in full clean suite (`test_external_client.py` live-loopback) |
+| `ruff check` + `ruff format --check` | PASS | Both clean repo-wide (189 files formatted) |
+| `uv lock --check --offline` | PASS | Resolved 42 packages, no manifest/lock delta (stdlib only) |
+| 120 fixtures / HMAC / 77 rules / usage | PASS | Untouched: tree shows only 4 modified app/client files + 1 updated test + 1 new test; no fixture/rule/config changes |
+| Real AI / real acceptance / release | NOT RUN | No production transport, key, account or paid call; no native Linux/release claim; stopping for independent review before T4a |
+
 ## 2026-11-01 — Parity T3a API/export completion (PAR-07)
 
 Owner-authorized bounded continuation of the uncommitted T3a
