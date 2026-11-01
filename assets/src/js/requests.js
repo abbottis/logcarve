@@ -7,6 +7,25 @@
 (function () {
   "use strict";
 
+  /* BFCache privacy refresh: htmx history snapshots are disabled
+   * (historyCacheSize 0) and dynamic pages are no-store, but a browser
+   * back/forward restore can still resurrect a DOM rendered under a
+   * fuller private view. When this page carries non-pseudonym private
+   * content, reload from the server on a persisted (BFCache) restore
+   * so stale originals are not kept on screen. Display masking is
+   * forward-looking only: it never erases an address an authorized
+   * admin already saw or copied. */
+  window.addEventListener("pageshow", function (event) {
+    if (!event.persisted) return;
+    try {
+      if (document.querySelector("[data-private-stale-reload]")) {
+        window.location.reload();
+      }
+    } catch (err) {
+      /* A failed refresh check keeps the server-rendered page as-is. */
+    }
+  });
+
   function label(button, open) {
     var custom = open
       ? button.getAttribute("data-label-hide")

@@ -8,11 +8,13 @@ tokens never do. The login form posts JSON to the existing
 Every log-derived value renders through Jinja2 autoescaping.
 """
 
+import math
+import re
 from dataclasses import asdict
 from datetime import UTC, datetime, timedelta
 from http import HTTPStatus
 from pathlib import Path
-from urllib.parse import quote, urlencode
+from urllib.parse import parse_qsl, quote, urlencode
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 from fastapi import APIRouter, Request
@@ -33,6 +35,8 @@ from app.analytics.contracts import (
 from app.analytics.service import Finding
 from app.api.deps import read_store, require_admin_session
 from app.config import load_settings
+from app.db import private as private_store
+from app.web import private_ip as private_view
 from app.web.evidence import evidence_url as _evidence_url
 from app.web.locales import t
 from app.web.timezones import (
@@ -275,6 +279,9 @@ def _parse_matchers(q) -> tuple[dict | None, str | None]:
         len(search) > 128 or any(ord(char) < 0x20 or ord(char) == 0x7F for char in search)
     ):
         return None, "error.bad_params"
+    enriched, error = _parse_enrichment_matchers(q)
+    if error is not None:
+        return None, error
     return {
         "method": raw_method,
         "status": status,
@@ -284,6 +291,107 @@ def _parse_matchers(q) -> tuple[dict | None, str | None]:
         "traffic": traffic,
         "search": search,
         **selectors,
+        **enriched,
+    }, None
+
+
+def _clean_text(value: str | None, *, limit: int) -> str | None:
+    """Trimmed ASCII text without controls, or None when blank.
+
+    Returns the sentinel ``""`` (empty string) when the value is
+    present but invalid, so callers map it to ``error.bad_params``.
+    """
+    if value is None:
+        return None
+    text = value.strip()
+    if not text:
+        return None
+    if len(text) > limit or not text.isascii():
+        return ""
+    if "\\" in text or any(ord(char) < 0x20 or ord(char) == 0x7F for char in text):
+        return ""
+    return text
+
+
+def _parse_enrichment_matchers(q) -> tuple[dict | None, str | None]:
+    """T2 measured-enrichment selectors shared by every data view (PAR-03).
+
+    Every value is validated against the same rules as the shared
+    :class:`AnalyticsFilter` contract (equality matchers replayed as
+    bound parameters downstream), so a value passing here can never
+    violate it. Unknown or contradictory values reject with
+    ``error.bad_params`` instead of silently widening.
+    """
+    path_exact = _clean_text(q.get("path_exact"), limit=1024)
+    if path_exact == "" or (
+        path_exact is not None and (not path_exact.startswith("/") or "\x00" in path_exact)
+    ):
+        return None, "error.bad_params"
+    server_host = _clean_text(q.get("server_host"), limit=253)
+    if server_host == "" or (server_host is not None and " " in server_host):
+        return None, "error.bad_params"
+    if server_host is not None:
+        # Stored hosts are lowercase; the contract folds the same way,
+        # so fold here to keep the URL replay honest.
+        server_host = server_host.lower()
+        if not server_host or "\x00" in server_host:
+            return None, "error.bad_params"
+    http_version = _clean_text(q.get("http_version"), limit=16)
+    if http_version is not None and not re.match(r"^HTTP/\d+(\.\d+)?$", http_version):
+        return None, "error.bad_params"
+    mime_type = _clean_text(q.get("mime_type"), limit=128)
+    if mime_type is not None:
+        media = mime_type.split(";", 1)[0].strip().lower()
+        if not re.match(r"^[^/\s;]{1,64}/[^;\s]{1,64}$", media):
+            return None, "error.bad_params"
+        mime_type = media
+    cache_status = _clean_text(q.get("cache_status"), limit=32)
+    if cache_status is not None:
+        cache_status = cache_status.upper()
+        if not re.match(r"^[A-Z_]{1,32}$", cache_status):
+            return None, "error.bad_params"
+    tls_protocol = _clean_text(q.get("tls_protocol"), limit=32)
+    if tls_protocol is not None and not re.match(r"^[A-Za-z0-9._-]{1,32}$", tls_protocol):
+        return None, "error.bad_params"
+    availability: dict[str, object] = {}
+    for key in ("timing_available", "upstream_available"):
+        raw = (q.get(key) or "").strip().lower() or None
+        if raw is None:
+            availability[key] = None
+        elif raw == "yes":
+            availability[key] = True
+        elif raw == "no":
+            availability[key] = False
+        else:
+            return None, "error.bad_params"
+    bounds: dict[str, object] = {}
+    for key in ("timing_min_ms", "timing_max_ms"):
+        raw = (q.get(key) or "").strip() or None
+        if raw is None:
+            bounds[key] = None
+            continue
+        try:
+            number = float(raw)
+        except ValueError:
+            return None, "error.bad_params"
+        if not math.isfinite(number) or number < 0:
+            return None, "error.bad_params"
+        bounds[key] = number
+    if (
+        bounds["timing_min_ms"] is not None
+        and bounds["timing_max_ms"] is not None
+        and bounds["timing_min_ms"] > bounds["timing_max_ms"]
+    ):
+        return None, "error.bad_params"
+    return {
+        "path_exact": path_exact,
+        "server_host": server_host,
+        "http_version": http_version,
+        "mime_type": mime_type,
+        "cache_status": cache_status,
+        "tls_protocol": tls_protocol,
+        **availability,
+        **bounds,
     }, None
 
 
@@ -315,6 +423,21 @@ def _parse_paging(q, default: int = 20) -> tuple[dict | None, str | None]:
     return {"limit": limit, "offset": offset}, None
 
 
+def _matcher_url_value(value: object) -> object:
+    """URL spelling for a matcher value: booleans ride as yes/no.
+
+    The filter bar parses ``timing_available``/``upstream_available``
+    from ``yes``/``no``; serializing Python ``True`` here would emit
+    ``True`` and fail the round-trip parse, silently dropping the
+    matcher on reload, back/forward and htmx pushes.
+    """
+    if value is True:
+        return "yes"
+    if value is False:
+        return "no"
+    return value
+
+
 def _canonical_query(params, site: str) -> dict[str, object]:
     """Shared filter set for canonical page URLs (route path excluded)."""
     query: dict[str, object] = {
@@ -328,7 +451,7 @@ def _canonical_query(params, site: str) -> dict[str, object]:
         query["source"] = params["source"]
     for key, value in params["matchers"].items():
         if value is not None:
-            query[key] = value
+            query[key] = _matcher_url_value(value)
     query["limit"] = params["limit"]
     query["offset"] = params["offset"]
     if params["bucket"] is not None:
@@ -350,6 +473,7 @@ MATCHER_KEYS = (
     "status",
     "status_class",
     "path_prefix",
+    "path_exact",
     "referer_host",
     "traffic",
     "bot",
@@ -357,13 +481,22 @@ MATCHER_KEYS = (
     "provider",
     "purpose",
     "search",
+    "server_host",
+    "http_version",
+    "mime_type",
+    "cache_status",
+    "tls_protocol",
+    "timing_available",
+    "upstream_available",
+    "timing_min_ms",
+    "timing_max_ms",
 )
 
 
 def _matcher_query(params) -> dict[str, object]:
     """Non-empty global matchers, shared by navigation and page URLs."""
     return {
-        key: params["matchers"][key]
+        key: _matcher_url_value(params["matchers"][key])
         for key in MATCHER_KEYS
         if params["matchers"].get(key) is not None
     }
@@ -479,6 +612,7 @@ def _base_filter(params, site: str) -> AnalyticsFilter:
         status=matchers["status"],
         status_class=matchers.get("status_class"),
         path_prefix=matchers["path_prefix"],
+        path_exact=matchers.get("path_exact"),
         referer_host=matchers["referer_host"],
         search=matchers.get("search"),
         traffic=matchers.get("traffic") or "all",
@@ -486,6 +620,15 @@ def _base_filter(params, site: str) -> AnalyticsFilter:
         category=matchers.get("category"),
         provider=matchers.get("provider"),
         purpose=matchers.get("purpose"),
+        server_host=matchers.get("server_host"),
+        http_version=matchers.get("http_version"),
+        mime_type=matchers.get("mime_type"),
+        cache_status=matchers.get("cache_status"),
+        tls_protocol=matchers.get("tls_protocol"),
+        timing_available=matchers.get("timing_available"),
+        upstream_available=matchers.get("upstream_available"),
+        timing_min_ms=matchers.get("timing_min_ms"),
+        timing_max_ms=matchers.get("timing_max_ms"),
         limit=100,
         offset=0,
     )
@@ -884,6 +1027,13 @@ def _active_filter_display(matchers: dict, rules=None) -> list[dict[str, str]]:
                 shown = status_label(int(value))
             except (TypeError, ValueError):
                 shown = value
+        elif key in ("timing_available", "upstream_available"):
+            shown = t("filter.timing_with") if value is True else t("filter.timing_without")
+        elif key in ("timing_min_ms", "timing_max_ms"):
+            try:
+                shown = f"{float(value):g} ms"
+            except (TypeError, ValueError):
+                shown = value
         items.append({"key": key, "value": shown})
     return items
 
@@ -1208,7 +1358,7 @@ def _sort_headers(page_url_fn, current: str, tz_name: str) -> list[dict[str, obj
     return headers
 
 
-def _requests_context(request: Request, conn, params):
+def _requests_context(request: Request, conn, params, ip_search_error: str | None = None):
     site, sites, error = _site_or_error(conn, params)
     if error is not None:
         return None, error
@@ -1224,8 +1374,21 @@ def _requests_context(request: Request, conn, params):
     if error is not None:
         return None, error
     page_filt = filt.model_copy(update={"limit": params["limit"], "offset": params["offset"]})
-    explorer = service.request_explorer(
-        conn, ExplorerQuery(filt=page_filt, sort=sort), request.app.state.rules
+    # The page rows and their private originals resolve inside this same
+    # read snapshot: the internal request id binds each displayed row to
+    # its own encrypted original by primary key (never by
+    # timestamp/path/pseudonym or ordinal), so identical adjacent rows
+    # and concurrent writer commits cannot cross-pair events. IDs stay
+    # internal: they never reach API/exports/tools/errors.
+    clf = service.classifier_for_filter(filt, request.app.state.rules)
+    assert clf is not None
+    paired, total_rows = queries.request_rows_with_ids(
+        conn, ExplorerQuery(filt=page_filt, sort=sort), clf
+    )
+    display_state = private_store.resolve_display_state(conn)
+    key, key_code = private_view.key_status(conn)
+    private_rows = private_view.attach_private(
+        conn, paired, key=key, key_code=key_code, state=display_state
     )
     summary = service.summarize(conn, filt, request.app.state.rules)
     _attach_observed_options(conn, context, filt, request.app.state.rules)
@@ -1239,7 +1402,7 @@ def _requests_context(request: Request, conn, params):
     # in the title attribute so both instants are inspectable. Stored
     # values are UTC ISO strings; unparsable ones fall back to verbatim.
     rows = []
-    for index, row in enumerate(explorer["items"]):
+    for index, row in enumerate(private_rows):
         display = str(row["ts_utc"])
         offset = params["tz_name"]
         try:
@@ -1273,8 +1436,26 @@ def _requests_context(request: Request, conn, params):
                 "status_phrase": status_phrase(int(row["status"])),
                 "rule_meta": rule_meta,
                 "detail_id": f"req-detail-{params['offset'] + index}",
+                # Sanitized absolute referrer link (http/https only) or
+                # None: templates render plain text otherwise, never a
+                # dangerous scheme or a secret-bearing value.
+                "referrer_url": private_view.safe_referrer_url(
+                    row.get("referer_scheme"), row.get("referer_host"), row.get("referer_path")
+                ),
             }
         )
+    # Full-result download links preserve the applied window, every
+    # matcher, the explorer sort and the display timezone; the reviewed
+    # session export streams pseudonyms only in every IP mode.
+    export_base = "/export/requests" + _nav_query(params, site)
+    session = _session_or_none(request)
+    csrf_token = session.csrf_token if session is not None else ""
+    if display_state.get("corrupt"):
+        ip_banner = "privacy.ip_corrupt"
+    elif display_state.get("mode") != private_store.IP_DISPLAY_PSEUDONYM_ONLY and key is None:
+        ip_banner = key_code or "privacy.ip_unavailable_no_key"
+    else:
+        ip_banner = None
     context.update(
         {
             "summary": summary,
@@ -1286,10 +1467,16 @@ def _requests_context(request: Request, conn, params):
                 sort,
                 params["tz_name"],
             ),
-            "paging": _paging_nav(
-                "/requests", params, site, explorer["total_rows"], {"sort": sort}
-            ),
+            "paging": _paging_nav("/requests", params, site, total_rows, {"sort": sort}),
             "fragment_url": "/partials/requests",
+            "ip_mode": display_state.get("mode"),
+            "ip_corrupt": bool(display_state.get("corrupt")),
+            "ip_key_configured": key is not None,
+            "ip_banner": ip_banner,
+            "ip_search_error": ip_search_error,
+            "csrf_token": csrf_token,
+            "export_csv_url": f"{export_base}&format=csv&sort={sort}",
+            "export_json_url": f"{export_base}&format=json&sort={sort}",
         }
     )
     return context, None
@@ -1358,8 +1545,11 @@ def _optional_nav_query(request: Request) -> str:
     return "?" + urlencode(query)
 
 
-def _settings_context(request: Request):
+def _settings_context(request: Request, conn, settings_error: str | None = None):
     settings = load_settings()
+    display_state = private_store.resolve_display_state(conn)
+    key, _ = private_view.key_status(conn)
+    session = _session_or_none(request)
     return {
         "t": t,
         "request": request,
@@ -1381,7 +1571,61 @@ def _settings_context(request: Request):
         "llm_stop_at_usd": settings.llm_stop_at_usd,
         "llm_daily_limit_usd": settings.llm_daily_limit_usd,
         "open_model_id": settings.open_model_id,
+        "ip_mode": display_state.get("mode"),
+        "ip_v4_hidden": display_state.get("v4_hidden"),
+        "ip_v6_hidden": display_state.get("v6_hidden"),
+        "ip_corrupt": bool(display_state.get("corrupt")),
+        "ip_key_configured": key is not None,
+        "settings_error": settings_error,
+        "csrf_token": session.csrf_token if session is not None else "",
     }
+
+
+def _form_fields(request: Request, body: bytes) -> dict[str, str]:
+    """URL-encoded HTML form fields parsed with the standard library.
+
+    The dashboard posts plain forms (no file inputs), so
+    ``application/x-www-form-urlencoded`` bodies are parsed without
+    any extra dependency. Other content types, undecodable bytes or
+    malformed pairs yield no fields and fail closed downstream —
+    never an exception from a missing multipart parser.
+    """
+    content_type = request.headers.get("content-type", "").split(";")[0].strip().lower()
+    if content_type != "application/x-www-form-urlencoded":
+        return {}
+    try:
+        text = body.decode("utf-8")
+    except UnicodeDecodeError:
+        return {}
+    fields: dict[str, str] = {}
+    try:
+        pairs = parse_qsl(text, keep_blank_values=True)
+    except (ValueError, TypeError):
+        return {}
+    for key, value in pairs:
+        fields.setdefault(key, value)
+    return fields
+
+
+def _valid_csrf_field(presented: object, expected: object) -> bool:
+    """Constant-time CSRF check for form-field tokens; fail-closed.
+
+    The header path uses :func:`app.api.deps.require_csrf`; HTML forms
+    on this slice post the same per-session token as a field instead.
+    Non-string, empty, non-ASCII or mismatched values all fail closed
+    without raising (``compare_digest`` raises ``TypeError`` on
+    non-ASCII ``str``).
+    """
+    import hmac as _hmac
+
+    if not isinstance(presented, str) or not presented:
+        return False
+    if not isinstance(expected, str) or not expected:
+        return False
+    try:
+        return _hmac.compare_digest(presented, expected)
+    except (TypeError, ValueError, AttributeError):
+        return False
 
 
 def _sources_context(request: Request, conn):
@@ -1662,8 +1906,158 @@ def ask_page(request: Request):
 def settings_page(request: Request):
     if _session_or_none(request) is None:
         return _redirect_to_login(request)
-    context = _settings_context(request)
+    with read_store(request) as conn:
+        context = _settings_context(request, conn)
     return templates.TemplateResponse(request, "pages/settings.html", context)
+
+
+@router.post("/settings/ip-display", response_class=HTMLResponse)
+async def settings_ip_display_update(request: Request):
+    """Persist the private original-IP display preference (T4a, PAR-02).
+
+    Local-admin session only (Bearer [REDACTED] never authorize this);
+    CSRF is accepted as the per-session header or as the form field of
+    the same token. Only the display mode and the validated hidden
+    octet/hextet counts are stored — never a key, never an address.
+    Filter/window state rides the action query string and returns via a
+    303 redirect, so mode changes never widen or drop the scope.
+    """
+    session = _session_or_none(request)
+    if session is None:
+        return _error_page(request, "error.auth_required", 401)
+    from app.api.deps import require_csrf
+
+    request_id = request.state.request_id
+    header_ok = require_csrf(request, session, request_id) is None
+    body = _form_fields(request, await request.body())
+    field_token = body.get("csrf_token")
+    if not header_ok and not _valid_csrf_field(field_token, session.csrf_token):
+        return _error_page(request, "error.csrf_required", 403)
+    raw_mode = body.get("ip_mode")
+    mode = raw_mode.strip() if isinstance(raw_mode, str) else ""
+    try:
+        v4_hidden = int(str(body.get("ip_v4_hidden", "")).strip())
+        v6_hidden = int(str(body.get("ip_v6_hidden", "")).strip())
+    except (TypeError, ValueError):
+        with read_store(request) as conn:
+            context = _settings_context(request, conn, "error.bad_params")
+        return templates.TemplateResponse(request, "pages/settings.html", context, status_code=400)
+    if mode not in private_store.IP_DISPLAY_MODES:
+        with read_store(request) as conn:
+            context = _settings_context(request, conn, "error.bad_params")
+        return templates.TemplateResponse(request, "pages/settings.html", context, status_code=400)
+    from app.db.database import writer_transaction
+
+    try:
+        with writer_transaction(request.app.state.db_path) as conn:
+            private_store.set_ip_display_mode(conn, mode)
+            private_store.set_ip_hidden_counts(conn, v4_hidden, v6_hidden)
+    except ValueError:
+        with read_store(request) as conn:
+            context = _settings_context(request, conn, "error.bad_params")
+        return templates.TemplateResponse(request, "pages/settings.html", context, status_code=400)
+    redirect_query = ("?" + str(request.url.query)) if request.url.query else ""
+    return RedirectResponse(url=f"/settings{redirect_query}", status_code=303)
+
+
+@router.post("/requests/ip-search", response_class=HTMLResponse)
+async def requests_ip_search(request: Request):
+    """Exact original-address lookup for the local admin (T4a, PAR-02).
+
+    Session + CSRF POST only. The entered address is validated
+    transiently (IPv4/IPv6, bounded body, exact source spelling kept
+    for the legacy HMAC input) and translated server-side to the safe
+    stable pseudonym: the 303 redirect carries only the pseudonym as
+    the normal ``search`` filter, preserving the current window and
+    every other matcher. The entered address is never echoed into
+    HTML, attributes, errors, redirects, URLs, history, bookmarks,
+    logs or model state, and the form re-renders empty. Invalid input
+    re-renders with a fixed localized error. Bearer [REDACTED] never
+    authorize this; the external API gains no raw-IP path.
+    """
+    session = _session_or_none(request)
+    if session is None:
+        return _error_page(request, "error.auth_required", 401)
+    from app.api.deps import require_csrf
+
+    request_id = request.state.request_id
+    header_ok = require_csrf(request, session, request_id) is None
+    body = _form_fields(request, await request.body())
+    field_token = body.get("csrf_token")
+    if not header_ok and not _valid_csrf_field(field_token, session.csrf_token):
+        return _error_page(request, "error.csrf_required", 403)
+    raw_ip = body.get("ip")
+    candidate = raw_ip.strip() if isinstance(raw_ip, str) else ""
+    if not candidate or len(candidate) > 1024:
+        return await _requests_ip_search_error(request, "privacy.ip_search_invalid")
+    from app.ingestion.combined import validate_original_ip
+
+    if validate_original_ip(candidate) is None:
+        return await _requests_ip_search_error(request, "privacy.ip_search_invalid")
+    try:
+        hmac_key = load_settings().hmac_key.get_secret_value().encode("utf-8")
+    except (ValueError, AttributeError):
+        return await _requests_ip_search_error(request, "privacy.ip_search_invalid")
+    if not hmac_key:
+        return await _requests_ip_search_error(request, "privacy.ip_search_invalid")
+    from app.ingestion.combined import pseudonymize_client
+
+    pseudonym = pseudonymize_client(candidate, hmac_key)
+    # Rebuild the redirect from the posted action query: same window,
+    # site, source, timezone and matchers survive; only the text search
+    # becomes the safe pseudonym (the raw address never leaves the POST
+    # body, which is discarded after this translation).
+    params, error = _parse_view_params(request, datetime.now(UTC))
+    if error is not None:
+        return _error_page(request, error, 400)
+    target: dict[str, object] = {
+        "site": params["site"] or "",
+        "range": params["range"],
+        "from": params["window"].time_from.isoformat(),
+        "to": params["window"].time_to.isoformat(),
+        "tz": params["tz_name"],
+    }
+    if params["source"] is not None:
+        target["source"] = params["source"]
+    for key in MATCHER_KEYS:
+        if key == "search":
+            continue
+        value = params["matchers"].get(key)
+        if value is not None:
+            target[key] = _matcher_url_value(value)
+    target["search"] = pseudonym
+    target["limit"] = params["limit"]
+    target["offset"] = 0
+    return RedirectResponse(url="/requests?" + urlencode(target), status_code=303)
+
+
+async def _requests_ip_search_error(request: Request, message_key: str) -> HTMLResponse:
+    """Re-render the Requests page with a fixed search error (400).
+
+    The entered address is never reflected: the message carries no
+    input value and the form renders empty.
+    """
+    params, error = _parse_view_params(request, datetime.now(UTC))
+    if error is not None:
+        return _error_page(request, error, 400)
+    with read_store(request) as conn:
+        site, _sites, site_error = _site_or_error(conn, params)
+        if site_error is not None:
+            return _error_page(
+                request, site_error, 400 if site_error != "error.unknown_site" else 404
+            )
+        source_error = _source_or_error(conn, site or "", params["source"])
+        if source_error is not None:
+            return _error_page(request, source_error, 400)
+        context, context_error = _requests_context(
+            request, conn, params, ip_search_error=message_key
+        )
+    if context_error is not None:
+        return _error_page(
+            request, context_error, 400 if context_error != "error.unknown_site" else 404
+        )
+    context["request"] = request
+    return templates.TemplateResponse(request, "pages/requests.html", context, status_code=400)
 
 
 @router.get("/data-sources", response_class=HTMLResponse)

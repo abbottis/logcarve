@@ -8,7 +8,7 @@
      deliberately: a new window always starts at the first page, while
      prev/next links carry explicit offsets. #}
   {% for key, value in matchers.items() %}
-  {% if key not in ["traffic", "bot", "category", "provider", "purpose", "status", "status_class", "search", "path_prefix", "method", "referer_host"] %}
+  {% if key not in ["traffic", "bot", "category", "provider", "purpose", "status", "status_class", "search", "path_prefix", "path_exact", "method", "referer_host", "server_host", "http_version", "mime_type", "cache_status", "tls_protocol", "timing_available", "upstream_available", "timing_min_ms", "timing_max_ms"] %}
   <input type="hidden" name="{{ key }}" value="{{ value }}">
   {% endif %}
   {% endfor %}
@@ -130,6 +130,59 @@
     <label class="label py-1" for="f-search"><span class="label-text">{{ t("filter.search") }}</span></label>
     <input id="f-search" name="search" type="search" value="{{ filt.search or "" }}" maxlength="128" class="input input-bordered input-sm" placeholder="{{ t("filter.search_placeholder") }}">
   </div>
+  <details class="w-full rounded-lg border border-base-300 p-3">
+    <summary class="cursor-pointer text-sm font-medium">{{ t("filter.more") }}</summary>
+    <div class="mt-2 flex flex-wrap items-end gap-3">
+      <div class="form-control">
+        <label class="label py-1" for="f-path-exact"><span class="label-text">{{ t("filter.path_exact") }}</span></label>
+        <input id="f-path-exact" name="path_exact" type="text" value="{{ filt.path_exact or "" }}" maxlength="1024" class="input input-bordered input-sm tech" placeholder="/docs/exact">
+      </div>
+      <div class="form-control">
+        <label class="label py-1" for="f-server-host"><span class="label-text">{{ t("filter.logged_host") }}</span></label>
+        <input id="f-server-host" name="server_host" type="text" value="{{ filt.server_host or "" }}" maxlength="253" class="input input-bordered input-sm tech" placeholder="example.org">
+      </div>
+      <div class="form-control">
+        <label class="label py-1" for="f-http-version"><span class="label-text">{{ t("filter.http_version") }}</span></label>
+        <input id="f-http-version" name="http_version" type="text" value="{{ filt.http_version or "" }}" maxlength="16" class="input input-bordered input-sm tech" placeholder="HTTP/1.1">
+      </div>
+      <div class="form-control">
+        <label class="label py-1" for="f-mime"><span class="label-text">{{ t("filter.mime_type") }}</span></label>
+        <input id="f-mime" name="mime_type" type="text" value="{{ filt.mime_type or "" }}" maxlength="128" class="input input-bordered input-sm tech" placeholder="text/html">
+      </div>
+      <div class="form-control">
+        <label class="label py-1" for="f-cache"><span class="label-text">{{ t("filter.cache_status") }}</span></label>
+        <input id="f-cache" name="cache_status" type="text" value="{{ filt.cache_status or "" }}" maxlength="32" class="input input-bordered input-sm tech" placeholder="HIT">
+      </div>
+      <div class="form-control">
+        <label class="label py-1" for="f-tls"><span class="label-text">{{ t("filter.tls_protocol") }}</span></label>
+        <input id="f-tls" name="tls_protocol" type="text" value="{{ filt.tls_protocol or "" }}" maxlength="32" class="input input-bordered input-sm tech" placeholder="TLSv1.3">
+      </div>
+      <div class="form-control">
+        <label class="label py-1" for="f-timing"><span class="label-text">{{ t("filter.timing") }}</span></label>
+        <select id="f-timing" name="timing_available" class="select select-bordered select-sm">
+          <option value="" {% if filt.timing_available is none %}selected{% endif %}>{{ t("filter.timing_any") }}</option>
+          <option value="yes" {% if filt.timing_available is true %}selected{% endif %}>{{ t("filter.timing_with") }}</option>
+          <option value="no" {% if filt.timing_available is false %}selected{% endif %}>{{ t("filter.timing_without") }}</option>
+        </select>
+      </div>
+      <div class="form-control">
+        <label class="label py-1" for="f-upstream"><span class="label-text">{{ t("filter.upstream") }}</span></label>
+        <select id="f-upstream" name="upstream_available" class="select select-bordered select-sm">
+          <option value="" {% if filt.upstream_available is none %}selected{% endif %}>{{ t("filter.timing_any") }}</option>
+          <option value="yes" {% if filt.upstream_available is true %}selected{% endif %}>{{ t("filter.timing_with") }}</option>
+          <option value="no" {% if filt.upstream_available is false %}selected{% endif %}>{{ t("filter.timing_without") }}</option>
+        </select>
+      </div>
+      <div class="form-control">
+        <label class="label py-1" for="f-timing-min"><span class="label-text">{{ t("filter.timing_min") }}</span></label>
+        <input id="f-timing-min" name="timing_min_ms" type="number" min="0" step="any" value="{{ filt.timing_min_ms if filt.timing_min_ms is not none else "" }}" class="input input-bordered input-sm tech" placeholder="0">
+      </div>
+      <div class="form-control">
+        <label class="label py-1" for="f-timing-max"><span class="label-text">{{ t("filter.timing_max") }}</span></label>
+        <input id="f-timing-max" name="timing_max_ms" type="number" min="0" step="any" value="{{ filt.timing_max_ms if filt.timing_max_ms is not none else "" }}" class="input input-bordered input-sm tech" placeholder="500">
+      </div>
+    </div>
+  </details>
   <button type="submit" class="btn btn-primary btn-sm">{{ t("filter.apply") }}</button>
   <p id="filter-times-notice" class="w-full text-sm text-base-content/70">{{ t("filter.times_in", tz=tz_name) }} ({{ tz_offset }}; {{ t("filter.offset_note", date=window_start_date) }})</p>
 </form>

@@ -2421,3 +2421,54 @@ AI-03/AI-04/PRIV-01-03/COST-01-02 extended to the report surface at
 the fake/stubbed-wire scope with sockets denied. AI-01/02 stay NOT
 RUN. Stopping for independent reinspection; no merge, push or
 deployment.
+
+## 2026-11-02 — Parity T4a private-IP web slice (PAR-02, implementer run)
+
+Owner-authorized bounded T4a ONLY on `feature/logwerk-parity-2026-11-01`
+(prior HEAD `a3ef748` preserved, no amend), exact model
+`muse-spark-1.3-contributor` / medium / Contributor ON; sandbox +
+approval ON, sole writer, no subagents, no new approval loop, no
+parent files/keys/private history/real logs, no Docker/product/
+provider calls/allowance resets/push/main/deployment. All
+code/assets/tests/scripts by the implementer. Public/synthetic
+current branch only; the 120 fixtures, 77 bot rules, core
+HMAC/auth/usage and all previous commits preserved (no fixture,
+rule or config-value changes; one existing replay-contract test
+extended for the authorized new matcher keys). No browser file
+import UI, no translations (central English keys only, locale
+architecture untouched). Report pages/charts (T4b) and saved
+views/comparison/refresh/comprehensive Help/locale audit (T4c) NOT
+implemented and not claimed.
+
+Reviewed predecessor evidence (not rerun as a gate): coordinator
+independent review of frozen `a3ef748` recorded PASS for
+`uv run --locked --offline pytest tests/unit tests/integration`
+(929 passed including both real-loopback external-client tests)
+and Gitleaks 100% redacted histories; T3b exit gate satisfied with
+permission to continue to T4a. The live-loopback skips below are
+the same pre-existing environmental category.
+
+| Check | Result | Evidence |
+| --- | --- | --- |
+| New `tests/unit/test_parity_t4a_private.py` | PASS | 14 passed: unset-full vs corrupt-pseudonym fallback, hidden-count maxhide fail-closed, compressed/expanded/mapped masking, scoped/invalid/count rejections, legacy spelling preservation, per-id duplicate binding, no/wrong/tampered/missing-key codes, referrer http/https-only, CSRF-field never-raises |
+| New `tests/integration/test_parity_t4a_web.py` | PASS | 30 passed: session/CSRF/Unicode-CSRF/Bearer denial with state intact, full/masked (suffix absent incl. title/data/JSON/details)/pseudonym modes, maxhide, corrupt-settings banner + repair, no/wrong/tampered/legacy-key guidance, duplicate id binding, POST-only exact-IP search (redirect purity, legacy spelling distinction, no-echo 400s, method/session guards), all enrichment filters propagate + narrow + reject + page, API/token/session exports address-free, downloads note in every mode, sort-truth label, no-store/htmx-zero/marker/storage scans, concurrent-delete render |
+| Existing replay contract `test_exact_replay_preserves_valid_values` | PASS (extended) | Expected matchers dict extended with the 10 authorized T4a enrichment keys (`None` here); all prior assertions unchanged |
+| Full `tests/unit tests/integration` | PASS | 971 passed, 2 skipped (same pre-existing loopback-env category), `UV_CACHE_DIR=/tmp/uvcache uv run --locked --offline`, exit status visible, no tail-masking |
+| Existing E2E in this shell sandbox | BLOCKED (environmental) | Pre-existing `test_nav_roundtrip` errors identically (`TargetClosedError`, Chromium Mach IPC `Permission denied`): the shell sandbox blocks browser launch here, not the new code; coordinator executes `uv run --locked pytest tests/e2e -q` including new `tests/e2e/test_parity_t4a.py` (settings/search/requests flows, masked-suffix DOM absence, storage/history scans, back/forward, 390px + dark) with the browser sandbox ON |
+| `ruff check` + `ruff format` | PASS | Both clean over `app` + `tests` after `ruff format` on touched files (TypeError for wrong-type counts per TRY004, no unused imports) |
+| `uv lock --check --offline` | PASS | No manifest/lock delta: no new dependencies (stdlib urlencoded form parsing; `python-multipart` absent so `request.form()` is never used) |
+| Assets | PASS | `assets/src/js/requests.js` authored (BFCache pageshow refresh); served `app/web/static/js/requests.js` synced by the exact `build:js` copy step (served tree is gitignored build output, not committed) |
+| 120-row fixture / HMAC / 77-rule catalog | PASS | Untouched: no fixture, rule or config changes in tree; new tests use tmp stores only |
+| Real AI / smoke allowance | NOT RUN | No production transport, key, account or paid call |
+
+Acceptance impact: PAR-02 private admin view implemented at the web
+layer with the ADR 0003 invariants intact (API/exports/errors/tools
+never carry originals; tokens never authorize them; no key
+edit/display; lost keys not repairable via HMAC). PAR-03 filter
+carriage completed for the web params/state/nav/paging surface;
+timing/upstream availability and finite ranges validated end to end.
+PAR-04/05/06/08/09/10 stay at their reviewed shared-layer state;
+report pages/nav/charts (T4b), saved views/comparison/refresh/Help
+coverage (T4c), follow/rotation and genuine GeoIP (T5) explicitly
+not claimed. Stopping for independent review; no overall release or
+owner-acceptance claim.

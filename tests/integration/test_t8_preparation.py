@@ -204,11 +204,13 @@ def test_exact_replay_preserves_valid_values():
     assert error is None
     # Slice A trusted-filter contract: the matchers dict carries every
     # selector (traffic/bot/category/provider/purpose/search unset here).
+    # T4a adds the shared T2 enrichment selectors (PAR-03), unset here.
     assert matchers == {
         "method": "get",
         "status": 404,
         "status_class": None,
         "path_prefix": "*",
+        "path_exact": None,
         "referer_host": "Example.ORG",
         "traffic": None,
         "search": None,
@@ -216,6 +218,15 @@ def test_exact_replay_preserves_valid_values():
         "category": None,
         "provider": None,
         "purpose": None,
+        "server_host": None,
+        "http_version": None,
+        "mime_type": None,
+        "cache_status": None,
+        "tls_protocol": None,
+        "timing_available": None,
+        "upstream_available": None,
+        "timing_min_ms": None,
+        "timing_max_ms": None,
     }
     matchers, error = web_routes._parse_matchers({"method": "OPTIONS"})
     assert error is None and matchers["method"] == "OPTIONS"

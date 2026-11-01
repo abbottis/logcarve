@@ -1126,6 +1126,31 @@ def request_rows(
     return [export_row_to_dict(row) for row in rows], total
 
 
+def request_rows_with_ids(
+    conn: sqlite3.Connection, query: ExplorerQuery, classifier: Classifier
+) -> tuple[list[tuple[int, dict[str, object]]], int]:
+    """Sanitized page rows paired with their internal request identity.
+
+    Runs the SAME ``_explorer_select`` scope/order as :func:`request_rows`
+    (same snapshot, same ``ORDER BY``, same page slice) but projects the
+    internal ``requests.id`` alongside so a session-gated private reader
+    can bind each displayed row to its own encrypted original by primary
+    key — never by timestamp/path/pseudonym or row ordinal, so
+    legitimate duplicate rows each resolve to their own event. The IDs
+    are internal-only: web callers must never serialize them into API
+    responses, exports, model tools, errors or shared DTOs.
+    """
+    filt = query.filt
+    sql, params = _explorer_select(filt, classifier, query.sort)
+    total = count_export_rows(conn, filt, classifier)
+    id_sql = sql.replace("SELECT ts_utc,", "SELECT id, ts_utc,", 1)
+    rows = conn.execute(f"{id_sql} LIMIT ? OFFSET ?", [*params, filt.limit, filt.offset]).fetchall()
+    paired: list[tuple[int, dict[str, object]]] = []
+    for row in rows:
+        paired.append((int(row[0]), export_row_to_dict(tuple(row[1:]))))
+    return paired, total
+
+
 def conflict_counts(
     conn: sqlite3.Connection, filt: AnalyticsFilter, classifier: Classifier | None = None
 ) -> dict[str, int]:

@@ -188,9 +188,22 @@ def require_admin_session(request: Request):
 
 
 def require_csrf(request: Request, session, request_id: str):
-    """Browser mutations must echo the per-session CSRF token."""
+    """Browser mutations must echo the per-session CSRF token (fail-closed 403)."""
     presented = request.headers.get(CSRF_HEADER, "")
-    if not presented or not hmac.compare_digest(presented, session.csrf_token):
+    expected = getattr(session, "csrf_token", "")
+    if not isinstance(presented, str) or not presented:
+        return _unauthorized(
+            request_id, "csrf_required", "A valid CSRF token is required.", status=403
+        )
+    try:
+        valid = hmac.compare_digest(presented, expected)
+    except (TypeError, ValueError, AttributeError):
+        # Non-ASCII/foreign-type presented values raise inside
+        # compare_digest; fail closed with the safe 403, never a 500.
+        return _unauthorized(
+            request_id, "csrf_required", "A valid CSRF token is required.", status=403
+        )
+    if not valid:
         return _unauthorized(
             request_id, "csrf_required", "A valid CSRF token is required.", status=403
         )

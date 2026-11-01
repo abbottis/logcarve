@@ -28,6 +28,39 @@
       <p class="mt-1 text-sm text-base-content/70">{{ t("settings.consumer_notice") }}</p>
     </div>
   </section>
+  <section class="card bg-base-100 shadow" aria-labelledby="set-ip-h">
+    <div class="card-body">
+      <h2 id="set-ip-h" class="card-title text-base">{{ t("privacy.ip_title") }}</h2>
+      <p class="text-sm text-base-content/70">{{ t("privacy.ip_body") }}</p>
+      {% if ip_corrupt %}
+      <p class="alert alert-warning text-sm" role="status">{{ t("privacy.ip_corrupt") }}</p>
+      {% endif %}
+      <p class="text-sm">{% if ip_key_configured %}{{ t("privacy.ip_key_configured") }}{% else %}{{ t("privacy.ip_key_missing") }}{% endif %}</p>
+      {% if settings_error %}
+      <p class="alert alert-error text-sm" role="alert">{{ t(settings_error) }}</p>
+      {% endif %}
+      <form method="post" action="/settings/ip-display{{ nav_query }}" class="mt-2 space-y-3">
+        <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+        <div class="form-control">
+          <label class="label py-1" for="f-ip-mode"><span class="label-text">{{ t("privacy.ip_mode") }}</span></label>
+          <select id="f-ip-mode" name="ip_mode" class="select select-bordered select-sm">
+            <option value="full" {% if ip_mode == "full" %}selected{% endif %}>{{ t("privacy.ip_mode_full") }} — {{ t("privacy.ip_mode_full_hint") }}</option>
+            <option value="suffix_mask" {% if ip_mode == "suffix_mask" %}selected{% endif %}>{{ t("privacy.ip_mode_mask") }}</option>
+            <option value="pseudonym_only" {% if ip_mode == "pseudonym_only" %}selected{% endif %}>{{ t("privacy.ip_mode_pseudo") }}</option>
+          </select>
+        </div>
+        <div class="form-control">
+          <label class="label py-1" for="f-ip-v4"><span class="label-text">{{ t("privacy.ip_hidden_v4") }}</span></label>
+          <input id="f-ip-v4" name="ip_v4_hidden" type="number" min="1" max="4" step="1" value="{{ ip_v4_hidden }}" class="input input-bordered input-sm tech">
+        </div>
+        <div class="form-control">
+          <label class="label py-1" for="f-ip-v6"><span class="label-text">{{ t("privacy.ip_hidden_v6") }}</span></label>
+          <input id="f-ip-v6" name="ip_v6_hidden" type="number" min="1" max="8" step="1" value="{{ ip_v6_hidden }}" class="input input-bordered input-sm tech">
+        </div>
+        <button type="submit" class="btn btn-primary btn-sm">{{ t("privacy.ip_save") }}</button>
+      </form>
+    </div>
+  </section>
   <section class="card bg-base-100 shadow" aria-labelledby="set-ai-h">
     <div class="card-body">
       <h2 id="set-ai-h" class="card-title text-base">{{ t("settings.assistant") }}</h2>

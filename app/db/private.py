@@ -55,6 +55,15 @@ IP_DISPLAY_SUFFIX_MASK = "suffix_mask"
 IP_DISPLAY_PSEUDONYM_ONLY = "pseudonym_only"
 IP_DISPLAY_MODES = (IP_DISPLAY_FULL, IP_DISPLAY_SUFFIX_MASK, IP_DISPLAY_PSEUDONYM_ONLY)
 _IP_DISPLAY_SETTING_KEY = "ip_display_mode"
+_IP_HIDDEN_V4_KEY = "ip_hidden_octets"
+_IP_HIDDEN_V6_KEY = "ip_hidden_hextets"
+#: Display-masking defaults: hide the last IPv4 octet and the last 64
+#: bits (4 hextets) of IPv6. Stored overrides are validated on read;
+#: corrupt values fail closed (see getters below).
+DEFAULT_HIDDEN_V4 = 1
+DEFAULT_HIDDEN_V6 = 4
+MAX_HIDDEN_V4 = 4
+MAX_HIDDEN_V6 = 8
 
 
 class PrivateUnavailable(Exception):
@@ -380,7 +389,12 @@ def read_original_ip(conn: sqlite3.Connection, *, request_id: int, key: bytes) -
 
 
 def get_ip_display_mode(conn: sqlite3.Connection) -> str:
-    """Persisted local-admin original-IP display mode; default ``full``."""
+    """Persisted local-admin original-IP display mode.
+
+    Only an UNSET preference defaults to ``full`` (explicit owner
+    default). A PRESENT but invalid/corrupt value fails closed to
+    ``pseudonym_only``; see :func:`is_ip_display_corrupt`.
+    """
     row = conn.execute(
         "SELECT value FROM admin_settings WHERE key = ?", (_IP_DISPLAY_SETTING_KEY,)
     ).fetchone()
@@ -388,8 +402,20 @@ def get_ip_display_mode(conn: sqlite3.Connection) -> str:
         return IP_DISPLAY_FULL
     mode = str(row[0])
     if mode not in IP_DISPLAY_MODES:
-        return IP_DISPLAY_FULL
+        return IP_DISPLAY_PSEUDONYM_ONLY
     return mode
+
+
+def _setting_value(conn: sqlite3.Connection, key: str) -> str | None:
+    """Raw persisted admin setting, or ``None`` when never stored."""
+    row = conn.execute("SELECT value FROM admin_settings WHERE key = ?", (key,)).fetchone()
+    return None if row is None else str(row[0])
+
+
+def is_ip_display_corrupt(conn: sqlite3.Connection) -> bool:
+    """Whether a stored display preference is present but invalid."""
+    raw = _setting_value(conn, _IP_DISPLAY_SETTING_KEY)
+    return raw is not None and raw not in IP_DISPLAY_MODES
 
 
 def set_ip_display_mode(conn: sqlite3.Connection, mode: str) -> str:
@@ -405,28 +431,161 @@ def set_ip_display_mode(conn: sqlite3.Connection, mode: str) -> str:
     return mode
 
 
-def mask_ip_suffix(ip_text: str) -> str:
+def _parse_hidden_count(raw: str | None, *, default: int, maximum: int) -> tuple[int, bool]:
+    """Validated hidden-group count; corrupt values fail closed to max hide."""
+    if raw is None:
+        return default, False
+    try:
+        count = int(str(raw).strip())
+    except (TypeError, ValueError):
+        return maximum, True
+    if not 1 <= count <= maximum:
+        return maximum, True
+    return count, False
+
+
+def get_ip_hidden_counts(conn: sqlite3.Connection) -> tuple[int, int]:
+    """Validated (hidden IPv4 octets, hidden IPv6 hextets) for masking.
+
+    Unset values use the defaults (1 octet / 4 hextets). Corrupt values
+    fail closed to maximum hiding, never to plaintext; callers that
+    need the corrupt signal use :func:`are_ip_hidden_counts_corrupt`.
+    """
+    v4_raw = _setting_value(conn, _IP_HIDDEN_V4_KEY)
+    v6_raw = _setting_value(conn, _IP_HIDDEN_V6_KEY)
+    v4, _ = _parse_hidden_count(v4_raw, default=DEFAULT_HIDDEN_V4, maximum=MAX_HIDDEN_V4)
+    v6, _ = _parse_hidden_count(v6_raw, default=DEFAULT_HIDDEN_V6, maximum=MAX_HIDDEN_V6)
+    return v4, v6
+
+
+def are_ip_hidden_counts_corrupt(conn: sqlite3.Connection) -> bool:
+    """Whether a stored hidden-count preference is present but invalid."""
+    v4_raw = _setting_value(conn, _IP_HIDDEN_V4_KEY)
+    v6_raw = _setting_value(conn, _IP_HIDDEN_V6_KEY)
+    _, v4_bad = _parse_hidden_count(v4_raw, default=DEFAULT_HIDDEN_V4, maximum=MAX_HIDDEN_V4)
+    _, v6_bad = _parse_hidden_count(v6_raw, default=DEFAULT_HIDDEN_V6, maximum=MAX_HIDDEN_V6)
+    return (v4_raw is not None and v4_bad) or (v6_raw is not None and v6_bad)
+
+
+def set_ip_hidden_counts(
+    conn: sqlite3.Connection, v4_hidden: int, v6_hidden: int
+) -> tuple[int, int]:
+    """Persist validated hidden octet/hextet counts; reject out-of-range."""
+    if not isinstance(v4_hidden, int) or isinstance(v4_hidden, bool):
+        raise TypeError(f"hidden IPv4 octets must be 1..{MAX_HIDDEN_V4}")
+    if not 1 <= v4_hidden <= MAX_HIDDEN_V4:
+        raise ValueError(f"hidden IPv4 octets must be 1..{MAX_HIDDEN_V4}")
+    if not isinstance(v6_hidden, int) or isinstance(v6_hidden, bool):
+        raise TypeError(f"hidden IPv6 hextets must be 1..{MAX_HIDDEN_V6}")
+    if not 1 <= v6_hidden <= MAX_HIDDEN_V6:
+        raise ValueError(f"hidden IPv6 hextets must be 1..{MAX_HIDDEN_V6}")
+    now = datetime.now(UTC).isoformat()
+    for key, value in ((_IP_HIDDEN_V4_KEY, v4_hidden), (_IP_HIDDEN_V6_KEY, v6_hidden)):
+        conn.execute(
+            "INSERT INTO admin_settings (key, value, updated_at) VALUES (?, ?, ?)"
+            " ON CONFLICT (key) DO UPDATE SET value = excluded.value,"
+            " updated_at = excluded.updated_at",
+            (key, str(value), now),
+        )
+    return v4_hidden, v6_hidden
+
+
+def resolve_display_state(conn: sqlite3.Connection) -> dict[str, object]:
+    """Effective private display state with fail-closed corrupt handling.
+
+    Returns ``mode`` (effective, already fail-closed), ``v4_hidden``,
+    ``v6_hidden``, ``corrupt`` (any present-but-invalid preference) and
+    ``defaulted`` (no mode preference was ever stored). When ``corrupt``
+    is true the caller must render pseudonym-only/unavailable plus a
+    safe notice, even if the effective mode would otherwise unmask.
+    """
+    mode_raw = _setting_value(conn, _IP_DISPLAY_SETTING_KEY)
+    mode = get_ip_display_mode(conn)
+    v4, v6 = get_ip_hidden_counts(conn)
+    corrupt = is_ip_display_corrupt(conn) or are_ip_hidden_counts_corrupt(conn)
+    if corrupt:
+        mode = IP_DISPLAY_PSEUDONYM_ONLY
+    return {
+        "mode": mode,
+        "v4_hidden": v4,
+        "v6_hidden": v6,
+        "corrupt": corrupt,
+        "defaulted": mode_raw is None,
+    }
+
+
+def mask_ip_suffix(ip_text: str, v4_hidden: int = 1, v6_hidden: int = 4) -> str:
     """Display masking for ``suffix_mask`` mode: hide the address suffix.
 
-    IPv4 hides the last octet (``192.0.2.*``); IPv6 hides the last 64
-    bits, keeping the /64 prefix (``2001:db8:1:2::*``). This is display
-    masking only, never proof of anonymity.
+    IPv4 hides the last ``v4_hidden`` octets (default 1:
+    ``192.0.2.*``; max 4: ``*.*.*.*``); IPv6 hides the last
+    ``v6_hidden`` hextets of the exploded form (default 4, keeping the
+    /64 prefix; max 8 hides every group). This is display masking
+    only, never proof of anonymity.
+
+    Scoped IPv6 (``fe80::1%eth0``), which :func:`ipaddress.ip_address`
+    accepts but whose ``exploded`` form raises, is rejected with
+    ``ValueError`` (callers render fixed Unavailable, never a zone
+    leak). IPv4-mapped IPv6 masks in exploded hex form so no embedded
+    dotted suffix leaks. Invalid counts raise ``ValueError``.
     """
-    parsed = ipaddress.ip_address(ip_text)
+    if not isinstance(v4_hidden, int) or isinstance(v4_hidden, bool):
+        raise TypeError(f"hidden IPv4 octets must be 1..{MAX_HIDDEN_V4}")
+    if not 1 <= v4_hidden <= MAX_HIDDEN_V4:
+        raise ValueError(f"hidden IPv4 octets must be 1..{MAX_HIDDEN_V4}")
+    if not isinstance(v6_hidden, int) or isinstance(v6_hidden, bool):
+        raise TypeError(f"hidden IPv6 hextets must be 1..{MAX_HIDDEN_V6}")
+    if not 1 <= v6_hidden <= MAX_HIDDEN_V6:
+        raise ValueError(f"hidden IPv6 hextets must be 1..{MAX_HIDDEN_V6}")
+    if not isinstance(ip_text, str) or "%" in ip_text:
+        # Zone-scoped forms are valid addresses but unsupported for
+        # display masking: fail closed instead of leaking the zone id
+        # or raising an unhandled exploded-form error.
+        raise ValueError("scoped IPv6 display is unsupported")
+    try:
+        parsed = ipaddress.ip_address(ip_text)
+    except ValueError:
+        raise ValueError("ip_text must be a valid IPv4/IPv6 address") from None
     if isinstance(parsed, ipaddress.IPv4Address):
         parts = ip_text.split(".")
-        if len(parts) != 4:
+        if len(parts) != 4 or any(not part for part in parts):
             raise ValueError("invalid IPv4 display form")
-        return ".".join(parts[:3]) + ".*"
-    groups = parsed.exploded.split(":")
-    return ":".join(groups[:4]) + ":*"
+        for part in parts:
+            if not part.isascii() or not part.isdigit() or not 0 <= int(part) <= 255:
+                raise ValueError("invalid IPv4 display form")
+        visible = parts[: 4 - v4_hidden]
+        return ".".join(visible + ["*"] * v4_hidden)
+    if parsed.ipv4_mapped is not None:
+        # IPv4-mapped IPv6 keeps a dotted suffix in ``exploded`` (7
+        # colon parts); mask from the integer form so no embedded
+        # dotted suffix leaks into the display string.
+        hex32 = f"{int(parsed):032x}"
+        groups = [hex32[offset : offset + 4] for offset in range(0, 32, 4)]
+    else:
+        try:
+            groups = parsed.exploded.split(":")
+        except (ValueError, AttributeError):
+            raise ValueError("scoped IPv6 display is unsupported") from None
+        if len(groups) != 8:
+            raise ValueError("invalid IPv6 display form")
+    visible = groups[: 8 - v6_hidden]
+    return ":".join(visible + ["*"])
 
 
-def format_original_for_display(ip_text: str, pseudonym: str, mode: str) -> str:
+def format_original_for_display(
+    ip_text: str,
+    pseudonym: str,
+    mode: str,
+    v4_hidden: int = 1,
+    v6_hidden: int = 4,
+) -> str:
     """Render a decrypted original under the persisted display mode.
 
-    ``full`` returns the address, ``suffix_mask`` hides the suffix octets
-    or hextets, ``pseudonym_only`` returns the stable HMAC pseudonym.
+    ``full`` returns the exact stored spelling (preserving the legacy
+    HMAC byte identity), ``suffix_mask`` hides the suffix octets or
+    hextets, ``pseudonym_only`` returns the stable HMAC pseudonym.
+    Scoped/unsupported forms raise ``ValueError`` so callers render
+    fixed Unavailable instead of plaintext.
     """
     if mode not in IP_DISPLAY_MODES:
         raise ValueError(f"unknown ip display mode: {mode!r}")
@@ -434,6 +593,8 @@ def format_original_for_display(ip_text: str, pseudonym: str, mode: str) -> str:
         return pseudonym
     if validate_original_ip(ip_text) is None:
         raise ValueError("ip_text must be a valid IPv4/IPv6 address")
+    if "%" in ip_text:
+        raise ValueError("scoped IPv6 display is unsupported")
     if mode == IP_DISPLAY_SUFFIX_MASK:
-        return mask_ip_suffix(ip_text)
+        return mask_ip_suffix(ip_text, v4_hidden=v4_hidden, v6_hidden=v6_hidden)
     return ip_text

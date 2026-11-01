@@ -10,9 +10,32 @@
 </div>
 {% endif %}
 
-<section class="card bg-base-100 shadow" aria-labelledby="req-h">
+{% if ip_banner %}
+<div class="mb-4" role="status">
+  <p class="alert alert-warning text-sm">{{ t(ip_banner) }}</p>
+</div>
+{% endif %}
+<section class="card bg-base-100 shadow" aria-labelledby="ip-search-h" data-ip-search>
+  <div class="card-body">
+    <h2 id="ip-search-h" class="card-title text-base">{{ t("privacy.ip_search_title") }}</h2>
+    <p class="text-sm text-base-content/70">{{ t("privacy.ip_search_hint") }}</p>
+    <form method="post" action="/requests/ip-search{{ nav_query }}" class="mt-2 flex flex-wrap items-end gap-3">
+      <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+      <div class="form-control">
+        <label class="label py-1" for="f-exact-ip"><span class="label-text">{{ t("privacy.ip_search_title") }}</span></label>
+        <input id="f-exact-ip" name="ip" type="text" maxlength="1024" autocomplete="off" autocapitalize="off" spellcheck="false" class="input input-bordered input-sm tech" placeholder="{{ t("privacy.ip_search_placeholder") }}">
+      </div>
+      <button type="submit" class="btn btn-secondary btn-sm">{{ t("privacy.ip_search_submit") }}</button>
+    </form>
+    {% if ip_search_error %}
+    <p class="alert alert-error mt-2 text-sm" role="alert">{{ t(ip_search_error) }}</p>
+    {% endif %}
+  </div>
+</section>
+<section class="card mt-4 bg-base-100 shadow" aria-labelledby="req-h"{% if ip_mode != "pseudonym_only" %} data-private-stale-reload{% endif %}>
   <div class="card-body">
     <h2 id="req-h" class="card-title text-base">{{ t("requests.rows") }}</h2>
+    <p class="text-sm text-base-content/70">{{ t("requests.client_sort_note") }}</p>
     {% if rows %}
     <div class="table-scroll overflow-x-auto">
       <table class="table table-sm req-table">
@@ -37,7 +60,7 @@
         <tbody>
           {% for row in rows %}
           <tr>
-            <td><span class="tech req-client" title="{{ row.client_pseudonym }}"><span class="sr-only">{{ row.client_pseudonym }}</span><span aria-hidden="true">{{ row.client_pseudonym[:12] }}…</span></span></td>
+            <td><span class="tech req-client" title="{{ row.client_pseudonym }}"><span class="sr-only">{{ row.client_pseudonym }}</span><span aria-hidden="true">{{ row.client_pseudonym[:12] }}…</span></span>{% if row.ip_state == "shown" or row.ip_state == "masked" %}<br><span class="tech req-original text-xs" title="{{ row.ip_display }}">{{ row.ip_display }}</span>{% elif row.ip_state == "unavailable" %}<br><span class="req-original-missing text-xs text-base-content/70">{{ t("privacy.ip_unavailable_short") }}</span>{% endif %}</td>
             <td>
               {% if row.traffic == "browser_like" %}
               <span class="badge badge-info">{{ t("traffic.browser_like") }}</span>
@@ -67,6 +90,7 @@
                 <h3 class="font-medium">{{ t("requests.detail_title") }}</h3>
                 <dl class="mt-2 space-y-1">
                   <div><dt class="inline text-base-content/70">{{ t("finding.client_pseudonym") }}: </dt><dd class="inline tech break-all">{{ row.client_pseudonym }}</dd></div>
+                  <div><dt class="inline text-base-content/70">{{ t("privacy.ip_title") }}: </dt><dd class="inline tech break-all">{% if row.ip_state == "shown" %}{{ row.ip_display }}{% elif row.ip_state == "masked" %}{{ row.ip_display }} <span class="text-base-content/70">({{ t("privacy.ip_mask_note") }})</span>{% elif row.ip_state == "unavailable" %}{{ t("privacy.ip_unavailable_short") }}{% if row.ip_notice %} — {{ t(row.ip_notice) }}{% endif %}{% else %}{{ t("privacy.ip_pseudonym_only") }}{% endif %}</dd></div>
                   <div><dt class="inline text-base-content/70">{{ t("requests.local_time") }} ({{ tz_name }}): </dt><dd class="inline tech">{{ row.ts_display }} ({{ row.ts_offset }})</dd></div>
                   <div><dt class="inline text-base-content/70">{{ t("requests.utc_instant") }}: </dt><dd class="inline tech break-all">{{ row.ts_utc }}</dd></div>
                   <div><dt class="inline text-base-content/70">{{ t("requests.agent") }}: </dt><dd class="inline tech break-all">{{ row.user_agent or "—" }}</dd></div>
@@ -74,7 +98,9 @@
                   <div><dd class="text-sm text-base-content/70">{{ t("requests.ua_note") }}</dd></div>
                   {% endif %}
                   <div><dt class="inline text-base-content/70">{{ t("filter.referrer") }}: </dt><dd class="inline tech break-all">{{ row.referer_host or "—" }}</dd></div>
-                  {% if row.referer_scheme or row.referer_path %}
+                  {% if row.referrer_url %}
+                  <div><dt class="inline text-base-content/70">{{ t("requests.referrer_detail") }}: </dt><dd class="inline tech break-all"><a class="link" href="{{ row.referrer_url }}" rel="noopener noreferrer nofollow" aria-label="{{ t("requests.referrer_open") }}">{{ row.referrer_url }}</a></dd></div>
+                  {% elif row.referer_scheme or row.referer_path %}
                   <div><dt class="inline text-base-content/70">{{ t("requests.referrer_detail") }}: </dt><dd class="inline tech break-all">{{ row.referer_scheme or "—" }}://{{ row.referer_host or "—" }}{{ row.referer_path or "" }}</dd></div>
                   {% endif %}
                   <div><dt class="inline text-base-content/70">{{ t("requests.logged_host") }}: </dt><dd class="inline tech break-all">{{ row.server_host or "—" }}</dd></div>
@@ -115,6 +141,17 @@
     {% else %}
     <p class="text-sm text-base-content/70" role="status">{{ t("requests.no_rows") }}</p>
     {% endif %}
+  </div>
+</section>
+
+<section class="card mt-4 bg-base-100 shadow" aria-labelledby="dl-h">
+  <div class="card-body">
+    <h2 id="dl-h" class="card-title text-base">{{ t("requests.downloads_title") }}</h2>
+    <p class="flex flex-wrap gap-2">
+      <a class="btn btn-outline btn-sm" href="{{ export_csv_url }}">{{ t("requests.export_csv") }}</a>
+      <a class="btn btn-outline btn-sm" href="{{ export_json_url }}">{{ t("requests.export_json") }}</a>
+    </p>
+    <p class="text-sm text-base-content/70">{{ t("privacy.export_note") }}</p>
   </div>
 </section>
 
