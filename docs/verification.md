@@ -1156,3 +1156,164 @@ Acceptance impact: UI-01 (full catalogue, explicit display timezone,
 stable order), UI-02/UI-05 (Apply/nav/reload preservation, server-side
 proof; browser proof coordinator-owned). Independent reinspection required
 before stage B. No paid/live gates claimed or passed.
+
+## 2026-11-01 — Stage A correction (independent protected-Chromium findings)
+
+Owner-authorized fix-first commit `773cd12` on
+`feature/acceptance-polish-2026-11-01` (prior Stage A `9332bc2`
+preserved, nothing reverted). Same posture as Stage A: sole writer,
+exact model `muse-spark-1.3-contributor`/medium, Contributor ON,
+public source + synthetic fixtures only, sandbox + approval judge ON,
+no agents, no provider/product calls, no pushes/main merge/deployment,
+no new dependencies, no parent/private runtime, secrets, traces or
+model-key inspection.
+
+- Real UI defect: the `filter.times_in` notice lived in
+  `partials/filter_bar.html` outside `#page-content`, so htmx fragment
+  swaps left it stale after Apply. Every data partial
+  (`overview/crawlers/errors/requests/security_content.html`) now
+  carries an out-of-band `<p id="filter-times-notice"
+  hx-swap-oob="true">` update with the server-validated zone; failed
+  Apply (400) carries none, so stale results keep the stale notice.
+  Locale-central, no inline script, no CSP change.
+- Test interaction defect: `test_asian_zone_explorer_and_nav_preservation`
+  at 390px now opens the real overlay menu (`Menu` button,
+  `aria-expanded`, visible `#side-nav`) and follows the actual scoped
+  visible Overview link, preserving narrow layout and the Asia/Tokyo
+  assertion. No forced/hidden clicks, no viewport widening.
+- `app/config.py`: the `default_timezone` validator no longer calls
+  `available_timezones` per `Settings` construction (which runs per
+  request); one `ZoneInfo` construction proves installability. Config
+  still never imports the web layer (dependency direction preserved).
+- Absent `DEFAULT_TIMEZONE` (neither environment nor `.env`,
+  via `model_fields_set`) now counts as unconfigured, so the
+  resolver's reliable regional server `TZ` fallback is reachable in
+  real routing; an explicit `DEFAULT_TIMEZONE` (including explicit
+  UTC) always wins. Covered by a Settings/request-routing test, not
+  only helper calls.
+- Automatic `TZ` detection accepts only a defensible region key
+  (`Region/City`) or `UTC`: `CET`/`EST`/`Etc/GMT+2`/path syntax fall
+  back to UTC even though those aliases stay explicitly selectable
+  and valid as configured values. No physical geolocation guessing.
+- UTC fallback honesty: naming UTC is deterministic, but rendering
+  any zone requires the system tz database — without usable zone data
+  the data pages fail fast with a safe 400 (tested), never with
+  silent UTC-looking output. Documents the tzdata prerequisite.
+
+Tests: `tests/integration/test_web_timezones.py` grows 12 → 18
+(no-enumeration proof, routing-level TZ fallback, explicit-alias
+selectability, OOB notice on all five fragments + absent on 400,
+deterministic missing-DB fallback and fail-fast 400).
+
+| Check | Result | Evidence |
+| --- | --- | --- |
+| Focused `pytest tests/integration/test_web_timezones.py` | PASS | 18 passed |
+| Related web/config/nav suites + `tests/unit/test_config.py` | PASS | 97 passed |
+| `pytest tests/e2e --collect-only` (incl. timezone file) | PASS | 2 timezone tests collect |
+| `ruff check .` | PASS | All checks passed |
+| `ruff format --check .` | PASS | All formatted |
+| `pytest tests/e2e` execution | BLOCKED | Sandbox denies protected browser launch; coordinator-owned |
+| Docker/x86-64 | NOT RUN | Coordinator-owned |
+
+Acceptance impact: UI-01/UI-02/UI-05 corrections only; Stage A work
+otherwise intact. Independent reinspection required before/after
+stage B. No paid/live gates claimed or passed.
+
+## 2026-11-01 — Stage B AI readiness corrections (offline-only)
+
+Owner-authorized bounded slice on `773cd12`, branch
+`feature/acceptance-polish-2026-11-01`. Same posture: sole writer,
+exact model `muse-spark-1.3-contributor`/medium, Contributor ON,
+public source + synthetic fixtures only, native mocked Meta transport
+with synthetic dummy keys, `socket.connect` blocked in tests, all
+databases temporary synthetic test stores unrelated to the exhausted
+ledger. No agents, no network/product/provider calls, no pushes/main
+merge/deployment, no new dependencies, no cap/allowance changes, no
+rerun of the real smoke runner. The independent runner's BEFORE
+numbers were reproduced first with an owned stubbed script
+(`displayed 47366 vs settled 23683`; `73451 vs 48567`;
+`output_limit_reached` before dispatch 2 with 1 transport call on
+scope example-combined WIN_C 2026-10-28T09Z..10Z); after the fix the
+same script reports exact agreement and 2 dispatches for the 3-tool
+case. Fake measured counts derive from stub wire length, never from
+actual product spend.
+
+1. Context minimization (AI-01/PRIV-01): `history_line` is no longer a
+   `repr` of minimized evidence. New `egress.project_evidence_summary`
+   builds one deterministic bounded projection per tool result —
+   exact `[evidence {tool_call_id}]` ID, tool name, actual observation
+   time, full executed scope (site/source/window + selected matchers),
+   coverage and a compact per-tool result (counts, rule refs, bounded
+   row/text samples with explicit `[+N more]`/`[+N more chars]`
+   markers) — from already-validated values, then re-validates the
+   complete final string. Overflow raises `payload_too_large` (mapped
+   to `output_limit_reached`) before further dispatch; hostile shapes
+   still fail first in `serialize_evidence` and are never thinned
+   into safety. The same projection travels in fake history lines and
+   native stateless `function_call_output` items (typed metadata:
+   `tool_call_id`, `tool`, `observation_time`, `summary`).
+   `HISTORY_MAX_CHARS=4000` is unchanged, full local envelopes and
+   reproducible server evidence links are untouched, all per-step
+   gates/reservations/budget days/cancellation/timeout/tool bounds
+   and provider-failure handling are intact. The old history-bound
+   regression still trips on its workload, proving the unchanged
+   limit.
+2. Estimated cost (COST-01/02): the real final branch displayed
+   `spent + step_actual` although `spent` already included the step —
+   now displays exactly `spent_micro_usd`. The fake path accumulates
+   each settled incremental estimate and displays that exact sum
+   instead of a re-rounded total. Returned usage now equals the
+   settled per-step ledger in one-dispatch, tool+final and
+   multi-step cases, with cached/reasoning subsets and synthetic
+   budget/smoke ledgers; settlement math and caps are untouched and
+   no historical usage was altered. The t8 combined assertion stays a
+   `>=` bound (per-step ceiling) while new tests assert exact ledger
+   equality with rounding coverage.
+3. Citations and observation wording (AI-02/AI-03): the system prompt
+   now requires exact `[evidence {tool_call_id}]` citations, separates
+   actual observation time from the requested window, mandates
+   claimed-bot / investigation-candidate / unavailable-timing wording
+   and requires truncated/partial disclosure (contract only — no
+   claim that wording guarantees model output). Also fixed the real
+   user message dropping `method`/`status`/`path_prefix`/
+   `referer_host` and the duplicated `status_class` line in
+   `_compose_user_text`. Deterministic prompt/wire/UI contract tests
+   assert the wording, metadata and scope without demanding exact
+   free prose from any model.
+
+Tests: new `tests/integration/test_assistant_stage_b.py` (18 tests):
+scripted-native A/B/C three-case test with actual analytics tools
+and T8 WIN_C goldens (exact counts/scopes/local envelopes, wire
+within unchanged limits, paired call IDs); 9-in-one and total tool
+overflow, interruption/gate-switch/budget exhaustion, poisoned
+question (zero dispatches/charges), oversized question,
+projection-bound fail-closed, hostile-content serialization block,
+all matchers on the real wire exactly once, native duplicate/missing
+call-ID rejection, multi-step cached/reasoning exact rounding,
+system-prompt contract, full-scope user-text contract, fake-history
+metadata contract, wire byte-cap/validation/immutability contract,
+chat UI contract (settled cost + typed evidence + evidence links).
+This is offline validation ONLY — AI-02 real-call status is NOT
+claimed and no production fake answering mode exists.
+
+| Check | Result | Evidence |
+| --- | --- | --- |
+| BEFORE reproduction (owned stub, blocked sockets, temp DBs) | FAIL as reported | 47366 vs 23683; 73451 vs 48567; output_limit_reached with 1 call |
+| AFTER reproduction (same script) | PASS | Displayed == settled in all cases; 3-tool case completes in 2 dispatches |
+| Focused `pytest tests/integration/test_assistant_stage_b.py` | PASS | 18 passed |
+| AI suites (`test_assistant`, `test_assistant_corrections`, `test_assistant_scope`, `test_t8_preparation`, `test_meta_adapter`, `test_ai_*`) | PASS | 140 passed (incl. 18 new) |
+| Full `pytest tests/unit tests/integration` | PASS | 462 passed, 2 skipped (pre-existing loopback-bind skips) |
+| Same full suite via `uv run --locked` (focused files) | PASS | 36 passed (18 timezone + 18 stage B) |
+| `ruff check .` | PASS | All checks passed |
+| `ruff format --check .` | PASS | 157 files already formatted |
+| `uv lock --check` | PASS | 40 packages, lockfile current, no new dependency |
+| `pytest tests/e2e` execution | BLOCKED | Sandbox denies protected browser launch; coordinator-owned |
+| Docker/candidate/smoke/x86-64 | NOT RUN | Coordinator-owned; no socket access |
+
+Acceptance impact: AI-01/AI-03 (bounded typed tool investigation with
+minimized context and explicit evidence), PRIV-01/02 (egress boundary
+unchanged and re-proven over the new wire shape), COST-01/02 (exact
+settled display, caps/ledgers intact), API-04 (chat contract without
+raw-log/proxy regressions — full suite green). Prior incomplete real
+AI demo and no-new-paid-call status retained. Independent
+reinspection required; no merge to `main`, no production deployment.

@@ -76,3 +76,23 @@ local demo update.
 
 Local regression, safe backup, exact-image update, owner acceptance/video
 rehearsal. No claim that paid/live gates passed.
+
+## Status 2026-11-01 — Stage A correction + Stage B implemented
+
+Separate owner authorization (Stage B task, same sole-writer branch
+`feature/acceptance-polish-2026-11-01`): the two independent
+protected-Chromium timezone findings were fixed first as commit
+`773cd12` (OOB timezone-notice update, real narrow-menu nav,
+cached config validation, TZ fallback reachability, abbreviation
+guards, tzdata fail-fast honesty; 18 timezone integration tests),
+then all three AI corrections above as a second commit (bounded
+evidence projection shared by fake/native paths, exact settled cost
+display, citations/observation wording + matcher scope fix; new
+18-test offline Stage B suite, full unit/integration green).
+Evidence: `docs/verification.md` (append-only). Remaining gaps for
+the coordinator/next session: protected-Chromium E2E execution
+(timezone + slice suites), Docker/candidate/smoke runs, x86-64
+verification, independent reinspection of both commits, owner
+acceptance/video rehearsal. No `main` merge, production deployment,
+paid call, cap change or dependency added. Prior incomplete real AI
+demo and no-new-paid-call status retained.

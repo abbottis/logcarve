@@ -688,12 +688,16 @@ def run_investigation(
                 scope.time_from,
                 scope.time_to,
                 [],
+                method=scope.method,
+                status=scope.status,
+                status_class=scope.status_class,
+                path_prefix=scope.path_prefix,
+                referer_host=scope.referer_host,
                 traffic=scope.traffic,
                 bot=scope.bot,
                 category=scope.category,
                 provider_claim=scope.provider_claim,
                 purpose=scope.purpose,
-                status_class=scope.status_class,
                 search=scope.search,
             )
             try:
@@ -914,6 +918,11 @@ def run_investigation(
                 actual_micro_usd=step_actual,
             )
             charged_input, charged_output = spent_input, spent_output
+            if not is_real:
+                # Fake/legacy path has no per-response usage ledger, so
+                # accumulate each settled incremental estimate: the final
+                # display is exactly the ledger sum including rounding.
+                spent_micro_usd += step_actual
             continue
         if len(response.text) > MAX_ANSWER_CHARS:
             _abandon_step(
@@ -938,7 +947,10 @@ def run_investigation(
                 "egress_blocked", "The provider answer cannot be shown safely."
             ) from exc
         if is_real:
-            actual_micro = spent_micro_usd + step_actual
+            # `spent_micro_usd` already includes this step's settled
+            # micro-USD (added above), so the display is exactly the
+            # ledger sum — never the last step twice.
+            actual_micro = spent_micro_usd
             usage_record = {
                 "input_tokens": spent_input,
                 "output_tokens": spent_output,
@@ -951,7 +963,10 @@ def run_investigation(
                 "tool_calls": tool_total,
             }
         else:
-            actual_micro = estimate_micro_usd(spent_input, spent_output)
+            # Display exactly the settled per-step sum (prior tool steps
+            # plus this final incremental estimate), never a re-rounded
+            # total that drifts from the ledger.
+            actual_micro = spent_micro_usd + step_actual
             usage_record = {
                 "input_tokens": spent_input,
                 "output_tokens": spent_output,
@@ -1031,7 +1046,6 @@ def _compose_user_text(
         f"category: {category or '-'}",
         f"provider: {provider_claim or '-'}",
         f"purpose: {purpose or '-'}",
-        f"status_class: {status_class or '-'}",
         f"search: {search or '-'}",
         f"tools: {', '.join(TOOL_NAMES)}",
         "",
@@ -1183,19 +1197,38 @@ def _execute_bounded_tool(
         raise InvestigationError("tool_rejected", "A tool result left the investigation scope.")
     try:
         minimized = egress.serialize_evidence(name, envelope["result"])
-        history_line = egress.check_outgoing(
-            f"Tool {tool_call_id} ({name}) evidence: {minimized!r}",
-            context="tool result",
+        history_line = egress.project_evidence_summary(
+            tool_name=name,
+            tool_call_id=tool_call_id,
+            minimized=minimized,
+            filters=envelope["filters"],
+            observation_time=envelope["observation_time"],
+            coverage=envelope["coverage"],
         )
     except egress.EgressViolation as exc:
+        if exc.code == "payload_too_large":
+            raise InvestigationError(
+                "output_limit_reached", "The investigation outgrew its evidence bound."
+            ) from exc
         raise InvestigationError(
             "egress_blocked", "A tool result cannot be forwarded safely."
         ) from exc
+    # Typed replay metadata both model paths share: the exact local
+    # evidence ID and actual observation time travel explicitly, so the
+    # model never has to guess them from a minimized result. The full
+    # local envelope (with complete filters, coverage and result) stays
+    # server-side for the UI and reproducible evidence links.
+    evidence_output = {
+        "tool_call_id": tool_call_id,
+        "tool": name,
+        "observation_time": envelope["observation_time"],
+        "summary": history_line,
+    }
     return {
         "envelope": envelope,
         "history_line": history_line,
-        # Executed (scope-overridden) arguments and minimized evidence
+        # Executed (scope-overridden) arguments and projection metadata
         # for typed stateless replay on real dispatches.
         "arguments": dict(scoped),
-        "evidence_output": minimized,
+        "evidence_output": evidence_output,
     }

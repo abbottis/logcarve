@@ -179,6 +179,16 @@ _EVIDENCE_FIELDS: dict[str, frozenset[str]] = {
 _EVIDENCE_ITEM_LIMIT = 10
 _EVIDENCE_TEXT_LIMIT = 200
 
+# Bounded per-tool evidence projection shared by fake history lines and
+# native stateless `function_call_output` items: the same compact text
+# reaches the model on both paths. Row samples and text fields are
+# capped; every omission is marked explicitly (`[+N more]`,
+# `[truncated ...]`); anything that still cannot fit fails closed
+# instead of dispatching with silently thinned evidence.
+EVIDENCE_PROJECTION_ITEMS = 5
+EVIDENCE_PROJECTION_TEXT = 80
+EVIDENCE_PROJECTION_MAX_CHARS = 1600
+
 
 def _scrub(value):
     if isinstance(value, str):
@@ -204,3 +214,200 @@ def serialize_evidence(tool_name: str, result: dict) -> dict:
     if allowed is None:
         raise EgressViolation("unknown_tool", f"No evidence contract for {tool_name}.")
     return {key: _scrub(result[key]) for key in allowed if key in result}
+
+
+def _clip_projection_text(value: object, limit: int = EVIDENCE_PROJECTION_TEXT) -> str:
+    """Shorten one already-validated text field with an explicit marker."""
+    text = str(value)
+    if len(text) <= limit:
+        return text
+    return text[:limit] + f"[+{len(text) - limit} more chars]"
+
+
+def _sample_list(items: object, render) -> str:
+    """Render at most the first rows with an explicit remainder marker."""
+    rows = list(items) if isinstance(items, (list, tuple)) else []
+    shown = [render(row) for row in rows[:EVIDENCE_PROJECTION_ITEMS]]
+    rest = len(rows) - len(shown)
+    text = ";".join(shown) if shown else "-"
+    if rest > 0:
+        text += f"[+{rest} more]"
+    return text
+
+
+def _limited_items(items: object) -> int:
+    """Count findings that carry explicit limitation notes."""
+    if not isinstance(items, (list, tuple)):
+        return 0
+    return sum(1 for row in items if isinstance(row, dict) and row.get("limitations"))
+
+
+def _project_result(tool_name: str, minimized: dict) -> str:
+    """Compact per-tool result summary over allowlisted minimized fields."""
+    if tool_name == "get_summary":
+        totals = minimized.get("totals", {})
+        totals = totals if isinstance(totals, dict) else {}
+        statuses = minimized.get("status_distribution", [])
+        duration = minimized.get("duration", {})
+        warnings = minimized.get("warnings", [])
+        status_text = _sample_list(
+            statuses,
+            lambda row: (
+                f"{row.get('status')}:{row.get('requests', 0)}" if isinstance(row, dict) else "?"
+            ),
+        )
+        timing = (
+            "available"
+            if isinstance(duration, dict) and duration.get("available")
+            else "unavailable"
+        )
+        warn_count = len(warnings) if isinstance(warnings, (list, tuple)) else 0
+        errors_4xx = totals.get("errors_4xx", 0)
+        errors_5xx = totals.get("errors_5xx", 0)
+        return (
+            f"requests={totals.get('requests', 0)} "
+            f"errors_4xx={errors_4xx} errors_5xx={errors_5xx} "
+            f"bytes={totals.get('bytes_total', 0)} "
+            f"statuses={status_text} timing={timing} warnings={warn_count}"
+        )
+    if tool_name == "get_timeseries":
+        buckets = minimized.get("buckets", [])
+        rows = list(buckets) if isinstance(buckets, (list, tuple)) else []
+        total_requests = sum(r.get("requests", 0) for r in rows if isinstance(r, dict))
+        total_errors = sum(r.get("errors", 0) for r in rows if isinstance(r, dict))
+        first = rows[0].get("bucket", "-") if rows and isinstance(rows[0], dict) else "-"
+        last = rows[-1].get("bucket", "-") if rows and isinstance(rows[-1], dict) else "-"
+        rest = len(rows) - min(len(rows), EVIDENCE_PROJECTION_ITEMS)
+        more = f"[+{rest} more buckets]" if rest > 0 else ""
+        return (
+            f"bucket={minimized.get('bucket', '-')} buckets={len(rows)} "
+            f"{first}->{last} requests={total_requests} errors={total_errors}{more}"
+        )
+    if tool_name == "get_top_paths":
+        return "groups={} top={}".format(
+            minimized.get("total_groups", 0),
+            _sample_list(
+                minimized.get("items", []),
+                lambda row: (
+                    f"{_clip_projection_text(row.get('path', '?'))}"
+                    f"({row.get('status', '?')})x{row.get('requests', 0)}"
+                    if isinstance(row, dict)
+                    else "?"
+                ),
+            ),
+        )
+    if tool_name == "get_top_referrers":
+        return "groups={} top={}".format(
+            minimized.get("total_groups", 0),
+            _sample_list(
+                minimized.get("items", []),
+                lambda row: (
+                    f"{_clip_projection_text(row.get('referer_host', '?'))}"
+                    f"x{row.get('requests', 0)}"
+                    if isinstance(row, dict)
+                    else "?"
+                ),
+            ),
+        )
+    if tool_name in ("get_crawler_claims", "get_security_findings"):
+        kind = "claims" if tool_name == "get_crawler_claims" else "findings"
+        items = minimized.get("items", [])
+        limited = _limited_items(items)
+        limits = f" limits_noted={limited}" if limited else ""
+
+        def _finding_text(row) -> str:
+            if not isinstance(row, dict):
+                return "?"
+            counts = row.get("counts")
+            requests = counts.get("requests", 0) if isinstance(counts, dict) else 0
+            return f"{row.get('rule_id', '?')}x{requests}"
+
+        return f"{kind}={minimized.get('total', 0)} " + _sample_list(items, _finding_text) + limits
+    if tool_name == "get_error_groups":
+        return "groups={} top={}".format(
+            minimized.get("total_groups", 0),
+            _sample_list(
+                minimized.get("items", []),
+                lambda row: (
+                    f"{_clip_projection_text(row.get('path', '?'))} "
+                    f"{row.get('status', '?')}x{row.get('requests', 0)}"
+                    if isinstance(row, dict)
+                    else "?"
+                ),
+            ),
+        )
+    raise EgressViolation("unknown_tool", f"No evidence contract for {tool_name}.")
+
+
+def _project_scope(filters: dict) -> str:
+    """Compact executed scope: site/source/window plus selected matchers."""
+    if not isinstance(filters, dict):
+        raise EgressViolation("unknown_tool", "Tool evidence scope is malformed.")
+    head = (
+        f"{filters.get('site_id', '?')}|{filters.get('source_id') or '-'}|"
+        f"{filters.get('time_from', '?')}->{filters.get('time_to', '?')}"
+    )
+    matchers = []
+    for key in (
+        "method",
+        "status",
+        "status_class",
+        "path_prefix",
+        "referer_host",
+        "traffic",
+        "bot",
+        "category",
+        "provider",
+        "purpose",
+        "search",
+    ):
+        value = filters.get(key)
+        if value is None:
+            continue
+        if key == "traffic" and value == "all":
+            continue
+        matchers.append(f"{key}={_clip_projection_text(value)}")
+    for key in ("limit", "offset", "bucket"):
+        value = filters.get(key)
+        if value is not None:
+            matchers.append(f"{key}={value}")
+    return head + ("|" + ",".join(matchers) if matchers else "")
+
+
+def project_evidence_summary(
+    *,
+    tool_name: str,
+    tool_call_id: str,
+    minimized: dict,
+    filters: dict,
+    observation_time: str,
+    coverage: dict,
+) -> str:
+    """Bounded evidence projection both model paths share.
+
+    Built ONLY from already egress-validated values (the allowlisted
+    minimized result plus server-generated envelope metadata), then the
+    complete final string is validated again — hostile content fails
+    closed in `serialize_evidence` first and is never thinned into
+    safety here. Carries the exact evidence ID, tool name, actual
+    observation time, full executed scope, coverage and the compact
+    result with explicit omission markers. Raises `EgressViolation`
+    when the meaningful content cannot fit the bound.
+    """
+    if not isinstance(minimized, dict) or not isinstance(observation_time, str):
+        raise EgressViolation("unknown_tool", "Tool evidence is malformed.")
+    if not isinstance(tool_call_id, str) or not tool_call_id:
+        raise EgressViolation("unknown_tool", "Tool evidence ID is malformed.")
+    unique = coverage.get("unique_events", "?") if isinstance(coverage, dict) else "?"
+    observed_min = coverage.get("observed_min", "?") if isinstance(coverage, dict) else "?"
+    observed_max = coverage.get("observed_max", "?") if isinstance(coverage, dict) else "?"
+    summary = (
+        f"[evidence {tool_call_id}] {tool_name} "
+        f"result={_project_result(tool_name, minimized)} "
+        f"scope={_project_scope(filters)} "
+        f"observed={observation_time} "
+        f"coverage={unique}e {observed_min}->{observed_max}"
+    )
+    if len(summary) > EVIDENCE_PROJECTION_MAX_CHARS:
+        raise EgressViolation("payload_too_large", "Tool evidence exceeds its projection bound.")
+    return check_outgoing(summary, context="tool evidence summary")
