@@ -251,3 +251,27 @@ class JourneyTimelineQuery(BaseModel):
     @classmethod
     def _require_tz_start(cls, value: datetime) -> datetime:
         return _as_utc(value)
+
+
+class JourneyIdQuery(BaseModel):
+    """Opaque journey lookup: resolve a listed ``journey_id`` to its timeline.
+
+    The list response carries ``journey_id``/``client_pseudonym``/
+    ``started_at`` but never the full stored User-Agent (agents
+    render truncated), so callers must not guess the agent text.
+    The server re-derives the journeys in the validated
+    site/source/window scope, matches the opaque ID exactly, and
+    then serves the same bounded timeline. ``None`` and empty-string
+    agents stay distinct keys; no history outside the validated
+    window is ever read and no original address is exposed.
+    """
+
+    filt: AnalyticsFilter
+    client_pseudonym: str = Field(min_length=1, max_length=128)
+    journey_start: datetime
+    journey_id: str = Field(min_length=64, max_length=64, pattern=r"^[0-9a-f]{64}$")
+
+    @field_validator("journey_start")
+    @classmethod
+    def _require_tz_start(cls, value: datetime) -> datetime:
+        return _as_utc(value)

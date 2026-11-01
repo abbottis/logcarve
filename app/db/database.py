@@ -36,8 +36,10 @@ def connect(
         # import-time analytics dependency; classification patterns always
         # come from the versioned rule file via bound parameters.
         from app.analytics.classification import register_sqlite_functions
+        from app.analytics.queries import register_time_functions
 
         register_sqlite_functions(conn)
+        register_time_functions(conn)
         return conn
     except Exception:
         conn.close()

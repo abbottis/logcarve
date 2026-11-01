@@ -21,6 +21,7 @@ from app.analytics.contracts import (
     BotTableQuery,
     BucketSize,
     ExplorerQuery,
+    JourneyIdQuery,
     JourneyQuery,
     JourneyTimelineQuery,
     SlowEndpointsQuery,
@@ -448,6 +449,7 @@ def security_findings(
         if has_threshold:
             offenders, offenders_total = queries.security_offenders(conn, filt, rule, clf)
             truncated = offenders_total > len(offenders)
+            window_seconds = int((filt.window.time_to - filt.window.time_from).total_seconds())
             for offender in offenders:
                 # The legacy 4xx rule keeps its exact historic shape:
                 # every counted row is a stored 4xx, so the count reads
@@ -457,11 +459,19 @@ def security_findings(
                         "errors": offender["hits"],
                         "distinct_paths": offender["distinct_paths"],
                     }
+                    avg_numerator = "stored 4xx errors"
                 else:
                     counts = {
                         "requests": offender["hits"],
                         "distinct_paths": offender["distinct_paths"],
                     }
+                    avg_numerator = "rule-matching requests"
+                sample_total = offender["sample_groups_total"]
+                assert isinstance(sample_total, int)
+                sequence = offender["path_sequence"]
+                assert isinstance(sequence, list)
+                sequence_total = offender["path_sequence_total"]
+                assert isinstance(sequence_total, int)
                 findings.append(
                     Finding(
                         rule_id=rule.id,
@@ -478,10 +488,51 @@ def security_findings(
                             "client_pseudonym": offender["client_pseudonym"],
                             "sample_paths": offender["sample_paths"],
                             "sample_paths_shown": len(offender["sample_paths"]),
-                            "sample_paths_total": offender["distinct_paths"],
+                            # Exact (path, status) groups in the
+                            # sample scope — never the distinct-path
+                            # count, which understates groups once one
+                            # path carries several statuses.
+                            "sample_paths_total": sample_total,
+                            "sample_paths_truncated": sample_total > len(offender["sample_paths"]),
+                            "sample_distinct_paths": offender["sample_distinct_paths"],
+                            "sample_scope_requests": offender["sample_scope_requests"],
                             "offenders_shown": len(offenders),
                             "offenders_total": offenders_total,
                             "offenders_truncated": truncated,
+                            # Honest tempo: a cumulative average over
+                            # the explicit window plus the peak
+                            # whole-UTC-minute burst. The average
+                            # spreads every counted row; only the
+                            # peak shows concentration.
+                            "window_seconds": window_seconds,
+                            "avg_requests_per_minute": offender["hits"] / window_seconds * 60.0
+                            if window_seconds
+                            else None,
+                            "avg_numerator": avg_numerator,
+                            "peak_minute_requests": offender["peak_minute_requests"],
+                            "peak_minute": offender["peak_minute"],
+                            "tempo_note": (
+                                "average spreads the full validated window; "
+                                "peak counts the busiest whole UTC minute "
+                                "(fractional rows fall into their truncated "
+                                "minute); same totals with different peaks "
+                                "mean spread-out versus concentrated traffic"
+                            ),
+                            # Bounded chronological evidence: the first
+                            # ordered (ts, path, status) rows with
+                            # exact inter-row gaps; totals stay exact.
+                            "path_sequence": sequence,
+                            "path_sequence_shown": len(sequence),
+                            "path_sequence_total": sequence_total,
+                            "path_sequence_truncated": sequence_total > len(sequence),
+                            "sequence_note": (
+                                "chronological sample ordered by stored UTC "
+                                "instant then row id (ties keep id order); "
+                                "gap_prev_s is whole seconds floored from "
+                                "exact epoch microseconds; the sample scope "
+                                "matches sample_paths (rule-narrowed, or "
+                                "all-status for the legacy 4xx rule)"
+                            ),
                         },
                         coverage_summary=coverage,
                         limitations=[*LIMITATIONS_SECURITY, *LIMITATIONS_LOGS],
@@ -535,8 +586,11 @@ LIMITATIONS_JOURNEYS = [
         "site/source event stream"
     ),
     (
-        "a first-of-key journey near the window start (or last near the window end) may continue "
-        "outside the window: flagged partial, never resolved by reading outside the authorized window"
+        "window edges are asymmetric: a first-of-key journey is partial only when "
+        "start - window_from < 1800s, but a last-of-key journey is partial when "
+        "window_to - end <= 1800s (an unseen event exactly on the excluded edge "
+        "would still continue it); flagged partial, never resolved by reading "
+        "outside the authorized window"
     ),
 ]
 
@@ -601,6 +655,39 @@ def journey_timeline(
         "time_range": _window_dict(query.filt),
         "filters": _filter_dict(query.filt),
         **result,
+        "coverage": coverage_summary(conn, query.filt, rules),
+        "limitations": [*LIMITATIONS_JOURNEYS, *LIMITATIONS_LOGS],
+    }
+
+
+def journey_timeline_by_id(
+    conn: sqlite3.Connection,
+    query: JourneyIdQuery,
+    rules: list[Rule] | None = None,
+) -> dict[str, object]:
+    """Bounded timeline for one opaque journey ID listed by :func:`journeys`.
+
+    Resolves the grouping key strictly inside the validated
+    site/source/window scope — callers pass the listed
+    ``client_pseudonym``/``started_at``/``journey_id`` and never guess
+    a full User-Agent from a truncated display field. Raises
+    ``KeyError`` for an ID with no exact in-scope match.
+    """
+    clf = _classifier_for(query.filt, rules)
+    result = queries.journey_timeline_by_id(
+        conn,
+        query.filt,
+        client_pseudonym=query.client_pseudonym,
+        journey_start=query.journey_start,
+        journey_id=query.journey_id,
+        classifier=clf,
+    )
+    return {
+        "site_id": query.filt.site_id,
+        "time_range": _window_dict(query.filt),
+        "filters": _filter_dict(query.filt),
+        **result,
+        "resolved_via": "journey_id",
         "coverage": coverage_summary(conn, query.filt, rules),
         "limitations": [*LIMITATIONS_JOURNEYS, *LIMITATIONS_LOGS],
     }
@@ -719,11 +806,27 @@ def previous_window_filter(filt: AnalyticsFilter) -> AnalyticsFilter:
 
 
 def _comparison_metric(
-    name: str, current: float, previous: float, comparable: bool
+    name: str,
+    current: float,
+    previous: float,
+    *,
+    coverage_ok: bool,
+    current_empty: bool,
+    previous_empty: bool,
 ) -> dict[str, object]:
-    """One current-vs-previous metric with honest ratio handling."""
+    """One current-vs-previous metric with honest ratio handling.
+
+    Raw counts and absolute changes are always exact over the
+    observed rows. Ratios need observed coverage on BOTH sides: a
+    limited import state, an empty current window, or two empty
+    windows all yield ``insufficient_coverage`` (an empty current
+    window is never a confident -100%). Only a covered nonempty
+    current window against a covered zero baseline yields
+    ``zero_baseline`` (exact change, ratio unavailable, never
+    infinite).
+    """
     change: int | float = current - previous
-    if not comparable:
+    if not coverage_ok:
         return {
             "name": name,
             "current": current,
@@ -733,6 +836,34 @@ def _comparison_metric(
             "percent": None,
             "ratio_status": "insufficient_coverage",
             "note": "coverage is limited (running/failed imports): no confident ratio",
+        }
+    if current_empty or previous_empty:
+        if not current_empty and previous == 0:
+            return {
+                "name": name,
+                "current": current,
+                "previous": previous,
+                "absolute_change": change,
+                "ratio": None,
+                "percent": None,
+                "ratio_status": "zero_baseline",
+                "note": "baseline is zero: change is exact, ratio is unavailable (never infinite)",
+            }
+        if current_empty and not previous_empty:
+            note = "current window holds no observed requests: no confident ratio"
+        elif previous_empty and not current_empty:
+            note = "baseline window holds no observed requests: no confident ratio"
+        else:
+            note = "neither window holds observed requests: no confident ratio"
+        return {
+            "name": name,
+            "current": current,
+            "previous": previous,
+            "absolute_change": change,
+            "ratio": None,
+            "percent": None,
+            "ratio_status": "insufficient_coverage",
+            "note": note,
         }
     if previous == 0:
         return {
@@ -758,6 +889,39 @@ def _comparison_metric(
     }
 
 
+#: Selector fields that must match between comparison windows. Only
+#: the validated windows and paging (limit/offset) may differ; any
+#: other mismatch (method, status, metadata, traffic/bot selectors)
+#: raises instead of comparing different populations silently.
+_COMPARISON_SELECTORS = (
+    "method",
+    "status",
+    "status_class",
+    "path_prefix",
+    "path_exact",
+    "referer_host",
+    "search",
+    "traffic",
+    "bot",
+    "category",
+    "provider",
+    "purpose",
+    "server_host",
+    "http_version",
+    "mime_type",
+    "cache_status",
+    "tls_protocol",
+    "timing_available",
+    "upstream_available",
+    "timing_min_ms",
+    "timing_max_ms",
+)
+
+
+def _comparison_selectors(filt: AnalyticsFilter) -> dict[str, object]:
+    return {name: getattr(filt, name) for name in _COMPARISON_SELECTORS}
+
+
 def compare_windows(
     conn: sqlite3.Connection,
     current: AnalyticsFilter,
@@ -768,14 +932,21 @@ def compare_windows(
 ) -> dict[str, object]:
     """Current-vs-explicit/previous equal-length window comparison.
 
-    Both filters must share site and source scope and span exactly
-    equal durations; anything else raises ``ValueError`` instead of
-    widening. Each side reports its own coverage range, raw counts,
-    absolute change and ratio/percentage. A zero baseline yields an
-    exact change with an unavailable ratio (never divide-by-zero or
-    infinite); limited coverage (running/failed imports on either
-    side) marks every ratio unavailable rather than a confident
-    spike. Only the two validated windows are read.
+    Both filters must share site and source scope, span exactly
+    equal durations, and carry identical selectors: anything else
+    raises ``ValueError`` instead of widening or comparing different
+    populations. Only the validated windows and paging may differ;
+    both selector sets travel in the output so the comparison is
+    auditable. Each side reports its own coverage range, raw counts,
+    absolute change and ratio/percentage. A covered zero baseline
+    yields an exact change with an unavailable ratio (never
+    divide-by-zero or infinite); limited coverage (running/failed
+    imports on either side) or absent observed requests on EITHER
+    side marks every ratio unavailable rather than a confident
+    spike — an empty current window is never a -100% finding.
+    Observed min/max bound observed events only: one event never
+    proves full-window coverage. Only the two validated windows are
+    read.
     """
     if current.site_id != previous.site_id or current.source_id != previous.source_id:
         raise ValueError("comparison windows must share site and source scope")
@@ -785,6 +956,18 @@ def compare_windows(
         raise ValueError("comparison windows must have exactly equal length")
     if current_duration <= timedelta(0):
         raise ValueError("comparison windows must have positive length")
+    current_selectors = _comparison_selectors(current)
+    previous_selectors = _comparison_selectors(previous)
+    if current_selectors != previous_selectors:
+        mismatch = next(
+            name
+            for name in _COMPARISON_SELECTORS
+            if current_selectors[name] != previous_selectors[name]
+        )
+        raise ValueError(
+            "comparison windows must carry identical selectors aside from the "
+            f"validated windows/paging (mismatch: {mismatch})"
+        )
     observed = datetime.now(UTC) if observation_time is None else observation_time
     sides: dict[str, dict[str, object]] = {}
     for name, filt in (("current", current), ("previous", previous)):
@@ -812,32 +995,39 @@ def compare_windows(
         }
     cur, prev = sides["current"], sides["previous"]
     assert isinstance(cur["coverage"], dict) and isinstance(prev["coverage"], dict)
-    comparable = not (cur["coverage"]["coverage_limited"] or prev["coverage"]["coverage_limited"])
+    coverage_ok = not (cur["coverage"]["coverage_limited"] or prev["coverage"]["coverage_limited"])
     cur_counts = cur["counts"]
     prev_counts = prev["counts"]
     assert isinstance(cur_counts, dict) and isinstance(prev_counts, dict)
+    current_empty = int(cur_counts["requests"]) == 0
+    previous_empty = int(prev_counts["requests"]) == 0
+    flags = {
+        "coverage_ok": coverage_ok,
+        "current_empty": current_empty,
+        "previous_empty": previous_empty,
+    }
     metrics = [
-        _comparison_metric("requests", cur_counts["requests"], prev_counts["requests"], comparable),
+        _comparison_metric("requests", cur_counts["requests"], prev_counts["requests"], **flags),
         _comparison_metric(
-            "errors_4xx", cur_counts["errors_4xx"], prev_counts["errors_4xx"], comparable
+            "errors_4xx", cur_counts["errors_4xx"], prev_counts["errors_4xx"], **flags
         ),
         _comparison_metric(
-            "errors_5xx", cur_counts["errors_5xx"], prev_counts["errors_5xx"], comparable
+            "errors_5xx", cur_counts["errors_5xx"], prev_counts["errors_5xx"], **flags
         ),
         _comparison_metric(
-            "bytes_total", cur_counts["bytes_total"], prev_counts["bytes_total"], comparable
+            "bytes_total", cur_counts["bytes_total"], prev_counts["bytes_total"], **flags
         ),
         _comparison_metric(
             "claimed_bot_requests",
             int(cur["claimed_bot"]),
             int(prev["claimed_bot"]),
-            comparable,
+            **flags,
         ),
         _comparison_metric(
             "automation_requests",
             int(cur["automation"]),
             int(prev["automation"]),
-            comparable,
+            **flags,
         ),
     ]
     assert isinstance(cur["requests_per_hour"], (int, float))
@@ -847,28 +1037,43 @@ def compare_windows(
             "requests_per_hour",
             float(cur["requests_per_hour"]),
             float(prev["requests_per_hour"] or 0.0),
-            comparable and prev["requests_per_hour"] is not None,
+            **flags,
         )
     )
+    comparable = coverage_ok and not current_empty and not previous_empty
     reasons = []
-    if not comparable:
+    if not coverage_ok:
         reasons.append("coverage limited by running/failed imports on at least one side")
-    if prev_counts["requests"] == 0:
+    if current_empty and not previous_empty:
+        reasons.append("current window holds no requests: ratios unavailable")
+    if previous_empty and not current_empty:
         reasons.append("baseline window holds no requests: ratios unavailable")
+    if current_empty and previous_empty:
+        reasons.append("neither window holds observed requests: ratios unavailable")
     return {
         "site_id": current.site_id,
         "source_id": current.source_id,
         "current_window": _window_dict(current),
         "previous_window": _window_dict(previous),
+        "selectors": current_selectors,
+        "filters": {"current": _filter_dict(current), "previous": _filter_dict(previous)},
         "window_seconds": int(current_duration.total_seconds()),
         "generated_at": observed.isoformat(),
         "metrics": metrics,
         "coverage": {"current": cur["coverage"], "previous": prev["coverage"]},
-        "comparable": comparable and int(prev_counts["requests"]) > 0,
+        "comparable": comparable,
         "comparable_reasons": reasons,
         "limitations": [
             "each side covers only its own validated window: no hidden widening",
-            "ratios are unavailable on zero baselines or limited coverage, never infinite",
+            "selectors match aside from the validated windows/paging: both sets travel above",
+            (
+                "observed_min/observed_max bound observed events only: one event never proves "
+                "full-window coverage and unseen gaps stay unknown"
+            ),
+            (
+                "ratios are unavailable on zero baselines, empty windows or limited coverage, "
+                "never infinite and never a confident -100% from an empty window"
+            ),
             *LIMITATIONS_BOT,
             *LIMITATIONS_LOGS,
         ],

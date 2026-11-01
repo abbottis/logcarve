@@ -138,9 +138,16 @@ near-float-ceiling interpolation stable.
   event of the same key **strictly exceeds 1800 seconds**; a gap of
   exactly 1800 seconds continues the journey (tested with 29m59s,
   30m00s and 30m01s gaps plus identical timestamps, which share a
-  journey ordered by row id). Stable journey IDs are SHA-256 over
-  site/source scope, pseudonym, sanitized agent (`None` marked, never
-  colliding) and start instant.
+  journey ordered by row id). All gap, duration-sort and edge
+  comparisons use exact integer epoch microseconds (`epoch_micros`:
+  a deterministic SQLite scalar over aware ISO-8601 instants, no
+  float/julianday rounding, naive values rejected, positive/negative
+  offsets normalized exactly): 1800.000000s continues while
+  1800.000001s splits (tested ±1µs). Legacy whole-second groupings
+  and the HMAC identity are unchanged. Stable journey IDs are
+  SHA-256 over site/source scope, pseudonym, sanitized agent
+  (`None` marked, never colliding with empty string) and start
+  instant.
 - Boundaries derive from the site/source/window event stream BEFORE
   any content matcher: the filtered `shown` count is a conditional
   aggregate computed afterwards, so a filter hiding the first or a
@@ -148,12 +155,30 @@ near-float-ceiling interpolation stable.
   entry path or changes the journey ID (tested). Entry paths always
   aggregate the base-scope first request of eligible journeys
   (`min_requests` filtered rows), with complete/partial shares.
-- Window edges are honest, never widened: a first-of-key journey is
-  `left_truncated` only when `start - window_from < 1800s`, a last
-  journey `right_truncated` only when `window_to - end < 1800s` (at
-  exactly the gap distance a hidden neighbour would start its own
-  journey, so the edge is provably complete — tested both sides). No
-  read outside the authorized window ever happens.
+- Window edges are honest, never widened, and deliberately
+  asymmetric: a first-of-key journey is `left_truncated` only when
+  `start - window_from < 1800s` (an excluded predecessor stands
+  strictly before the edge, so at exactly the gap its own gap would
+  strictly exceed the limit — left-complete at equality), while a
+  last journey is `right_truncated` when `window_to - end <= 1800s`
+  (an unseen event exactly on the excluded edge would still continue
+  it — right-partial at equality, proven by an expanded-window
+  control where a real event on the old edge continues the same
+  journey). No read outside the authorized window ever happens.
+- The segmentation base projects every stored column the shared
+  matchers reference (host, HTTP version, MIME, cache, TLS,
+  measured/upstream timing), so all metadata filters narrow `shown`
+  on list, timeline and entries exactly like every other consumer;
+  boundaries still derive before matchers and a matching-nothing
+  filter yields zero journeys, never an unfiltered result.
+- A listed opaque `journey_id` resolves via `journey_timeline_by_id`
+  strictly inside the validated site/source/window scope (exact ID
+  re-hash over same-client/same-instant candidates, offsets
+  normalized): callers never guess a full User-Agent from a
+  truncated display field. Distinct agents sharing one client and
+  start (including `None` vs empty string) resolve apart; unknown or
+  out-of-scope IDs raise `KeyError` without widening history, and no
+  original address participates.
 - Exact `total_groups` via grouped-subquery counts; only the requested
   page crosses into Python (never a `fetchall` of every event); list
   sorts (`requests_desc` ranks filtered shown, plus `start_asc`,
@@ -187,15 +212,42 @@ near-float-ceiling interpolation stable.
   (`SECURITY_MAX_OFFENDERS`) with explicit truncation, bounded
   per-offender samples. The legacy 4xx rule keeps its historic
   all-status sample shape; the old capped-scan pseudo-finding is gone.
-- `compare_windows` validates identical site/source scope and exactly
-  equal durations (`ValueError` otherwise) and reads only the two
-  windows. Each side reports coverage range, raw counts, absolute
+- Offender reads are a constant 6 SELECTs per threshold rule no matter
+  how many offenders show (grouped totals/page plus four batched
+  queries: path sample, exact per-client stats, whole-minute peaks,
+  chronological sequences — proven 1 vs 100 clients). Sample totals
+  count exact (path, status) groups in the sample scope, kept apart
+  from distinct paths: one path with three statuses is 3 groups over
+  1 path, so shown never exceeds its total. Rule-sample `errors`
+  counts every stored 4xx AND 5xx (a `/.env` 500 is an error like a
+  404; 200/304 stay 0) with the `errors_4xx`/`errors_5xx` split
+  alongside; overlapping rules each report their own matches fully
+  (shared rows appear in both scopes, never as a deduplicated unique
+  claim).
+- Cumulative offender counts keep their honest names and meanings
+  (rule IDs/versions unchanged); genuine tempo travels alongside as
+  bounded evidence with an explicit denominator: average requests
+  per minute over the validated `window_seconds`, the peak
+  whole-UTC-minute burst (`peak_minute_requests`/`peak_minute`), and
+  a chronological path-sequence sample (ordered by stored instant
+  then row id, exact inter-row `gap_prev_s`, bounded rows with exact
+  totals, same scope as the sample). Equal totals with different
+  peaks separate spread-out from concentrated traffic (tested).
+- `compare_windows` validates identical site/source scope, exactly
+  equal durations AND identical selectors aside from the validated
+  windows/paging (`ValueError` naming the mismatch otherwise: GET vs
+  POST or any metadata difference never compares silently) and reads
+  only the two windows. Both filter/selector sets travel in the
+  output. Each side reports coverage range, raw counts, absolute
   change and ratio/percentage per metric (requests, 4xx, 5xx, bytes,
-  claimed-bot/automation requests, requests/hour). Zero baselines
-  yield an exact change with `ratio: None` (`zero_baseline`, never
-  infinite); running/failed imports on either side mark every ratio
-  `insufficient_coverage`. `previous_window_filter` slides exactly one
-  duration with selectors preserved.
+  claimed-bot/automation requests, requests/hour). Covered zero
+  baselines yield an exact change with `ratio: None`
+  (`zero_baseline`, never infinite); running/failed imports OR absent
+  observed requests on EITHER side mark every ratio
+  `insufficient_coverage` — an empty current window is never a
+  confident -100%. Observed min/max bind observed events only: one
+  event never proves full-window coverage. `previous_window_filter`
+  slides exactly one duration with selectors preserved.
 
 ## Provenance
 

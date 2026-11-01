@@ -190,7 +190,14 @@ def test_t2b_filters_hide_but_never_invent_starts(tmp_path):
 
 
 def test_t2b_window_edge_partial_flags_with_equality(tmp_path):
-    """Near-edge first/last journeys are partial; exactly-gap edges complete."""
+    """Edges are asymmetric: left is complete at exactly the gap, right stays partial.
+
+    An excluded predecessor stands strictly before ``window_from``,
+    so at exactly 1800s its gap would strictly exceed the limit and
+    start its own journey (left complete). An unseen successor may
+    sit exactly on the excluded ``window_to`` edge, where a gap of
+    exactly 1800s still continues the journey (right partial).
+    """
     db = _import_journeys(tmp_path)
     conn = connect(db, read_only=True)
     try:
@@ -243,14 +250,17 @@ def test_t2b_window_edge_partial_flags_with_equality(tmp_path):
     assert left_first["entry_path"] == "/a2"
     assert left_first["started_at"] == "2026-10-27T10:29:59+00:00"
     assert left_first["left_truncated"] is True
-    # A last journey ending 900s before the edge is right-partial, but
-    # exactly 1800s before the edge it is provably complete.
+    # A last journey ending 900s before the edge is right-partial,
+    # and — unlike the left edge — exactly 1800s before the edge it
+    # is still right-partial: an unseen request exactly on the
+    # excluded edge would continue it (see the expanded-window
+    # control in test_t2b_right_edge_equality_expanded_control).
     right_j2 = next(i for i in right["items"] if i["entry_path"] == "/a4")
     assert right_j2["right_truncated"] is True
     assert right_j2["completeness"] == "partial-right"
     exact_j2 = next(i for i in exact["items"] if i["entry_path"] == "/a4")
-    assert exact_j2["right_truncated"] is False
-    assert exact_j2["completeness"] == "complete"
+    assert exact_j2["right_truncated"] is True
+    assert exact_j2["completeness"] == "partial-right"
 
 
 def test_t2b_list_paging_sort_and_min_requests(tmp_path):

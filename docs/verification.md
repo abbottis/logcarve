@@ -1,5 +1,43 @@
 # Verification record
 
+## 2026-11-01 — Parity T2b correction A-H (before T3, shared layer)
+
+Owner-authorized LogWerk parity T2b correction on
+`feature/logwerk-parity-2026-11-01`, exact model
+`muse-spark-1.3-contributor`/medium/Contributor ON; sandbox +
+approval ON, sole writer, no subagents, no new approval loop, no
+parent private files/keys/logs, product calls, Docker, pushes, main
+or deployment. All code/tests by the implementer. Public/synthetic
+data only; the immutable 120-row fixtures, HMAC/core identities,
+auth/usage/consumed allowance and the 77-rule bot catalog stay
+unchanged (asserted untouched in-test). Prior commits preserved, no
+amend. Coordinator probes A-H were reproduced on the frozen T2b
+commit first (throwaway `/tmp` probes: right-at-equality False,
+`no such column` on 8 metadata filters, 102 SELECTs for 100
+offenders, 500-errors 0, empty-current comparable True, GET-vs-POST
+accepted, no per-side filters), then fixed. Definitions corrected
+in `docs/logwerk-parity-metrics.md` (asymmetric edges, microsecond
+comparisons, group totals, >=400 errors, strict selectors with
+empty-side honesty, burst/sequence evidence, opaque ID lookup). No
+HTTP/UI/export wiring; old bot-conflict/legacy finding counts
+intact.
+
+| Check | Result | Evidence |
+| --- | --- | --- |
+| New `tests/integration/test_parity_t2b_corrections.py` | PASS | 21 passed: A (right-partial at equality + expanded-window control proving continuation, left-complete asymmetry), B (17 metadata/content filters on list/timeline/entries with unchanged IDs/starts/entries + no silent ignoring), C (6 SELECTs for 1 vs 100 offenders, groups-vs-paths multi-status incl. legacy all-status scope), D (200/304/401/403/500 exact + 4xx/5xx split + overlapping-rule honesty vs unique events), E (empty current/both empty unavailable, empty previous keeps zero_baseline, running-import unavailable, 5 selector mismatches rejected, paging/window-only differences compare), F (spread-vs-burst peaks 1 vs 6 with equal averages + window_seconds, bounded 10/16 sequence with gaps + benign rows + outside-window exclusion), G (epoch-micros exactness, offset normalization, naive rejection, SQLite scalar, 1800s +/-1us grouping/edges, identical instants), H (ID roundtrip == direct timeline for all 5 key shapes incl. NULL vs empty UA + long UA, same-start distinction, offset-spelling resolution, tampered/out-of-scope KeyError) — project `.venv`, Python 3.12 |
+| Corrected `tests/integration/test_parity_t2b.py` | PASS | Symmetric exact-right-complete expectation replaced with the proven asymmetric rule (right-partial at equality + control reference); all other T2b cases unmodified and passing |
+| Full `tests/unit tests/integration` | PASS | 738 passed, 2 skipped (loopback sockets unavailable in sandbox; same pre-existing env category as frozen T2b) |
+| `ruff check` + `ruff format --check` | PASS | Both clean over `app` + `tests` + `config` |
+| `uv lock --check --offline` | PASS | `UV_CACHE_DIR=/tmp/uvcache`: resolved 42 packages, no manifest/lock delta (no new dependencies) |
+| e2e (Playwright/Chromium) | NOT RUN | No browser, HTTP, UI or export changes in this correction (shared analytics layer only); no e2e file references the changed shapes |
+| Gitleaks pre-push scan | NOT RUN | No push authorized in this task; no secrets, real logs, keys or private paths added (synthetic TEST-NET fixtures only) |
+| No-original-IP surface | PASS | Journeys/timelines/ID resolution/offenders/sequences carry pseudonyms + truncated agents only; resolution returns keys, never addresses |
+
+Acceptance impact: PAR-05/PAR-06/PAR-08 stay at the shared
+service/query layer with corrected definitions; API/export wiring
+stays T3 and admin UI stays T4, not claimed. Stopping for
+independent review.
+
 ## 2026-11-01 — Parity T2b journeys/security/comparison (E/F/H, shared layer)
 
 Authorized LogWerk parity build on `feature/logwerk-parity-2026-11-01`,
