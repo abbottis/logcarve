@@ -1763,7 +1763,7 @@ is `ffaf737`; commits after it are tests/docs ONLY, so the tested runtime
 image was built from `a087c3e1497b1ca3e9144a8fb0e072d8a8bed6b0` — no fresh
 build is claimed for the later docs/test-only commits, and those commits
 need no broad test repeat. No writer edits to app/tests after this point.
-No push, merge, deployment, provider/product calls, purchases, or
+No push, main merge, production deployment, product/provider calls, purchases, or
 allowance reset/restore. Sole-writer Muse coding with exact
 `muse-spark-1.3-contributor`/medium, protections ON, no agents; public
 source + synthetic fixtures only. Historical PASS/FAIL/BLOCKED/NOT RUN
@@ -1784,7 +1784,7 @@ records above are preserved unchanged.
 | Internal-network offline Compose | PASS | 24/0 (no external network/model key/chat; API/client, backup/isolated restore, retention, cleanup); owned resources removed |
 | Built candidate + upgraded live 8080 | PASS | 36 route/theme/width cases each (9 routes incl. Help, 1440+390, light+dark); 8 timezone checks each (all 599 zones, default/order/labels, Kathmandu/Auckland/New York/Adelaide exact times, summer/winter OOB refresh, invalid Apply, narrow themes); 12 UI interaction checks each (header clicks vs external API, keyboard details, details after htmx Apply, both themes); no console errors/external requests/overflow/failed responses |
 | 100k synthetic profile (macOS 27.0.1 arm64, M5 Pro 18 cores/48GiB, Python 3.12.16) | Observed | 98969 accepted / 1031 by-design rejected, 2.0801s import, 45916160 DB bytes, peak RSS 169.53 MiB; byte-sorted Requests 0.1841/0.8048s, Security 0.2931/0.9566s, Overview 1.4416/3.1017s, Crawlers 1.1949/1.4437s; single observations, not percentiles/guarantees |
-| Redacted Gitleaks history + tracked export | PASS with reviewed finding | Only the known `technical-spec.md:787` cost-heading false positive (`generic-api-key`, exit 1 retained); no allowlist, no new finding; no work-origin naming trace; functional ChatGPT-User catalog data retained unchanged |
+| Redacted Gitleaks history + tracked export | Known finding (exit 1) | Only the known `technical-spec.md:787` cost-heading false positive (`generic-api-key`, exit 1 retained); no allowlist, no new finding; no work-origin naming trace; functional User-Agent catalog data retained unchanged |
 | Live update 127.0.0.1:8080 | PASS | EXACT tested image `logcarve-candidate:a087c3e…`, UID 10001, loopback only, RO source mounts, AI off, empty key, default Europe/Berlin; online 0600 backup + rollback image taken BEFORE activation; all-table/row hashes identical across activation; credential hashes unchanged; 120 rows, schema 4, admin/token/sessions/usage retained; later logins create only their own sessions; pins `d765393f…ebeb65` / `b9479a8e…52ca45f` unchanged |
 | Linux x86-64 / standalone host install | NOT RUN | ARM64 only; no x86/amd64 claim |
 | Persistent demo network posture | Noted | Ordinary bridge loopback demo is NOT air-gapped; offline proof is the separate internal-network run |
