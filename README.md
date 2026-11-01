@@ -67,10 +67,19 @@ tracked-export and full-history scans (only the known
 `technical-spec.md:787` cost-heading false positive), an 8/0 Docker Compose
 candidate run, a 24/0 internal-network offline smoke run and a 32-case
 built-image browser matrix on both the isolated candidate and the updated
-persistent demo. These are observed results reported by the independent
-local runner on macOS ARM64 / Linux ARM64 containers; native Linux x86-64
-installation and standalone Linux host install are **NOT RUN**, and no
-full release, hackathon or all-project QA approval is claimed.
+persistent demo. At the acceptance-readiness anchor `bb272a9`
+(reviewed public source branch `feature/acceptance-polish-2026-11-01`,
+canonical equivalent `ad6d74f`), the display-timezone catalogue, three
+offline AI corrections and the technical local gates are likewise
+complete and independently verified: 480 unit/integration tests, 24
+protected browser E2E tests, a 121-check offline mock probe, semantic
+evidence checks, the 599-zone catalogue, an 8/0 candidate Compose run,
+a 24/0 offline smoke run and a 32-case browser matrix on candidate and
+persistent demo plus 7/7 timezone acceptance on both. These are observed
+results reported by the independent local runner on macOS ARM64 / Linux
+ARM64 containers; native Linux x86-64 installation and standalone Linux
+host install are **NOT RUN**, and no full release, hackathon or
+all-project QA approval is claimed.
 
 Deferred scope stays deferred: gzip, custom formats, live ingestion,
 GeoIP, sessions, export/import UX, webhooks and the MCP product server.
@@ -78,11 +87,14 @@ The product AI path stays off in the demo (AI disabled, empty model key,
 no Internet in offline proof); the separately authorized real Meta test
 completed two investigations with tool evidence while the third stopped at
 its context bound, so the three-case AI demonstration remains
-**incomplete**. Context minimization, a returned cost-display double count
-and citation wording remain follow-up work. The settled usage ledger and
-execution caps were unaffected by the display issue. No additional real or
-paid model calls are authorized by this snapshot. Muse coding-model usage
-is separate from product app caps and the product Standard data-mode gate.
+**incomplete**. The offline context-minimization, exact settled-cost
+display and citation/observation corrections are complete and verified;
+the settled usage ledger and execution caps were unaffected by the
+display issue. No additional real or paid model calls are authorized by
+this snapshot. Owner manual acceptance is pending (see the
+[acceptance checklist](docs/acceptance-checklist.md)). Muse coding-model
+usage is separate from product app caps and the product Standard
+data-mode gate.
 
 See [verification history](docs/verification.md), [checkpoint notes](docs/publication.md)
 and [next-session tasks](docs/next-session.md). The local demo uses a normal

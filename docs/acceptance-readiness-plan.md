@@ -77,7 +77,32 @@ local demo update.
 Local regression, safe backup, exact-image update, owner acceptance/video
 rehearsal. No claim that paid/live gates passed.
 
-## Status 2026-11-01 — Stage A correction + Stage B implemented
+## Status 2026-11-01 — closeout: A + B + C complete, owner acceptance pending
+
+Timezone catalogue (A), three offline AI corrections (B) and the
+tiny readiness fix — completed source-change quality on every tool
+plus decoded scope validation before JSON escaping — are committed
+at clean application source `bb272a9` on
+`feature/acceptance-polish-2026-11-01` (canonical equivalent
+`ad6d74f` on `local/acceptance-readiness-2026-11-01`; inspect `git
+status` rather than assuming a branch name). Independent final
+gates are recorded in `docs/verification.md` (append-only
+transcription): 480 unit/integration, 24 protected E2E, 121-check
+offline mock probe, semantic evidence checks, 599-zone catalogue,
+Gitleaks (only the known false positive), 8/0 candidate Compose,
+24/0 offline smoke, 32-case browser matrix on candidate and
+persistent demo, 7/7 timezone acceptance on both, exact-image demo
+update with the 8080 demo left running. No `main` merge, production
+deployment, paid call, cap change or dependency added. Prior
+incomplete real AI demo and no-new-paid-call status retained.
+Remaining for the owner: manual acceptance TODAY (see
+`docs/acceptance-checklist.md`, record on Tue 03 Nov), then video
+rehearsal/publication only after owner feedback and audit; real AI
+proof only with a new explicit bounded authorization; Linux x86-64
+verification for a full install claim. No new GitHub push yet; the
+old publication checkpoint remains older and `main` is unchanged.
+
+## Status 2026-11-01 (earlier) — Stage A correction + Stage B implemented
 
 Separate owner authorization (Stage B task, same sole-writer branch
 `feature/acceptance-polish-2026-11-01`): the two independent

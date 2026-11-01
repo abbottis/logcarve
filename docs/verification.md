@@ -1369,3 +1369,130 @@ tool), PRIV-01/02 (decoded scope/metadata validated before
 compact/escaping with final string check retained; masking and exact
 scope unchanged). No merge to `main`, no deployment, no new
 dependencies.
+
+## 2026-11-01 — Acceptance readiness closeout (independent final evidence, reported append-only)
+
+Independent coordinator final evidence for clean application source
+`bb272a9` on the reviewed public/synthetic branch
+`feature/acceptance-polish-2026-11-01`, exactly as supplied in
+`artifacts/task-inputs/acceptance-final-evidence.md`. This section
+only transcribes the runner's reported outcome; the documentation
+writer did not re-execute coordinator checks, read parent/private
+runtime, credentials, traces, keys or history, make provider/product
+calls, or change application, test, fixture or configuration files.
+All historical PASS/FAIL/BLOCKED/NOT RUN records above are preserved
+unchanged.
+
+- Application freeze: `bb272a94b9001949510126f7a700da6fbc65230a` on
+  `feature/acceptance-polish-2026-11-01`. All Muse writers finished
+  before verification. The canonical checkout is integrated on a
+  separate `local/acceptance-readiness-2026-11-01` branch at
+  equivalent `ad6d74fae4cb0695e719db80e79bc2a95f`, tree clean, entire
+  tracked tree identical. Prior local analytics branch `d11e8ee` and
+  T10 branch `236387c` preserved; `main`/`origin/main` (`836769b`)
+  unchanged; no new push/merge/production/public deployment.
+- Maintained unit+integration: 480 PASS, 0 skipped, 4 warnings in
+  30.32s clean; 480 PASS, 0 skipped, 4 warnings in 30.18s under
+  `AI_ENABLED=true LLM_WARN_AT_USD=999`. Protected Chromium E2E:
+  24 PASS, 0 skipped, 1 warning in 22.77s. Ruff check PASS, format
+  159 files PASS, `uv lock` 40 packages PASS, `git diff --check`
+  PASS. No dependencies changed.
+- Independent native-protocol mock probe (`socket.connect`
+  hard-BLOCKED, dummy test keys, temporary synthetic DBs only):
+  121 checks PASS across A12/B10/C8 plus a fourth full 120-row rich
+  window. All complete two-native-format mocked dispatches; exact
+  per-step integer cost including cached/reasoning matches displayed
+  cost, budget ledger and smoke ledger; IDs, scope/time/coverage
+  transmitted; paired calls/outputs and the 65536 wire cap hold;
+  exhausted synthetic allowance blocks a further dispatch with zero
+  extra calls. This is OFFLINE evidence, never a real AI-02 pass.
+- Independent semantic probe: actual model-visible named counts C
+  `errors` 5 / `distinct_paths` 5 and sensitive-path `requests` 2 /
+  `distinct_paths` 2 with rule version 1. Time series now 72 hour
+  bins / 30 requests / 10 errors, full actual first+last stamps,
+  explicit 67 not-shown sample bins. Exact filters retained; actual
+  observation timestamp distinct from window. Completed-but-
+  source-changed import warning visible for the security tool;
+  legacy raw diagnostics withheld. Direct and maintained regressions
+  prove decoded scope/metadata scanned before JSON encoding: raw
+  Combined-like metadata cannot bypass via escapes. No
+  parser/auth/retention changes; shared analytics/contracts
+  preserved; read-only tool allowlist and Standard fail-closed
+  egress, step/history/budget/cancellation limits unchanged.
+  Independent diff/security reinspection of these changed paths
+  completed; no unresolved blocking finding in this slice, no
+  all-project/release certification.
+- Timezone catalog: cached installed IANA keys, readable labels,
+  effective server default first then UTC, remaining region/city
+  sorted without duplicate values. Explicit valid URL wins;
+  otherwise `DEFAULT_TIMEZONE` config, reliable regional TZ when
+  unconfigured, else UTC. No Internet geolocation or guessed
+  physical host location. Default/order/Settings match; one
+  full-page notice and correct htmx OOB updates; failed Apply
+  preserves prior state. All region aliases explicitly available;
+  automatic abbreviations/fixed offsets are never guessed. Real
+  timestamps honor Asian/Pacific/US/Australian zones and fractional
+  offsets. UTC storage/input window/public API contracts unchanged.
+  Existing fractional-offset heatmap unsupported-state remains
+  explicitly unavailable. Missing tzdata fails safely.
+- Fully redacted Gitleaks: tracked-export directory plus all 17
+  public commits — scanner exit 1 ONLY for the known
+  `technical-spec.md:787` generic-api-key cost-heading false
+  positive, no new finding, no allowlist. Public history
+  metadata/blob audit: zero development-tool-provenance matches;
+  functional crawler identifiers intact. No private canonical
+  history published or copied to Contributor context.
+- Fresh tracked-export Docker build (includes npm asset
+  build/check-external), isolated candidate Compose 8 PASS / 0
+  FAIL, 120 rows, original 30 + new 90, replay 0/30 + 0/90,
+  restart persistence, owned teardown. Internal-network/offline
+  maintained smoke 24 PASS / 0 FAIL with AI off, empty model key,
+  no Internet: API/client/restart/backup/isolated restore/
+  retention/source read-only/owned cleanup. Actual Linux ARM64
+  containers on OrbStack; native Linux x86-64 and standalone Linux
+  host install NOT RUN. No new performance claims.
+- Actual built-image browser matrix: 32 PASS on isolated candidate
+  18091, SAME 32 PASS on persistent 8080 after upgrade (8 routes x
+  light/dark x 1440/390), no console/off-origin/failed-response
+  errors, Chart.js/data agreement, claimed 45 and GPT 16
+  filters/nav. Additional actual-image timezone acceptance 7 PASS
+  on candidate AND 7 PASS on persistent demo: exact installed
+  catalogue 599 keys, no duplicates, proper priority/sort/readable
+  labels; Apply/nav/reload and exact latest-row local times for
+  Kathmandu/Auckland/New York/Adelaide; both 390px themes no
+  overflow/errors/external requests. Candidate default UTC; actual
+  demo configured default Europe/Berlin.
+- Canonical demo updated with the EXACT tested image
+  `logcarve-candidate:bb272a9…` (locally tagged `logcarve-demo:t10`);
+  no host-context rebuild substituted. Non-root 10001, loopback
+  `127.0.0.1:8080`, AI off, empty model key, read-only synthetic
+  mounts. Consistent online backup 0600 plus old-image rollback
+  retained before update. EVERY database table/row and both demo
+  credential files unchanged across image activation; 120 requests,
+  schema 4, integrity ok. Live API: existing token valid, all 120 /
+  old-exclusive 26..29 Oct 30 / claimed 45 / GPT 16; actual stdlib
+  client all 3 replies PASS; missing-token 401 body/header
+  `request_id` parity. Health script: `healthz` 200 AI-off, unauth
+  `readyz` 401, private admin `readyz` 200 schema 4. All temporary
+  owned candidate containers/networks/volumes/credentials removed;
+  actual 8080 left RUNNING.
+- No new product/provider calls, no actual allowance reset or usage
+  mutation. Muse coding usage is separate, exact coding cost not
+  claimed. Historical real Meta smoke: 2 successful of 3
+  investigations, third failed closed; real AI-02 remains
+  INCOMPLETE, not rerun after the fix. Extra real work requires a
+  new explicit bounded authorization respecting existing state; do
+  not reset/recreate/restore ledgers. Product demo stays AI-off.
+  Owner manually accepts TODAY; acceptance/video/publication are
+  NOT yet executed.
+- Fixed demo URL:
+  `http://127.0.0.1:8080/?site=default&range=custom&from=2026-10-26T00:00:00%2B00:00&to=2026-11-01T00:00:00%2B00:00&tz=Europe%2FBerlin&source=example-combined`
+
+Acceptance impact: timezone display catalogue (A), three offline AI
+corrections (B) and technical local gates (C) are complete at this
+anchor; owner manual acceptance is pending. Model-visible scope
+metadata (named counts, timeseries bins, sample semantics,
+import-quality notes) is independently reverified. Historical real
+AI 2-of-3 INCOMPLETE, no-new-paid-authorization, actual-demo-AI-off
+and x86-NOT-RUN are preserved. Coding Contributor usage stays
+separate from product Standard/data-egress/caps.

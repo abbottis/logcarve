@@ -59,6 +59,30 @@ Build deterministic slices first (parser, storage, analytics, external API), the
 - The local Python is 3.15.2 while the target image is pinned separately; the tested version is recorded at bootstrap.
 - Owner decisions settled in [ADR 0002](decisions/0002-mvp-scope-grill.md): Apache-2.0 license with no unverified LogWerk reuse; private Linux x86-64 host/VM with Compose as install target; verify-then-capped-smoke for T8; separate clone with feature-branch reconciliation; 30-day configurable UTC retention with online-API backups; findings derived on read. Still unresolved: Meta account verification, real-provider execution, and publication gates.
 
+## Current-status mapping (2026-11-01; historical plan otherwise unchanged)
+
+This plan stays the historical MVP record: its approval history,
+requirements, T1–T10 slice contract and ADR decisions above are
+unchanged. Three scaffold-era planning risks are now
+resolved/historical; links point to the evidence. Nothing here claims
+T8, T10 or release as fully passed.
+
+- No `.git` metadata / unconnected checkout: resolved — work runs
+  in a connected Git repository with feature branches and reviewable
+  diffs (see `verification.md` for the per-slice evidence trail).
+- Docker daemon unreachable at inspection: historical — the
+  coordinator has since executed fresh-image builds, isolated
+  candidate Compose runs and internal-network offline smoke runs on
+  Linux ARM64 containers (see `verification.md`); native Linux
+  x86-64 and standalone Linux host install remain NOT RUN.
+- Local Python 3.15.2 versus target image pin: resolved — the
+  project pins Python 3.12.16 via `uv` (`uv.lock`), and the tested
+  version is recorded at bootstrap in each verification entry.
+- Still open from the ADR 0002 list: real-provider execution beyond
+  the single authorized capped smoke (AI-02 INCOMPLETE, no new paid
+  authorization), publication gates and final release/QA approvals —
+  all owner decisions (pending gates: `acceptance-checklist.md`).
+
 ## Sources
 
 - [FastAPI release notes](https://fastapi.tiangolo.com/fr/release-notes/)
