@@ -15,6 +15,10 @@ from pydantic import BaseModel, Field, field_validator, model_validator
 MAX_LIMIT = 1000
 MAX_WINDOW_DAYS = 366
 MAX_SEARCH_LEN = 128
+#: Largest pageable offset: the SQLite signed-64-bit binding range.
+#: Larger offsets reject as invalid instead of surfacing an
+#: ``OverflowError``/plain-500 from the driver.
+SQLITE_INT64_MAX = 2**63 - 1
 BucketSize = Literal["hour", "day"]
 TopPathSort = Literal["requests_desc", "errors_desc", "bytes_desc"]
 TopReferrerSort = Literal["requests_desc"]
@@ -110,7 +114,7 @@ class AnalyticsFilter(BaseModel):
     timing_min_ms: float | None = Field(default=None, ge=0)
     timing_max_ms: float | None = Field(default=None, ge=0)
     limit: int = Field(default=100, ge=1, le=MAX_LIMIT)
-    offset: int = Field(default=0, ge=0)
+    offset: int = Field(default=0, ge=0, le=SQLITE_INT64_MAX)
 
     @field_validator("server_host", "http_version", "mime_type", "cache_status", "tls_protocol")
     @classmethod

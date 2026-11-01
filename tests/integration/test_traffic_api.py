@@ -192,6 +192,22 @@ def test_explorer_search_and_sort(tapi):
             "traffic",
             "rule_id",
             "conflict",
+            # Approved SAFE per-request enrichment (PAR-03/T3); still
+            # no original IP, raw line, query value or secret.
+            "format_id",
+            "policy_version",
+            "referer_scheme",
+            "referer_path",
+            "server_host",
+            "http_version",
+            "request_time_ms",
+            "upstream_time_ms",
+            "upstream_count",
+            "cache_status",
+            "mime_type",
+            "tls_protocol",
+            "timing_available",
+            "upstream_available",
         }
         assert isinstance(row["ua_truncated"], bool)
         assert isinstance(row["conflict"], bool)

@@ -158,6 +158,7 @@
   "data.events": "{count} unique events",
   "error.title": "Something needs attention",
   "error.bad_params": "The requested filters are invalid. Adjust the time range and try again.",
+  "error.export_too_large": "The selected scope is too large to export. Narrow the time range or filters.",
   "error.unknown_site": "The requested site is unknown.",
   "error.back": "Back to Overview",
   "crawler.claimed": "Identified bot",
@@ -327,4 +328,15 @@
   "crawlers.groups_title": "Bots and automation by category, provider and purpose",
   "crawlers.groups_chart": "Bots and automation requests by provider",
   "crawlers.groups_note": "Groups cover recognized bots and other automation (monitoring and automation rules); totals span both, not only the Bots traffic bucket. Provider and purpose are configured catalog claims, never proof of training use or verified identity."
+,
+  "requests.referrer_detail": "Referrer detail",
+  "requests.logged_host": "Logged host",
+  "requests.http_version": "HTTP version",
+  "requests.mime_type": "Logged media type",
+  "requests.cache_status": "Cache status",
+  "requests.tls_protocol": "TLS protocol",
+  "requests.format_id": "Log format",
+  "requests.policy_version": "policy",
+  "requests.request_time": "Measured request time",
+  "requests.upstream_time": "Measured upstream time"
 }

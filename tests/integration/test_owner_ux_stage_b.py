@@ -407,6 +407,21 @@ def test_service_and_queries_agree_with_stable_legacy_sorts(stage_b_db):
                     "traffic",
                     "rule_id",
                     "conflict",
+                    # Approved SAFE per-request enrichment (PAR-03/T3).
+                    "format_id",
+                    "policy_version",
+                    "referer_scheme",
+                    "referer_path",
+                    "server_host",
+                    "http_version",
+                    "request_time_ms",
+                    "upstream_time_ms",
+                    "upstream_count",
+                    "cache_status",
+                    "mime_type",
+                    "tls_protocol",
+                    "timing_available",
+                    "upstream_available",
                 }
     finally:
         conn.close()
@@ -674,8 +689,12 @@ def test_requests_details_carry_full_sanitized_context(tmp_path, monkeypatch):
     assert "bot-search-google v1" in page
     # Timing from Combined sources is unavailable, never zero.
     assert "Response-time data unavailable" in page
-    # No raw lines, IPs, query values or countries anywhere.
-    assert "203.0.113" not in page and "HTTP/1.1" not in page and "secret" not in page
+    # No raw lines, IPs, query values or countries anywhere. The
+    # allowlisted per-request HTTP version renders in its labelled
+    # detail row, so the raw-line sentinel below pins the Combined
+    # timestamp shape instead of the bare protocol token.
+    assert "203.0.113" not in page and "[27/Oct/2026" not in page and "secret" not in page
+    assert "HTTP version:" in page and "Logged host:" in page
 
 
 def test_apply_refreshes_option_metadata_out_of_band(tmp_path, monkeypatch):

@@ -2,7 +2,7 @@
 """Reproducible external LogCarve analytics client (T5).
 
 Calls the versioned read-only API over plain HTTPS/HTTP with a scoped
-Bearer [REDACTED] taken from ``LOGCARVE_API_TOKEN`` or ``--token``. Standard
+Bearer token taken from ``LOGCARVE_API_TOKEN`` or ``--token``. Standard
 library only: no third-party dependencies, no model access, no imports.
 Prints one JSON document per endpoint.
 

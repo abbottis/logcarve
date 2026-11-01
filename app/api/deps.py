@@ -1,6 +1,6 @@
 """Request authentication, authorization and login rate limiting (T5).
 
-Bearer [REDACTED] authorize analytics reads only: the token's site and
+Scoped API tokens authorize analytics reads only: the token's site and
 scope are derived server-side from the stored hash, never from client
 claims. Admin routes require a server-side session cookie plus a
 per-session CSRF header. Login attempts are bounded per client address.
@@ -63,7 +63,16 @@ def open_read_db(request: Request) -> sqlite3.Connection:
 
 @contextmanager
 def read_store(request: Request):
-    """Yield a read-only store connection for one request.
+    """Yield a read-only store connection inside ONE read snapshot.
+
+    A deferred ``BEGIN`` spans every related query of the response
+    (counts/distributions/percentile ranks/coverage, or a displayed
+    event plus its private original), so a concurrent follow/refresh
+    batch committing mid-response cannot mix generations: retention
+    or new row IDs can never pair an old request with another
+    event's data. The snapshot releases (``COMMIT``) before the
+    response returns and is never held across model provider awaits;
+    exports hold their own bounded streaming snapshot instead.
 
     Missing, corrupt or uninitialized stores surface only as the narrow
     ``StoreUnavailable`` signal (mapped to a safe 503 elsewhere); only
@@ -76,11 +85,24 @@ def read_store(request: Request):
     except (sqlite3.Error, OSError) as exc:
         raise StoreUnavailable("data store unavailable") from exc
     try:
+        conn.execute("BEGIN")
+    except (sqlite3.Error, OSError) as exc:
+        conn.close()
+        raise StoreUnavailable("data store unavailable") from exc
+    try:
         yield conn
     except (sqlite3.Error, OSError) as exc:
         raise StoreUnavailable("data store unavailable") from exc
     finally:
-        conn.close()
+        try:
+            conn.execute("COMMIT")
+        except (sqlite3.Error, OSError):
+            try:
+                conn.execute("ROLLBACK")
+            except (sqlite3.Error, OSError):
+                pass
+        finally:
+            conn.close()
 
 
 def bearer_credentials(request: Request) -> str | None:
@@ -96,10 +118,10 @@ def _unauthorized(request_id: str, code: str, message: str, status: int = 401):
 
 
 def require_analytics_token(request: Request) -> ApiToken | object:
-    """Validate the Bearer [REDACTED] return the stored token or an error response."""
+    """Validate the scoped API token and return the stored token or an error response."""
     request_id = request.state.request_id
     if not request.headers.get("Authorization", "").strip():
-        return _unauthorized(request_id, "missing_token", "A Bearer [REDACTED] is required.")
+        return _unauthorized(request_id, "missing_token", "A Bearer token is required.")
     plaintext = bearer_credentials(request)
     if plaintext is None:
         return _unauthorized(
@@ -109,7 +131,7 @@ def require_analytics_token(request: Request) -> ApiToken | object:
         token = verify_token(conn, plaintext=plaintext)
     if token is None:
         return _unauthorized(
-            request_id, "invalid_token", "The Bearer [REDACTED] is invalid, expired or revoked."
+            request_id, "invalid_token", "The Bearer token is invalid, expired or revoked."
         )
     if "analytics:read" not in token.scopes:
         return _unauthorized(

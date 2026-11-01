@@ -74,6 +74,15 @@
                   <div><dd class="text-sm text-base-content/70">{{ t("requests.ua_note") }}</dd></div>
                   {% endif %}
                   <div><dt class="inline text-base-content/70">{{ t("filter.referrer") }}: </dt><dd class="inline tech break-all">{{ row.referer_host or "—" }}</dd></div>
+                  {% if row.referer_scheme or row.referer_path %}
+                  <div><dt class="inline text-base-content/70">{{ t("requests.referrer_detail") }}: </dt><dd class="inline tech break-all">{{ row.referer_scheme or "—" }}://{{ row.referer_host or "—" }}{{ row.referer_path or "" }}</dd></div>
+                  {% endif %}
+                  <div><dt class="inline text-base-content/70">{{ t("requests.logged_host") }}: </dt><dd class="inline tech break-all">{{ row.server_host or "—" }}</dd></div>
+                  <div><dt class="inline text-base-content/70">{{ t("requests.http_version") }}: </dt><dd class="inline tech">{{ row.http_version or "—" }}</dd></div>
+                  <div><dt class="inline text-base-content/70">{{ t("requests.mime_type") }}: </dt><dd class="inline tech">{{ row.mime_type or "—" }}</dd></div>
+                  <div><dt class="inline text-base-content/70">{{ t("requests.cache_status") }}: </dt><dd class="inline tech">{{ row.cache_status or "—" }}</dd></div>
+                  <div><dt class="inline text-base-content/70">{{ t("requests.tls_protocol") }}: </dt><dd class="inline tech">{{ row.tls_protocol or "—" }}</dd></div>
+                  <div><dt class="inline text-base-content/70">{{ t("requests.format_id") }}: </dt><dd class="inline tech">{{ row.format_id or "—" }}{% if row.policy_version %} ({{ t("requests.policy_version") }} {{ row.policy_version }}){% endif %}</dd></div>
                   <div><dt class="inline text-base-content/70">{{ t("filter.traffic") }}: </dt><dd class="inline">{{ t("traffic." + row.traffic) if row.traffic else "—" }}</dd></div>
                   {% if row.rule_meta %}
                   <div><dt class="inline text-base-content/70">{{ t("table.rule") }}: </dt><dd class="inline tech">{{ row.rule_meta.id }} v{{ row.rule_meta.version }}</dd></div>
@@ -86,7 +95,14 @@
                   {% if row.conflict %}
                   <div><dd><span class="badge badge-warning">{{ t("requests.conflict_signal") }}</span></dd></div>
                   {% endif %}
+                  {% if row.timing_available %}
+                  <div><dt class="inline text-base-content/70">{{ t("requests.request_time") }}: </dt><dd class="inline tech">{{ row.request_time_ms }} ms</dd></div>
+                  {% if row.upstream_available %}
+                  <div><dt class="inline text-base-content/70">{{ t("requests.upstream_time") }}: </dt><dd class="inline tech">{{ row.upstream_time_ms }} ms{% if row.upstream_count %} ({{ row.upstream_count }}×){% endif %}</dd></div>
+                  {% endif %}
+                  {% else %}
                   <div><dd class="text-base-content/70">{% include "icons/clock.svg" %}{{ t("data.response_time_unavailable") }}</dd></div>
+                  {% endif %}
                 </dl>
               </div>
             </td>

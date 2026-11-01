@@ -1,6 +1,10 @@
 # External Agent & Workflow API
 
-**Planned contract; endpoints are not implemented.** This API is an independent MVP product capability, backed by the same deterministic analytics as the dashboard and internal assistant.
+Core analytics endpoints are implemented (see Verified usage); the
+full-result export below is implemented as the T3a slice (PAR-07).
+Remaining planned surfaces stay planned until built. This API is an
+independent MVP product capability, backed by the same deterministic
+analytics as the dashboard and internal assistant.
 
 ## Planned endpoints
 
@@ -53,9 +57,9 @@ For public remote access require TLS; otherwise use local/private/VPN access. Se
 ```bash
 export LOGCARVE_API_TOKEN="lc_..."  # scoped analytics:read token, shown once at issuance
 BASE="http://127.0.0.1:8080"
-curl -s -H "Authorization: Bearer $LOG[PAD]CARVE_API_TOKEN" \
+curl -s -H "Authorization: Bearer $LOGCARVE_API_TOKEN" \
   "$BASE/api/v1/summary?site_id=default&from=2026-10-27T00:00:00%2B00:00&to=2026-10-28T00:00:00%2B00:00"
-curl -s -H "Authorization: Bearer $LOG[PAD]CARVE_API_TOKEN" \
+curl -s -H "Authorization: Bearer $LOGCARVE_API_TOKEN" \
   "$BASE/api/v1/security/findings?site_id=default&from=2026-10-27T00:00:00%2B00:00&to=2026-10-28T00:00:00%2B00:00"
 ```
 
@@ -64,7 +68,7 @@ curl -s -H "Authorization: Bearer $LOG[PAD]CARVE_API_TOKEN" \
 `clients/logcarve_api_client.py` (stdlib only) performs the same calls and prints JSON:
 
 ```bash
-LOG[PAD]CARVE_API_TOKEN="lc_..." python clients/logcarve_api_client.py \
+LOGCARVE_API_TOKEN="lc_..." python clients/logcarve_api_client.py \
   --base-url http://127.0.0.1:8080 --site default \
   --from 2026-10-27T00:00:00+00:00 --to 2026-10-28T00:00:00+00:00
 ```
@@ -72,6 +76,94 @@ LOG[PAD]CARVE_API_TOKEN="lc_..." python clients/logcarve_api_client.py \
 ### n8n sketch
 
 HTTP Request node: GET `{{$json.baseUrl}}/api/v1/summary`, query parameters `site_id`, `from`, `to` (ISO UTC), header `Authorization: Bearer {{$credentials.logcarveApi.token}}` from a credential store (never a URL parameter). Follow with IF/Code nodes operating on the minimized JSON only.
+
+## Full-result export (implemented, T3a / PAR-07)
+
+Two download entries share one deterministic contract over the
+allowlisted export columns (sanitized explorer projection plus
+approved SAFE enrichment — stable HMAC pseudonyms; never original
+client IPs, raw log lines, query values, keys, exception text or
+stored diagnostics, even when an admin display mode is full):
+
+- `GET /api/v1/exports/requests` — Bearer `analytics:read` (token
+  site/source/time bounds apply exactly as on every analytics read).
+- `GET /export/requests` — admin session cookie (browser download;
+  Bearer [REDACTED] are never accepted here, no credential is read from the
+  query string). No export UI is added yet.
+
+Query: `site_id`, `from`/`to` (UTC ISO), optional `source_id` and
+every shared selector, `timezone` (API: UTC only, else
+`unsupported_timezone`; browser: any validated zone, recorded as
+the display zone), `export_format` (`csv` default, or `json`) and
+`sort` (allowlisted explorer order, default `oldest`).
+
+Scope and streaming (documented, never silent truncation):
+
+- The export always covers the ENTIRE filtered result: no
+  `limit`/`offset` is accepted and none leaks into metadata or rows.
+- Scopes above 250000 rows reject BEFORE streaming with HTTP 413
+  `export_too_large` (narrow the window or filters instead).
+- Rows stream from ONE owned read snapshot (count, cap, metadata,
+  cursor and rows share a generation, so a concurrent append or
+  retention pass can neither inflate rows past the cap nor split
+  metadata from rows) in bounded 1000-row chunks — never
+  `fetchall`, never page-size slicing. A failed stream never reads
+  complete: JSON closes with `"complete": true` only on success; a
+  CSV abort truncates mid-body.
+- Needs no model client, key or network: works with chat disabled,
+  no key and no Internet.
+
+CSV transport (standard interoperability): the body is plain CSV —
+one header row naming the export columns (CRLF, minimal quoting,
+newline escaping by the CSV writer) plus one record per row; every
+reproducibility field travels in ASCII-safe `X-Logcarve-Export-*`
+headers (no preamble lines in the body):
+
+| Header | Content |
+| --- | --- |
+| `X-Logcarve-Export-Schema` | `export/1` |
+| `X-Logcarve-Export-Rows` | Exact row count (equals the streamed records) |
+| `X-Logcarve-Export-Site` / `-Source` | Validated site (source empty when unfiltered) |
+| `X-Logcarve-Export-Window` | UTC `time_from/time_to` pair |
+| `X-Logcarve-Export-Timezone` | Selected display timezone (rows stay UTC) |
+| `X-Logcarve-Export-Sort` | Selected row order |
+| `X-Logcarve-Export-Generated-At` | Generation instant |
+| `X-Logcarve-Export-Filters` | Compact JSON of the non-default validated filters (bounded by the contract maxima; defaults omitted) |
+| `X-Logcarve-Export-Coverage` | Compact JSON: unique events, observed min/max, sources, line totals, import count plus per-import `id`/`status` capped at 50 with an explicit `imports_truncated` flag (never silent, never `error_summary`) |
+| `X-Logcarve-Privacy` | Pseudonymization label |
+
+JSON transport: `{"metadata": {...}, "rows": [...], "complete": true}`
+with the same reproducibility set (`schema_version`, `site_id`,
+`source_id`, UTC `time_range`, `display_timezone`, `sort`,
+`generated_at`, full validated `filters`, exact `row_count`,
+`coverage`, `data_quality` with line totals plus per-import
+`id`/`status`, `privacy`, `limitations`).
+
+Spreadsheet safety: string cells whose first meaningful character
+(after Unicode whitespace, control and format bytes such as NUL,
+NBSP, BOM or zero-width space) is `=`, `+`, `-` or `@` gain a
+neutralizing single-quote prefix; the original text is preserved
+verbatim behind it. `None` maps to empty, booleans to
+`true`/`false`, meaningful numerics stay unquoted numbers. No
+spreadsheet is launched and no formula is evaluated.
+
+### curl
+
+```bash
+export LOGCARVE_API_TOKEN="lc_..."  # scoped analytics:read token, shown once at issuance
+BASE="http://127.0.0.1:8080"
+Q="site_id=default&from=2026-10-27T00:00:00%2B00:00&to=2026-10-28T00:00:00%2B00:00"
+curl -s -D - -H "Authorization: Bearer $LOGCARVE_API_TOKEN" \
+  "$BASE/api/v1/exports/requests?$Q&export_format=csv&sort=oldest" -o export.csv
+curl -s -H "Authorization: Bearer $LOGCARVE_API_TOKEN" \
+  "$BASE/api/v1/exports/requests?$Q&export_format=json&sort=newest" | python3 -c \
+  "import json,sys; e=json.load(sys.stdin); print(e['metadata']['row_count'], e['complete'])"
+```
+
+Clients parse CSV with any standard CSV reader (header row first)
+and read reproducibility metadata from the response headers; JSON
+clients read the `metadata` envelope. Assistant/tool and stdlib
+client expansion stays a separately orchestrated slice (not T3a).
 
 ## Verified usage (T5)
 

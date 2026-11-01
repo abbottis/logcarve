@@ -1,5 +1,104 @@
 # Verification record
 
+## 2026-11-01 — Parity T3a API/export completion (PAR-07)
+
+Owner-authorized bounded continuation of the uncommitted T3a
+API/export slice on `feature/logwerk-parity-2026-11-01` (prior HEAD
+`966c99b` preserved, no amend), exact model
+`muse-spark-1.3-contributor`/medium/Contributor ON; sandbox +
+approval ON, sole writer, no subagents, no extra approval loop, no
+parent files/keys/private history/real logs, no Docker/product/
+provider calls/push/main/deployment. All code/tests by the
+implementer. Public/synthetic data only; the immutable 120-row
+fixtures, 77 bot rules, core HMAC/auth/usage/consumed allowance and
+all previous commits preserved. Assistant/tool/stdlib-client final
+expansion stays a separately orchestrated T3b slice (not
+implemented, not claimed); no approved API/export requirement
+dropped.
+
+Reproduced first on the frozen tree: the full clean suite showed
+exactly the 4 known export failures (11-vs-10 row counts on three
+export tests, 302-vs-200 on the browser entrypoint); no other suite
+failures. Hand audit: 4 hostile paths + 6 hostile UAs + 1 query
+line = 11 seed lines, but the `Evil "Quoted"` UA carries a raw `"`
+inside a Combined quoted field, which the parser rightly rejects
+as `malformed_line` (probed per-line: 10 accepted, 1 rejected with
+reason `malformed_line`; old two-snapshot split separately
+reproduced via public API as count=1/rows=2). The quoting hazard
+now runs on valid single-quote bytes plus an NBSP-leading formula
+row (12 accepted / 0 rejected, asserted in-seed with an
+independent stored-row oracle). The 200 was TestClient following
+the login redirect; the test now inspects the redirect with
+`follow_redirects=False` (302 + `/login` location, no data or
+metadata on the body).
+
+Correction gates (each re-probed before fixing, then covered by
+controlled tests — writers between preparation and streaming,
+closed-resource assertions, no timing sleeps):
+
+1. One owned export snapshot (`ExportStream` in
+   `app/api/routes_export.py`): count, cap, metadata, cursor open
+   and first-chunk prime share a single `BEGIN` on a dedicated
+   read-only handle for BOTH Bearer [REDACTED] session downloads, before any
+   byte streams (store/query failures map to safe 503/`request_id`
+   or 400, never a 200 prefix). The sequential endpoint-thread to
+   Starlette-worker handoff uses a per-connection
+   `check_same_thread=False` (new opt-in kwarg on
+   `app.db.database.connect`, default unchanged — no global
+   switch, no `fetchall`). Cursor/connection close
+   deterministically on EOF, renderer error, cancellation,
+   explicit close without consumption and disconnect; post-header
+   failures abort without `complete: true`.
+2. Reproducibility metadata on BOTH transports: JSON gains the
+   selected `sort` and `display_timezone`; CSV carries schema,
+   site/source, UTC window, display timezone, sort, generated-at,
+   exact count, coverage/quality and privacy in bounded ASCII-safe
+   `X-Logcarve-Export-*` headers (non-default filters only,
+   per-import `id`/`status` capped at 50 with an explicit
+   `imports_truncated` flag — never silent truncation, never
+   `error_summary`, never originals). The CSV body stays plain
+   interoperable CSV (header row + records, no preamble); full
+   filtered rows up to the documented 250000 cap (413 above) in
+   bounded chunks; no limit/offset leakage (asserted absent).
+3. Unicode-aware formula classifier: dangerous `=,+,-,@` detected
+   after leading Unicode whitespace/control/format bytes (NUL, C0,
+   DEL, NBSP, BOM, zero-width, separators), original text
+   preserved behind the apostrophe; numerics/`None`/booleans keep
+   safe-null/numeric semantics; no spreadsheet launched.
+4. Exact integer metrics: `ComparisonMetricOut`
+   current/previous/absolute_change are `int | float` end to end
+   (service already exact); proven with SQLite int64-valid
+   9007199254740993 plus small deltas against the shared service;
+   ratios stay finite optional floats.
+5. Fractional precision: security/comparison `window_seconds` is
+   float seconds with an exact `window_seconds_us` companion
+   (sub-second windows keep precise rates instead of 0/None);
+   journey `duration_s` is float seconds with exact `duration_us`
+   (1us journey reads 1us); whole-second behavior unchanged
+   (old 3600/3599/0 assertions still green). No new timestamp
+   formats.
+
+| Check | Result | Evidence |
+| --- | --- | --- |
+| Focused T3 `tests/integration/test_parity_t3.py` | PASS | 27 passed: 10 versioned routes (service equality, auth/scope/time negatives, AI-off/no-key), export rowcount/quoting/sentinels with independent oracle, JSON envelope + cursor equality, 1500-row exact streaming, negatives/cap, session-only browser entry (302 + Berlin display zone), int64-exact comparison, 0.5s/1.5s windows, 1us journey, single-snapshot freeze/retention, cap/lifecycle closes, post-header abort, both-format metadata, header cap flag — project `.venv`, Python 3.12.16 |
+| New `tests/unit/test_export_cells.py` | PASS | 7 passed: ASCII leads, NUL/controls, Unicode whitespace, format bytes, verbatim preservation, benign text, safe-null/numerics |
+| T2b preflight + old suites | PASS | `test_parity_t2b_preflight.py` 5 passed (incl. ruff UP012/format closeout); `test_parity_t2b.py`, `test_parity_t2b_corrections.py`, `test_traffic_api.py` 48 passed with new float shapes |
+| Full `tests/unit tests/integration` clean | PASS | 777 passed, 2 skipped (loopback sockets unavailable in sandbox; pre-existing env category), 62s — `UV_CACHE_DIR=/tmp/uvcache uv run --locked pytest tests/unit tests/integration -q` |
+| Full suite conflicting env | PASS | 777 passed, 2 skipped — same command with `AI_ENABLED=true LLM_WARN_AT_USD=999` ambient (no leakage) |
+| `ruff check` + `ruff format --check` | PASS | Both clean over `app` + `tests` + `config` |
+| `uv lock --check --offline` | PASS | `UV_CACHE_DIR=/tmp/uvcache`: resolved 42 packages, no manifest/lock delta (no new dependencies) |
+| API offline/AI-off | PASS | Hermetic suite (Settings env cleared per-test; chat disabled, no model key) runs everything through TestClient with no provider transport; exports covered by the same offline path |
+| e2e (Playwright/Chromium) | NOT RUN | Not in the T3a gate list; the one browser-touching change (display-timezone pass-through) is covered by TestClient session-download tests |
+| Gitleaks pre-push scan | NOT RUN | No push authorized in this task; no secrets, real logs, keys or private paths added (synthetic TEST-NET fixtures only) |
+| No-original-IP surface | PASS | Export columns, metadata, headers, errors and session downloads carry pseudonyms + truncated agents only; originals never leave the store |
+
+Acceptance impact: PAR-07 API/export (T3a) only — routes, both
+download entries, snapshot/cap/metadata/formula/exactness/
+precision corrections with actual checks above. T3b (assistant,
+tools, stdlib-client expansion), full UI, follow/rotation,
+GeoIP and PAR-08+ stay unclaimed. Stopping for independent
+reinspection.
+
 ## 2026-11-01 — Parity T2b correction A-H (before T3, shared layer)
 
 Owner-authorized LogWerk parity T2b correction on

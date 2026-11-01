@@ -17,15 +17,32 @@ class WriterBusy(RuntimeError):
 
 
 def connect(
-    db_path: Path, *, timeout_s: float = 30.0, read_only: bool = False
+    db_path: Path,
+    *,
+    timeout_s: float = 30.0,
+    read_only: bool = False,
+    check_same_thread: bool = True,
 ) -> sqlite3.Connection:
-    """Open a SQLite connection with the project pragmas applied."""
+    """Open a SQLite connection with the project pragmas applied.
+
+    ``check_same_thread`` stays enabled everywhere except the
+    single-owner export streamer (:mod:`app.api.routes_export`),
+    which hands ONE dedicated read-only connection sequentially
+    from the preparing endpoint thread to Starlette's streaming
+    worker threads (never concurrent use, deterministically
+    closed). No global switch exists.
+    """
     db_path = Path(db_path)
     if read_only:
-        conn = sqlite3.connect(f"file:{db_path}?mode=ro", uri=True, timeout=timeout_s)
+        conn = sqlite3.connect(
+            f"file:{db_path}?mode=ro",
+            uri=True,
+            timeout=timeout_s,
+            check_same_thread=check_same_thread,
+        )
     else:
         db_path.parent.mkdir(parents=True, exist_ok=True)
-        conn = sqlite3.connect(str(db_path), timeout=timeout_s)
+        conn = sqlite3.connect(str(db_path), timeout=timeout_s, check_same_thread=check_same_thread)
     try:
         if not read_only:
             conn.execute("PRAGMA journal_mode=WAL")

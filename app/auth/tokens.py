@@ -1,4 +1,4 @@
-"""Server-side admin sessions and scoped Bearer [REDACTED] (T5).
+"""Server-side admin sessions and scoped API tokens (T5).
 
 Sessions are opaque random IDs validated against the database; the
 cookie itself carries no authority beyond the lookup. Every session
@@ -214,7 +214,7 @@ def issue_token(
 def verify_token(
     conn: sqlite3.Connection, *, plaintext: str, now: datetime | None = None
 ) -> ApiToken | None:
-    """Validate a Bearer [REDACTED] honoring expiry and revocation; else None.
+    """Validate a Bearer token honoring expiry and revocation; else None.
 
     Expiry is compared as parsed UTC instants. Stored values with a
     non-UTC offset evaluate correctly; malformed or naive stored values

@@ -1,7 +1,7 @@
 """Authenticated assistant chat transport (T7).
 
 Admin sessions only: the caller needs a valid server-side session
-cookie plus the per-session CSRF header. Analytics Bearer [REDACTED]
+cookie plus the per-session CSRF header. Analytics Bearer tokens
 grant no model access and are rejected here. Chat is additionally
 bounded by a per-session rate limit and a small global concurrency
 semaphore; both bounds are documented constants until later slices

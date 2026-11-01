@@ -9,6 +9,7 @@ truncation flags so reads never load the whole database into memory.
 import hashlib
 import math
 import sqlite3
+from collections.abc import Iterator
 from datetime import UTC, datetime, timedelta
 from typing import Literal
 
@@ -919,6 +920,190 @@ _EXPLORER_ORDER: dict[str, str] = {
 _CONFLICT = "conflicting_bot(user_agent)"
 
 
+#: Explicit allowlisted export columns in stable order (PAR-07): the
+#: sanitized explorer projection plus approved SAFE enrichment. Never
+#: the private original-IP table, raw lines, query values, keys,
+#: exception text or stored diagnostics — even when an admin display
+#: mode is full.
+EXPORT_COLUMNS: tuple[str, ...] = (
+    "ts_utc",
+    "method",
+    "path",
+    "status",
+    "bytes",
+    "referer_scheme",
+    "referer_host",
+    "referer_path",
+    "server_host",
+    "http_version",
+    "mime_type",
+    "cache_status",
+    "tls_protocol",
+    "request_time_ms",
+    "upstream_time_ms",
+    "upstream_count",
+    "format_id",
+    "policy_version",
+    "user_agent",
+    "ua_truncated",
+    "client_pseudonym",
+    "traffic",
+    "rule_id",
+    "conflict",
+    "timing_available",
+    "upstream_available",
+)
+
+#: Bounded streaming chunk: one ``fetchmany`` per chunk crosses into
+#: Python, never a ``fetchall`` of the whole result.
+EXPORT_CHUNK_ROWS = 1000
+
+
+def _explorer_select(
+    filt: AnalyticsFilter, classifier: Classifier, sort: str
+) -> tuple[str, list[object]]:
+    """Shared sanitized row SELECT for paging and full-result export.
+
+    Sort comes from the allowlisted ``_EXPLORER_ORDER`` literals only;
+    unknown sorts raise ``ValueError``. The projection is exactly
+    :data:`EXPORT_COLUMNS` (truncated 200-char agent plus flag, derived
+    booleans, no original-IP join).
+    """
+    where, params = _where(filt, classifier)
+    traffic_case, traffic_params = traffic_case_sql(classifier)
+    rule_case, rule_params = rule_id_case_sql(classifier)
+    try:
+        order = _EXPLORER_ORDER[sort]
+    except KeyError as exc:
+        raise ValueError(f"unknown explorer sort: {sort!r}") from exc
+    sql = (
+        "SELECT ts_utc, method, path, status, bytes, referer_scheme, referer_host,"
+        " referer_path, server_host, http_version, mime_type, cache_status, tls_protocol,"
+        " request_time_ms, upstream_time_ms, upstream_count, format_id, policy_version,"
+        " substr(user_agent, 1, 200),"
+        " CASE WHEN user_agent IS NOT NULL AND LENGTH(user_agent) > 200 THEN 1 ELSE 0 END,"
+        " client_pseudonym,"
+        f" {traffic_case} AS traffic, {rule_case} AS rule_id,"
+        f" {_CONFLICT} AS conflict"
+        f" FROM requests WHERE {where} ORDER BY {order}"
+    )
+    return sql, [*traffic_params, *rule_params, *params]
+
+
+def export_row_to_dict(row: tuple) -> dict[str, object]:
+    """Map one SELECT tuple onto :data:`EXPORT_COLUMNS` with derived flags."""
+    (
+        ts,
+        method,
+        path,
+        status,
+        nbytes,
+        referer_scheme,
+        host,
+        referer_path,
+        server_host,
+        http_version,
+        mime_type,
+        cache_status,
+        tls_protocol,
+        request_time_ms,
+        upstream_time_ms,
+        upstream_count,
+        format_id,
+        policy_version,
+        agent,
+        truncated,
+        pseudonym,
+        traffic,
+        rule_id,
+        conflict,
+    ) = row
+    return {
+        "ts_utc": ts,
+        "method": method,
+        "path": path,
+        "status": status,
+        "bytes": nbytes,
+        "referer_scheme": referer_scheme,
+        "referer_host": host,
+        "referer_path": referer_path,
+        "server_host": server_host,
+        "http_version": http_version,
+        "mime_type": mime_type,
+        "tls_protocol": tls_protocol,
+        "request_time_ms": request_time_ms,
+        "upstream_time_ms": upstream_time_ms,
+        "upstream_count": upstream_count,
+        "format_id": format_id,
+        "policy_version": policy_version,
+        "user_agent": agent,
+        "ua_truncated": bool(truncated),
+        "client_pseudonym": pseudonym,
+        "traffic": traffic,
+        "rule_id": rule_id,
+        "conflict": bool(conflict),
+        "cache_status": cache_status,
+        "timing_available": request_time_ms is not None,
+        "upstream_available": upstream_time_ms is not None,
+    }
+
+
+def count_export_rows(
+    conn: sqlite3.Connection, filt: AnalyticsFilter, classifier: Classifier
+) -> int:
+    """Exact full-result row count for the export scope (never a capped scan)."""
+    where, params = _where(filt, classifier)
+    return int(conn.execute(f"SELECT COUNT(*) FROM requests WHERE {where}", params).fetchone()[0])
+
+
+def export_cursor(
+    conn: sqlite3.Connection,
+    filt: AnalyticsFilter,
+    classifier: Classifier,
+    sort: str,
+) -> sqlite3.Cursor:
+    """Open the full-result export SELECT cursor (stable order).
+
+    Sort comes from the allowlisted ``_EXPLORER_ORDER`` literals
+    only; unknown sorts raise ``ValueError`` before any row is
+    read. The caller owns the cursor (and its ``close``) and must
+    hold the read snapshot for the stream duration.
+    """
+    sql, params = _explorer_select(filt, classifier, sort)
+    return conn.execute(sql, params)
+
+
+def iter_export_rows(
+    conn: sqlite3.Connection,
+    filt: AnalyticsFilter,
+    classifier: Classifier,
+    sort: str,
+    *,
+    chunk: int = EXPORT_CHUNK_ROWS,
+) -> Iterator[dict[str, object]]:
+    """Stream full-result export rows in bounded chunks (stable order).
+
+    A server-side cursor with ``fetchmany`` materializes at most
+    ``chunk`` rows at a time — never a ``fetchall`` of the whole
+    result and never page-size slicing with silently capped totals.
+    The caller holds the read snapshot for the stream duration.
+    """
+    cursor = export_cursor(conn, filt, classifier, sort)
+    try:
+        while True:
+            batch = cursor.fetchmany(chunk)
+            if not batch:
+                return
+            for row in batch:
+                yield export_row_to_dict(row)
+    finally:
+        cursor.close()
+
+
+#: Backwards-compatible alias (internal callers renamed to public).
+_export_row_to_dict = export_row_to_dict
+
+
 def request_rows(
     conn: sqlite3.Connection, query: ExplorerQuery, classifier: Classifier
 ) -> tuple[list[dict[str, object]], int]:
@@ -928,60 +1113,17 @@ def request_rows(
     values or full user agents (truncated to 200 chars with an explicit
     truncation flag). The conflict flag is a derived boolean computed
     from the full stored sanitized agent — the full value itself never
-    leaves the database.
+    leaves the database. Approved SAFE enrichment travels alongside
+    (format/policy provenance, sanitized referrer scheme/host/path,
+    logged host, HTTP version, measured request/upstream timing,
+    cache status, logged MIME, TLS); Combined-only/old absent values
+    stay ``None``. No private original-IP join or field participates.
     """
     filt = query.filt
-    where, params = _where(filt, classifier)
-    traffic_case, traffic_params = traffic_case_sql(classifier)
-    rule_case, rule_params = rule_id_case_sql(classifier)
-    total = conn.execute(f"SELECT COUNT(*) FROM requests WHERE {where}", params).fetchone()[0]
-    try:
-        order = _EXPLORER_ORDER[query.sort]
-    except KeyError as exc:
-        raise ValueError(f"unknown explorer sort: {query.sort!r}") from exc
-    rows = conn.execute(
-        "SELECT ts_utc, method, path, status, bytes, referer_host,"
-        " substr(user_agent, 1, 200),"
-        " CASE WHEN user_agent IS NOT NULL AND LENGTH(user_agent) > 200 THEN 1 ELSE 0 END,"
-        " client_pseudonym,"
-        f" {traffic_case} AS traffic, {rule_case} AS rule_id,"
-        f" {_CONFLICT} AS conflict"
-        f" FROM requests WHERE {where} ORDER BY {order} LIMIT ? OFFSET ?",
-        [*traffic_params, *rule_params, *params, filt.limit, filt.offset],
-    ).fetchall()
-    return (
-        [
-            {
-                "ts_utc": ts,
-                "method": method,
-                "path": path,
-                "status": status,
-                "bytes": nbytes,
-                "referer_host": host,
-                "user_agent": agent,
-                "ua_truncated": bool(truncated),
-                "client_pseudonym": pseudonym,
-                "traffic": traffic,
-                "rule_id": rule_id,
-                "conflict": bool(conflict),
-            }
-            for (
-                ts,
-                method,
-                path,
-                status,
-                nbytes,
-                host,
-                agent,
-                truncated,
-                pseudonym,
-                traffic,
-                rule_id,
-                conflict,
-            ) in rows
-        ],
-        total,
-    )
+    sql, params = _explorer_select(filt, classifier, query.sort)
+    total = count_export_rows(conn, filt, classifier)
+    rows = conn.execute(f"{sql} LIMIT ? OFFSET ?", [*params, filt.limit, filt.offset]).fetchall()
+    return [export_row_to_dict(row) for row in rows], total
 
 
 def conflict_counts(
@@ -2338,7 +2480,10 @@ def journey_list(
     never a silent truncation. Each row carries the unfiltered
     ``requests_total`` alongside the filtered ``requests_shown``
     count, the stable journey ID, the base-scope entry path and
-    explicit window-edge flags. Only the requested page crosses into
+    explicit window-edge flags. Elapsed time travels as float
+    ``duration_s`` with the exact integer-microsecond
+    ``duration_us`` companion (same epoch-micros arithmetic as the
+    grouping/sort). Only the requested page crosses into
     Python — never a ``fetchall`` of every event.
     """
     filt = query.filt
@@ -2374,6 +2519,11 @@ def journey_list(
             completeness = "partial-right"
         else:
             completeness = "complete"
+        # Exact elapsed microseconds (the same epoch-micros
+        # arithmetic the grouping/sort uses): float seconds for
+        # display plus the exact integer companion, so a 1us
+        # journey reads 1us instead of a floored 0.
+        duration_us = epoch_micros(str(end)) - epoch_micros(str(start))
         items.append(
             {
                 "journey_id": journey_id_for(
@@ -2384,7 +2534,8 @@ def journey_list(
                 "requests_shown": int(shown_n),
                 "started_at": start,
                 "ended_at": end,
-                "duration_s": int((epoch_micros(str(end)) - epoch_micros(str(start))) // 1_000_000),
+                "duration_s": duration_us / 1_000_000,
+                "duration_us": duration_us,
                 "entry_path": entry,
                 "left_truncated": left_flag,
                 "right_truncated": right_flag,
@@ -2546,23 +2697,33 @@ def journey_key_for_id(
     :func:`journey_id_for` and the ID must match exactly. Distinct
     User-Agents sharing one client and start instant (including
     ``None`` versus empty string) hash distinctly, so at most one
-    key matches; zero matches raise ``KeyError``. The full stored
-    agent is never returned here — only handed to the timeline
-    builder — and no original address participates.
+    key matches; zero matches raise ``KeyError``. Rows stream
+    through a bounded cursor one at a time (no ``fetchall``, no
+    cap): high-cardinality same-client/same-start UA sets resolve
+    with O(1) memory and a late match is never dropped. The full
+    stored agent is never returned here — only handed to the
+    timeline builder — and no original address participates.
     """
     wanted_us = epoch_micros(journey_start.isoformat())
     cte, cte_params, _shown_cond, matcher_params = _journey_segments(filt, classifier)
-    rows = conn.execute(
+    # Streaming bounded cursor: rows are hashed one at a time and the
+    # scan stops at the first exact ID match, so memory stays O(1) no
+    # matter how many User-Agents share one client/start instant. No
+    # LIMIT/cap is applied: a valid match near the end is still found.
+    cursor = conn.execute(
         f"{cte} SELECT user_agent, start_ts FROM journeys"
         " WHERE client_pseudonym = ? AND epoch_micros(start_ts) = ?",
         [*cte_params, *matcher_params, client_pseudonym, wanted_us],
-    ).fetchall()
-    for agent, start_ts in rows:
-        candidate = journey_id_for(
-            filt.site_id, filt.source_id, client_pseudonym, agent, str(start_ts)
-        )
-        if candidate == journey_id:
-            return agent, str(start_ts)
+    )
+    try:
+        for agent, start_ts in cursor:
+            candidate = journey_id_for(
+                filt.site_id, filt.source_id, client_pseudonym, agent, str(start_ts)
+            )
+            if candidate == journey_id:
+                return agent, str(start_ts)
+    finally:
+        cursor.close()
     raise KeyError("unknown journey: no journey in scope matches that ID")
 
 
@@ -2799,36 +2960,39 @@ def offender_minute_peaks(
     sample_params: list[object],
     client_pseudonyms: list[str],
 ) -> dict[str, dict[str, object]]:
-    """Peak whole-UTC-minute burst per client in ONE grouped query.
+    """Peak whole-UTC-minute burst per client, ranked in SQL.
 
     Stored timestamps are UTC-normalized ISO text, so
     ``substr(ts_utc, 1, 16)`` buckets whole UTC minutes exactly;
     fractional rows fall into their truncated minute (documented,
-    never interpolated). Ties resolve to the earliest minute, so
-    the peak is deterministic. Missing clients map to a zero peak.
-    An empty request list returns without touching the database.
+    never interpolated). Ranking happens in SQL with
+    ``ROW_NUMBER()`` partitioned by client ordered by hits DESC,
+    minute ASC (exact earliest tie), so at most ONE row per
+    requested client crosses into Python no matter how many minute
+    buckets exist (never up to ``100*366*1440`` groups). Missing
+    clients map to a zero peak. An empty request list returns
+    without touching the database.
     """
     wanted = [p for p in dict.fromkeys(client_pseudonyms) if p][:MAX_SAMPLE_CLIENTS]
     if not wanted:
         return {}
     placeholders = ", ".join("?" for _ in wanted)
     rows = conn.execute(
-        "SELECT client_pseudonym, substr(ts_utc, 1, 16) AS minute, COUNT(*) AS hits"
+        "SELECT client_pseudonym, minute, hits FROM ("
+        " SELECT client_pseudonym, substr(ts_utc, 1, 16) AS minute,"
+        " COUNT(*) AS hits,"
+        " ROW_NUMBER() OVER (PARTITION BY client_pseudonym"
+        " ORDER BY COUNT(*) DESC, substr(ts_utc, 1, 16) ASC) AS rn"
         f" FROM requests WHERE {sample_where} AND client_pseudonym IN ({placeholders})"
-        " GROUP BY client_pseudonym, minute",
+        " GROUP BY client_pseudonym, minute"
+        ") WHERE rn = 1",
         [*sample_params, *wanted],
     ).fetchall()
     peaks: dict[str, dict[str, object]] = {
         p: {"peak_minute_requests": 0, "peak_minute": None} for p in wanted
     }
     for client, minute, hits in rows:
-        current = peaks[client]
-        assert isinstance(current["peak_minute_requests"], int)
-        if int(hits) > current["peak_minute_requests"] or (
-            int(hits) == current["peak_minute_requests"]
-            and (current["peak_minute"] is None or str(minute) < str(current["peak_minute"]))
-        ):
-            peaks[client] = {"peak_minute_requests": int(hits), "peak_minute": minute}
+        peaks[str(client)] = {"peak_minute_requests": int(hits), "peak_minute": minute}
     return peaks
 
 
@@ -2938,23 +3102,48 @@ def security_offenders(
     # The legacy 4xx rule (no row narrowing) keeps its historic
     # all-status sample: selection counts 4xx only, the sample shows
     # the offender's other rows too. Narrowed rules (path/status
-    # selectors) sample within their own scope instead.
+    # selectors) sample within their own scope instead. Peaks ALWAYS
+    # use the rule-matching scope (``scoped``): the peak numerator
+    # matches the average numerator (stored 4xx for the legacy rule,
+    # rule-matching rows otherwise), so the two tempo figures compare
+    # identical traffic. The historic all-status context stays
+    # available separately via the path/sequence samples.
     if rule.path_contains or rule.status_in:
         sample_where, sample_params = scoped, args
     else:
         sample_where, sample_params = where, params
+    if rule.min_client_errors is not None:
+        peak_numerator = "stored 4xx errors"
+    else:
+        peak_numerator = "rule-matching requests"
     shown = [str(ident) for ident, _hits, _paths in rows[:SECURITY_MAX_OFFENDERS]]
     samples = _sample_paths_scoped(
         conn, sample_where, sample_params, shown, limit=SECURITY_OFFENDER_PATHS
     )
     stats = offender_sample_stats(conn, sample_where, sample_params, shown)
-    peaks = offender_minute_peaks(conn, sample_where, sample_params, shown)
+    peaks = offender_minute_peaks(conn, scoped, args, shown)
     sequences = offender_sequences(conn, sample_where, sample_params, shown)
+    window_from = filt.window.time_from
+    window_to = filt.window.time_to
     offenders = []
     for ident, hits, paths in rows[:SECURITY_MAX_OFFENDERS]:
         key = str(ident)
         stat = stats[key]
         peak = peaks[key]
+        minute = peak["peak_minute"]
+        if isinstance(minute, str):
+            interval_start = f"{minute}:00+00:00"
+            try:
+                bucket_from = datetime.fromisoformat(interval_start)
+                bucket_to = bucket_from + timedelta(seconds=60)
+                partial = bucket_from < window_from or bucket_to > window_to
+                interval = f"{bucket_from.isoformat()}/{bucket_to.isoformat()}"
+            except ValueError:
+                partial = True
+                interval = f"{interval_start}/+60s"
+        else:
+            partial = False
+            interval = None
         offenders.append(
             {
                 "client_pseudonym": ident,
@@ -2969,6 +3158,17 @@ def security_offenders(
                 "sample_distinct_paths": stat["distinct_paths"],
                 "peak_minute_requests": peak["peak_minute_requests"],
                 "peak_minute": peak["peak_minute"],
+                # Unambiguous tempo scope: peak and average share the
+                # same rule-matching numerator (never compared as
+                # identical traffic with the all-status samples).
+                "peak_minute_scope": "rule_matching",
+                "peak_minute_numerator": peak_numerator,
+                # Whole-UTC-minute honesty: buckets intersecting a
+                # partial query window edge are lower-bound counts
+                # over the exact interval below, never a fully
+                # observed 60s burst.
+                "peak_minute_interval": interval,
+                "peak_minute_partial": partial,
                 "path_sequence": sequences[key],
                 "path_sequence_total": stat["scope_rows"],
             }

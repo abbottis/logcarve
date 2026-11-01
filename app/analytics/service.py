@@ -70,6 +70,18 @@ def _window_dict(filt: AnalyticsFilter) -> dict[str, str]:
     }
 
 
+def _window_micros(filt: AnalyticsFilter) -> int:
+    """Exact validated-window length in integer microseconds.
+
+    Timedelta fields (never the lossy ``total_seconds()`` float) so
+    sub-second windows keep every microsecond and multi-day windows
+    lose nothing to float rounding. Callers derive display seconds
+    as ``micros / 1_000_000`` and carry the integer alongside.
+    """
+    delta = filt.window.time_to - filt.window.time_from
+    return (delta.days * 86400 + delta.seconds) * 1_000_000 + delta.microseconds
+
+
 def _filter_dict(filt: AnalyticsFilter) -> dict[str, object]:
     return {
         "site_id": filt.site_id,
@@ -398,9 +410,12 @@ def security_findings(
     cap) with a bounded, explicitly labelled agent sample. Every other
     rule counts ALL matching rows exactly in SQL no matter how many
     distinct paths exist; only samples are bounded, with
-    shown/total/truncated fields. No DNS, HTTP, GeoIP, unmasking or bot
-    removal is ever performed; absence of a candidate never proves the
-    traffic genuine.
+    shown/total/truncated fields. Tempo evidence carries the window
+    as float ``window_seconds`` with the exact integer-microsecond
+    ``window_seconds_us`` companion (sub-second windows keep a
+    precise rate instead of a truncated 0/None). No DNS, HTTP,
+    GeoIP, unmasking or bot removal is ever performed; absence of a
+    candidate never proves the traffic genuine.
     """
     observed = datetime.now(UTC) if observation_time is None else observation_time
     clf = _classifier_for(filt, rules)
@@ -449,7 +464,11 @@ def security_findings(
         if has_threshold:
             offenders, offenders_total = queries.security_offenders(conn, filt, rule, clf)
             truncated = offenders_total > len(offenders)
-            window_seconds = int((filt.window.time_to - filt.window.time_from).total_seconds())
+            # Precise positive denominator: float seconds for the rate
+            # plus the exact integer-microsecond companion (a sub-second
+            # window no longer truncates to 0 with a None rate).
+            window_us = _window_micros(filt)
+            window_seconds = window_us / 1_000_000
             for offender in offenders:
                 # The legacy 4xx rule keeps its exact historic shape:
                 # every counted row is a stored 4xx, so the count reads
@@ -505,18 +524,30 @@ def security_findings(
                             # spreads every counted row; only the
                             # peak shows concentration.
                             "window_seconds": window_seconds,
+                            "window_seconds_us": window_us,
                             "avg_requests_per_minute": offender["hits"] / window_seconds * 60.0
                             if window_seconds
                             else None,
                             "avg_numerator": avg_numerator,
                             "peak_minute_requests": offender["peak_minute_requests"],
                             "peak_minute": offender["peak_minute"],
+                            "peak_minute_scope": offender["peak_minute_scope"],
+                            "peak_minute_numerator": offender["peak_minute_numerator"],
+                            "peak_minute_interval": offender["peak_minute_interval"],
+                            "peak_minute_partial": offender["peak_minute_partial"],
                             "tempo_note": (
                                 "average spreads the full validated window; "
+                                "window_seconds is float seconds (exact "
+                                "window_seconds_us alongside) so sub-second "
+                                "windows keep a precise rate; "
                                 "peak counts the busiest whole UTC minute "
                                 "(fractional rows fall into their truncated "
-                                "minute); same totals with different peaks "
-                                "mean spread-out versus concentrated traffic"
+                                "minute) over the SAME rule-matching numerator "
+                                "(peak_minute_scope/numerator); the historic "
+                                "all-status path/sequence context is separate "
+                                "and never compared as identical traffic; a "
+                                "partial edge bucket is a lower-bound count "
+                                "over peak_minute_interval"
                             ),
                             # Bounded chronological evidence: the first
                             # ordered (ts, path, status) rows with
@@ -730,6 +761,83 @@ def journey_entry_paths(
     }
 
 
+EXPORT_SCHEMA_VERSION = "export/1"
+
+#: Explicit privacy label carried by every full-result export (and its
+#: CSV headers): stable HMAC pseudonyms only — never original IPs, raw
+#: lines, query values, keys, exception text or stored diagnostics,
+#: even when an admin display mode is full.
+EXPORT_PRIVACY_LABEL = (
+    "pseudonymized: stable HMAC client pseudonyms only; "
+    "no original client IPs, raw log lines, query values, keys, "
+    "exception text or stored diagnostics"
+)
+
+
+def export_metadata(
+    conn: sqlite3.Connection,
+    filt: AnalyticsFilter,
+    rules: list[Rule] | None = None,
+    *,
+    row_count: int,
+    sort: str = "oldest",
+    display_timezone: str = "UTC",
+    observation_time: datetime | None = None,
+) -> dict[str, object]:
+    """Metadata envelope for a full-result CSV/JSON export.
+
+    Carries schema/version, site/source scope, the full validated
+    filter set, UTC window, display timezone, selected sort,
+    generation time, exact row count, coverage and import quality
+    WITHOUT any free-text diagnostics (only import ``id``/``status``
+    travel — never ``error_summary``), plus the explicit privacy
+    label. Rows stay UTC; ``display_timezone`` records only the
+    validated display zone the caller selected, and ``sort`` the
+    allowlisted row order. The row payload itself comes from the
+    allowlisted :data:`queries.EXPORT_COLUMNS` under the SAME read
+    snapshot. No paging limit/offset leaks in: exports always cover
+    the full filtered result.
+    """
+    clf = _classifier_for(filt, rules)
+    observed = datetime.now(UTC) if observation_time is None else observation_time
+    cov = queries.coverage(conn, filt, clf)
+    attempts = cov["import_attempts"]
+    assert isinstance(attempts, dict)
+    imports = cov["imports"]
+    assert isinstance(imports, list)
+    return {
+        "schema_version": EXPORT_SCHEMA_VERSION,
+        "site_id": filt.site_id,
+        "source_id": filt.source_id,
+        "time_range": _window_dict(filt),
+        "display_timezone": display_timezone,
+        "sort": sort,
+        "generated_at": observed.isoformat(),
+        "filters": _filter_dict(filt),
+        "row_count": row_count,
+        "coverage": {
+            "unique_events": cov["unique_events"],
+            "observed_min": cov["observed_min"],
+            "observed_max": cov["observed_max"],
+            "sources": cov["sources"],
+        },
+        "data_quality": {
+            "line_totals": {
+                "lines_total": attempts["lines_total"],
+                "lines_accepted": attempts["lines_accepted"],
+                "lines_rejected": attempts["lines_rejected"],
+                "records_replayed": attempts["records_replayed"],
+            },
+            "imports": [
+                {"import_id": imp["import_id"], "status": imp["status"]}
+                for imp in imports  # type: ignore[union-attr]
+            ],
+        },
+        "privacy": EXPORT_PRIVACY_LABEL,
+        "limitations": LIMITATIONS_LOGS,
+    }
+
+
 def rejected_lines(
     conn: sqlite3.Connection,
     filt: AnalyticsFilter,
@@ -807,8 +915,8 @@ def previous_window_filter(filt: AnalyticsFilter) -> AnalyticsFilter:
 
 def _comparison_metric(
     name: str,
-    current: float,
-    previous: float,
+    current: int | float,  # noqa: PYI041 - int must survive for Pydantic/JSON exactness
+    previous: int | float,  # noqa: PYI041 - int must survive for Pydantic/JSON exactness
     *,
     coverage_ok: bool,
     current_empty: bool,
@@ -816,8 +924,11 @@ def _comparison_metric(
 ) -> dict[str, object]:
     """One current-vs-previous metric with honest ratio handling.
 
-    Raw counts and absolute changes are always exact over the
-    observed rows. Ratios need observed coverage on BOTH sides: a
+    Raw integer counts (and their absolute change, computed in
+    integer arithmetic when both sides are integers) stay exact end
+    to end — never through a lossy ``float`` — so SQLite int64
+    values above 2**53 survive. Ratios need observed coverage on
+    BOTH sides: a
     limited import state, an empty current window, or two empty
     windows all yield ``insufficient_coverage`` (an empty current
     window is never a confident -100%). Only a covered nonempty
@@ -946,7 +1057,10 @@ def compare_windows(
     spike — an empty current window is never a -100% finding.
     Observed min/max bound observed events only: one event never
     proves full-window coverage. Only the two validated windows are
-    read.
+    read. The shared window length travels as float
+    ``window_seconds`` with the exact integer-microsecond
+    ``window_seconds_us`` companion, consistent with the ISO window
+    pair (no conflicting truncation).
     """
     if current.site_id != previous.site_id or current.source_id != previous.source_id:
         raise ValueError("comparison windows must share site and source scope")
@@ -1057,7 +1171,8 @@ def compare_windows(
         "previous_window": _window_dict(previous),
         "selectors": current_selectors,
         "filters": {"current": _filter_dict(current), "previous": _filter_dict(previous)},
-        "window_seconds": int(current_duration.total_seconds()),
+        "window_seconds": _window_micros(current) / 1_000_000,
+        "window_seconds_us": _window_micros(current),
         "generated_at": observed.isoformat(),
         "metrics": metrics,
         "coverage": {"current": cur["coverage"], "previous": prev["coverage"]},

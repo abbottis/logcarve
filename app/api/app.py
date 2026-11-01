@@ -14,7 +14,7 @@ from fastapi.responses import JSONResponse
 from fastapi.staticfiles import StaticFiles
 
 from app.analytics.rules import load_rules
-from app.api import routes_admin, routes_analytics, routes_chat
+from app.api import routes_admin, routes_analytics, routes_chat, routes_export
 from app.api.deps import LoginRateLimiter, StoreUnavailable, require_admin_session
 from app.api.errors import error_response, store_unavailable_handler, validation_error_handler
 from app.db.database import connect
@@ -85,6 +85,7 @@ def build_api(
         return {"ready": True, "database": "ok", "schema_version": row[0]}
 
     app.include_router(routes_analytics.router)
+    app.include_router(routes_export.router)
     app.include_router(routes_admin.router)
     app.include_router(routes_chat.router)
     web_static = Path(__file__).resolve().parent.parent / "web" / "static"

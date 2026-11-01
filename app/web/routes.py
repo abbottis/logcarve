@@ -298,14 +298,19 @@ def _parse_sort(q, allowed: tuple[str, ...], default: str) -> tuple[str | None, 
 
 
 def _parse_paging(q, default: int = 20) -> tuple[dict | None, str | None]:
-    """Bounded offset pagination shared by every data view."""
+    """Bounded offset pagination shared by every data view.
+
+    Offsets stay inside the SQLite signed-64-bit binding range so a
+    huge offset rejects as bad params instead of surfacing an
+    ``OverflowError``/plain-500 from the driver.
+    """
     raw_limit, raw_offset = (q.get("limit") or "").strip(), (q.get("offset") or "").strip()
     try:
         limit = int(raw_limit) if raw_limit else default
         offset = int(raw_offset) if raw_offset else 0
     except ValueError:
         return None, "error.bad_params"
-    if not 1 <= limit <= 100 or offset < 0:
+    if not 1 <= limit <= 100 or not 0 <= offset <= 2**63 - 1:
         return None, "error.bad_params"
     return {"limit": limit, "offset": offset}, None
 
@@ -1578,6 +1583,65 @@ def requests_partial(request: Request):
     response = templates.TemplateResponse(request, "partials/requests_content.html", context)
     response.headers["HX-Push-Url"] = context["canonical_url"]
     return response
+
+
+@router.get("/export/requests")
+def export_requests_download(request: Request):
+    """Session-authenticated full-result CSV/JSON download (thin entry).
+
+    No Bearer token is accepted here and no credential is read from
+    the query string; the admin session authorizes the download while
+    the shared export builder enforces the same site/source/window
+    contract, allowlisted columns, privacy label and row cap as the
+    Bearer API. No export UI is added yet (T4).
+    """
+    from app.api import routes_export
+
+    params, gate = _data_page(request)
+    if gate == "redirect":
+        return _redirect_to_login(request)
+    if gate is not None:
+        return _error_page(request, gate, 400)
+    raw_format = (request.query_params.get("format") or "csv").strip().lower()
+    if raw_format not in ("csv", "json"):
+        return _error_page(request, "error.bad_params", 400)
+    sort, error = _parse_sort(request.query_params, EXPLORER_SORTS, "oldest")
+    if error is not None:
+        return _error_page(request, error, 400)
+    with read_store(request) as conn:
+        site, sites, error = _site_or_error(conn, params)
+        if error is not None:
+            return _error_page(request, error, 400 if error != "error.unknown_site" else 404)
+        error = _source_or_error(conn, site, params["source"])
+        if error is not None:
+            return _error_page(request, error, 400 if error != "error.unknown_site" else 404)
+        try:
+            context = _base_context(
+                request, params, site, sites, "/export/requests", request.app.state.rules
+            )
+        except _InvalidFilter:
+            return _error_page(request, "error.bad_params", 400)
+        filt = context["filt"]
+    prepared, failure = routes_export.prepare_session_export(
+        filt=filt,
+        rules=request.app.state.rules,
+        sort=sort,
+        export_format=raw_format,
+        db_path=request.app.state.db_path,
+        display_timezone=params["tz_name"],
+    )
+    if failure == "invalid":
+        return _error_page(request, "error.bad_params", 400)
+    if isinstance(failure, tuple):
+        return HTMLResponse(
+            f'<p class="alert alert-error" role="alert">{t("error.export_too_large")}</p>',
+            status_code=413,
+        )
+    assert prepared is not None
+    filename = routes_export.safe_filename(
+        filt.site_id, filt.window.time_from, filt.window.time_to, raw_format
+    )
+    return routes_export.export_response(prepared, filename)
 
 
 @router.get("/ask", response_class=HTMLResponse)
