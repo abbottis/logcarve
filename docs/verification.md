@@ -1342,3 +1342,30 @@ paths), PRIV-01/02 (egress re-proven; hostile/legacy diagnostics
 withheld; no raw logs, IPs, secrets or clients cross), COST-01/02
 (ledger/display untouched, suite green). Historical failures and
 pending gates preserved. No merge, no deploy, no new dependencies.
+
+## 2026-11-01 — Tiny readiness correction: source-change quality + decoded scope validation
+
+Two confirmed residuals on 9e7d81a fixed; all working fixes preserved
+(timezone default/notice, named security counts, 72-bucket/30-request
+series, exact per-step cached/reasoning display). Caps unchanged
+(1600 projection / 4000 history / 8000 outgoing / 65536 wire); fail
+closed retained; no raw `error_summary` text, paths or credentials
+cross; no cap increases or history/allowance resets.
+
+| Check | Result | Evidence |
+| --- | --- | --- |
+| BEFORE reproduction (owned probes, blocked sockets, temp DBs) | FAIL as reported | `check_outgoing(raw)` BLOCKED `raw_log_line` but `project_evidence_summary(... path_prefix=raw ...)` ALLOWED escaped JSON; `_projection_quality` for completed `source_changed_during_import; source_content_mismatch` carried only `imports_by_status completed:1` with no warning |
+| AFTER: escaped Combined-like scope blocked decoded | PASS | `project_evidence_summary` BLOCKED `raw_log_line` for `/x - - [28/Oct/2026...]` host `/x` (no IP), Unicode variant and `api_key` poisoned suffix; `/ok` scope stays exact |
+| AFTER: completed source-change/mismatch + withheld on every tool | PASS | `_projection_quality` emits fixed `source changed during import`, `source content mismatch`, `diagnostic withheld: legacy format` notes for `get_summary/timeseries/top_paths/security_findings/error_groups`; native wire and fake history both carry them with underscore codes absent and full local envelopes retained |
+| Focused regression `test_assistant_projection + test_ai_egress + test_assistant_stage_b + test_assistant/scope/corrections + test_t8_preparation + test_web_timezones` | PASS | 147 passed |
+| AI unit `test_ai_budget/gate/tools` | PASS | 22 passed |
+| New projection tests | PASS | `test_assistant_projection.py`: 10 passed (8 prior + 2 new) |
+| `ruff check app tests` + `ruff format --check app tests` | PASS | All checks passed; 114 files formatted |
+| `pytest tests/e2e` execution | BLOCKED | Sandbox cannot launch headless shell; coordinator-owned |
+| Docker/x86-64 / real AI-02 smoke | NOT RUN | No production transport, key, account or paid call; coordinator-owned |
+
+Acceptance impact: AI-01/AI-03 (quality signals complete on every
+tool), PRIV-01/02 (decoded scope/metadata validated before
+compact/escaping with final string check retained; masking and exact
+scope unchanged). No merge to `main`, no deployment, no new
+dependencies.

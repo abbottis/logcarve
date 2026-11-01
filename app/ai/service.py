@@ -1136,7 +1136,10 @@ def _projection_quality(tool_name: str, envelope: dict) -> dict:
     travel explicitly; a bare count is never a substitute. Only
     server-generated notes and integer import metadata travel — stored
     `error_summary` free text (including legacy pre-allowlist
-    diagnostics and any poisoned metadata) is never included.
+    diagnostics and any poisoned metadata) is never included. Completed
+    imports carrying the allowlisted source-change/content-mismatch
+    segments (and the legacy withheld marker) surface as fixed notes on
+    every tool, not only on summary warnings.
     """
     coverage = envelope.get("coverage")
     coverage = coverage if isinstance(coverage, dict) else {}
@@ -1164,12 +1167,29 @@ def _projection_quality(tool_name: str, envelope: dict) -> dict:
                 continue
             if status == "failed":
                 note = f"import {imp_id} failed: committed batches kept, resume to complete"
+                if note not in warnings:
+                    warnings.append(note)
             elif status == "running":
                 note = f"import {imp_id} still running: data may be partial"
-            else:
-                continue
-            if note not in warnings:
-                warnings.append(note)
+                if note not in warnings:
+                    warnings.append(note)
+            # Allowlisted source-change/mismatch segments (already
+            # sanitized at the shared query boundary) surface as fixed
+            # notes on every tool; raw `error_summary` text never travels.
+            summary = imp.get("error_summary")
+            segments = set(summary.split("; ")) if isinstance(summary, str) and summary else set()
+            if "source_changed_during_import" in segments:
+                note = f"import {imp_id} source changed during import: data may be incomplete"
+                if note not in warnings:
+                    warnings.append(note)
+            if "source_content_mismatch" in segments:
+                note = f"import {imp_id} source content mismatch: data may be incomplete"
+                if note not in warnings:
+                    warnings.append(note)
+            if "diagnostic_withheld:legacy_format" in segments:
+                note = f"import {imp_id} diagnostic withheld: legacy format"
+                if note not in warnings:
+                    warnings.append(note)
     attempts = coverage.get("import_attempts")
     if isinstance(attempts, dict):
         quality["imports"] = {

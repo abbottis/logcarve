@@ -410,7 +410,10 @@ def _project_scope(filters: dict) -> str:
     """Exact executed scope as compact JSON with sorted keys.
 
     Every selected and model-narrowed filter value travels exactly —
-    never clipped — so the summary replays the real read. A scope that
+    never clipped — so the summary replays the real read. Decoded
+    scope values are egress-validated BEFORE JSON encoding so a
+    forbidden shape cannot hide behind escape sequences; the complete
+    encoded scope is validated again by the caller. A scope that
     cannot fit the projection bound fails the dispatch closed instead
     of sending a thinned, unreproducible one.
     """
@@ -419,10 +422,15 @@ def _project_scope(filters: dict) -> str:
     exact: dict[str, object] = {}
     for key in sorted(filters):
         value = filters[key]
-        if isinstance(value, (str, int, bool)) or value is None:
+        if isinstance(value, str):
+            check_outgoing(value, context="tool evidence scope")
+            exact[str(key)] = value
+        elif isinstance(value, (int, bool)) or value is None:
             exact[str(key)] = value
         else:
             raise EgressViolation("unknown_tool", "Tool evidence scope is malformed.")
+    for key in exact:
+        check_outgoing(str(key), context="tool evidence scope")
     return _compact_json(exact)
 
 
@@ -440,7 +448,9 @@ def project_evidence_summary(
     """Bounded evidence projection both model paths share.
 
     Built ONLY from already egress-validated values (the allowlisted
-    minimized result plus server-generated envelope metadata), then the
+    minimized result plus server-generated envelope metadata), with
+    decoded scope/metadata values validated BEFORE JSON encoding so
+    forbidden shapes cannot hide behind escape sequences, then the
     complete final string is validated again — hostile content fails
     closed in `serialize_evidence` first and is never thinned into
     safety here. Exact totals come from the untruncated `full_result`
@@ -466,6 +476,23 @@ def project_evidence_summary(
         "from": coverage.get("observed_min", "?"),
         "to": coverage.get("observed_max", "?"),
     }
+    # Decoded allowlisted metadata crosses the boundary BEFORE any JSON
+    # encoding or clipping, so a Combined-like scope value or poisoned
+    # suffix cannot hide behind escape sequences. Result display rows
+    # stay on the already-scrubbed minimized payload (masking preserved);
+    # only the outgoing metadata here is validated decoded. The complete
+    # encoded summary is validated again below.
+    check_wire_values(
+        {
+            "tool": tool_name,
+            "tool_call_id": tool_call_id,
+            "observed": observation_time,
+            "filters": filters,
+            "coverage": coverage_payload,
+            "quality": quality if quality is not None else {},
+        },
+        context="tool evidence metadata",
+    )
     summary = (
         f"[evidence {tool_call_id}] {tool_name} "
         f"result={_project_result(tool_name, minimized, full_result)} "

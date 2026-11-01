@@ -388,6 +388,77 @@ def test_quality_warnings_visible_and_poison_withheld(senv, no_network):
     assert "Traceback" not in stored
 
 
+def test_escaped_scope_never_slips_into_projection():
+    """A Combined-like scope value is blocked decoded, not hidden by JSON escapes."""
+    raw = '/x - - [28/Oct/2026:09:00:00 +0000] "GET / HTTP/1.1" 200 1 "-" "synthetic"'
+    with pytest.raises(egress_mod.EgressViolation) as excinfo:
+        egress_mod.check_outgoing(raw, context="raw")
+    assert excinfo.value.code == "raw_log_line"
+    minimized = {
+        "totals": {"requests": 0, "errors_4xx": 0, "errors_5xx": 0, "bytes_total": 0},
+        "status_distribution": [],
+        "duration": {"available": False},
+        "warnings": [],
+    }
+    with pytest.raises(egress_mod.EgressViolation) as excinfo:
+        egress_mod.project_evidence_summary(
+            tool_name="get_summary",
+            tool_call_id="tc-escaped",
+            minimized=minimized,
+            filters={"site_id": "default", "path_prefix": raw},
+            observation_time=NOW.isoformat(),
+            coverage={"unique_events": 0, "observed_min": None, "observed_max": None},
+        )
+    assert excinfo.value.code == "raw_log_line"
+    ok = egress_mod.project_evidence_summary(
+        tool_name="get_summary",
+        tool_call_id="tc-ok",
+        minimized=minimized,
+        filters={"site_id": "default", "path_prefix": "/ok"},
+        observation_time=NOW.isoformat(),
+        coverage={"unique_events": 0, "observed_min": None, "observed_max": None},
+    )
+    assert '"path_prefix":"/ok"' in ok
+
+
+def test_completed_source_change_quality_on_every_tool(senv, no_network):
+    """Completed source-change/mismatch + withheld markers warn on native and fake paths."""
+    with writer_transaction(senv["db"]) as conn:
+        imp_id = conn.execute("SELECT id FROM imports ORDER BY id").fetchone()[0]
+        conn.execute(
+            "UPDATE imports SET status='completed',"
+            " error_summary='source_changed_during_import; source_content_mismatch'"
+            " WHERE id=?",
+            (imp_id,),
+        )
+    provider, transport = _native([{"calls": ["get_security_findings"]}, {"text": "Noted."}])
+    result = _investigate(senv, provider)
+    summary = _wire_summary(transport)
+    assert f"import {imp_id} source changed during import" in summary
+    assert f"import {imp_id} source content mismatch" in summary
+    assert "source_changed_during_import" not in summary
+    assert "source_content_mismatch" not in summary
+    envelope = result.evidence[0]
+    assert envelope["coverage"]["imports"][0]["status"] == "completed"
+    fake = FakeProvider(
+        script=[
+            ProviderResponse(
+                text="",
+                input_tokens=100,
+                output_tokens=20,
+                tool_calls=(ToolCall(name="get_security_findings", arguments={"limit": 5}),),
+            ),
+            ProviderResponse(text="Noted.", input_tokens=200, output_tokens=30),
+        ]
+    )
+    result = _investigate(senv, fake)
+    history = "\n".join(fake.captured_prompts())
+    assert f"import {imp_id} source changed during import" in history
+    assert f"import {imp_id} source content mismatch" in history
+    for line in history.splitlines():
+        assert "Traceback" not in line
+
+
 def test_remainder_counts_use_true_totals_not_serialized_cap():
     """First-10 truncation plus 5-row sampling leaves remainder metadata exact."""
     items = [
