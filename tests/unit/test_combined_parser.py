@@ -181,7 +181,7 @@ def test_oversized_line_keeps_no_content():
 
 def test_unknown_format_rejected():
     with pytest.raises(ValueError, match="unknown format_id"):
-        parse_line(b"whatever", source_id="s", format_id="common", hmac_key=HMAC_KEY)
+        parse_line(b"whatever", source_id="s", format_id="jsonl", hmac_key=HMAC_KEY)
 
 
 def test_empty_hmac_key_refused():

@@ -1,0 +1,3 @@
+example.org 203.0.113.20 - - [27/Oct/2026:10:15:32 +0100] "GET /page HTTP/1.1" 200 153 "https://example.org/old?x=1" "Mozilla/5.0" MISS 0.123 text/html TLSv1.3 "0.100, 0.020"
+example.org 2001:db8::25 - - [27/Oct/2026:11:02:03 +0100] "GET /style.css HTTP/1.1" 200 2314 "-" "curl/8.0" HIT 0.002 text/css;charset=utf-8 TLSv1.2 "-"
+example.org 198.51.100.7 - - [27/Oct/2026:11:15:44 +0100] "GET /api/events HTTP/2" 200 128 "-" "-" - - - - "-"

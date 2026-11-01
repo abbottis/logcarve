@@ -18,8 +18,29 @@ from app.db.database import connect
 from app.db.importer import run_import
 from app.db.migrations_runner import migrate
 from app.db.retention import apply_retention
-from app.ingestion.combined import Limits
-from app.ingestion.sources import SourceConfig
+from app.ingestion.combined import (
+    APACHE_COMBINED,
+    APACHE_VHOST_COMBINED,
+    AUTO,
+    COMMON,
+    CUSTOM,
+    NGINX_COMBINED,
+    NGINX_EXTENDED,
+    Limits,
+)
+from app.ingestion.custom import CustomFormatError, load_spec_file
+from app.ingestion.gzipio import GzipLimits
+from app.ingestion.sources import HostFilter, SourceConfig
+
+_FORMAT_CHOICES = (
+    NGINX_COMBINED,
+    APACHE_COMBINED,
+    COMMON,
+    APACHE_VHOST_COMBINED,
+    NGINX_EXTENDED,
+    AUTO,
+    CUSTOM,
+)
 
 
 def _hmac_key() -> bytes:
@@ -33,44 +54,103 @@ def _utcnow() -> str:
     return datetime.now(UTC).strftime("%Y%m%dT%H%M%SZ")
 
 
+def _result_payload(result) -> dict:
+    return {
+        "import_id": result.import_id,
+        "status": result.status,
+        "lines_total": result.lines_total,
+        "lines_accepted": result.lines_accepted,
+        "lines_rejected": result.lines_rejected,
+        "records_inserted": result.records_inserted,
+        "records_replayed": result.records_replayed,
+        "records_skipped_foreign": result.records_skipped_foreign,
+        "is_gzip": result.is_gzip,
+        "gzip_members": result.gzip_members,
+        "source_changed": result.source_changed,
+        "error_summary": result.error_summary,
+    }
+
+
+def _split_hosts(values: list[str] | None) -> list[str]:
+    hosts: list[str] = []
+    for value in values or []:
+        hosts.extend(part.strip() for part in value.split(",") if part.strip())
+    return hosts
+
+
 def cmd_import(args: argparse.Namespace) -> int:
-    source = SourceConfig(
-        source_id=args.source_id,
-        format_id=args.format,
-        allowed_root=Path(args.root),
-        relative_path=args.path,
-    )
-    result = run_import(
-        Path(args.db),
-        source=source,
-        site_id=args.site_id,
-        site_name=args.site_name,
-        site_hostname=args.site_hostname,
-        server_type=args.server_type,
-        path_alias=args.path,
-        hmac_key=_hmac_key(),
-        batch_size=args.batch_size,
-        limits=Limits(
-            max_line_bytes=args.max_line_bytes,
-            max_diagnostics=args.max_diagnostics,
-        ),
-    )
-    print(
-        json.dumps(
-            {
-                "import_id": result.import_id,
-                "status": result.status,
-                "lines_total": result.lines_total,
-                "lines_accepted": result.lines_accepted,
-                "lines_rejected": result.lines_rejected,
-                "records_inserted": result.records_inserted,
-                "records_replayed": result.records_replayed,
-                "source_changed": result.source_changed,
-                "error_summary": result.error_summary,
-            }
+    custom_format = None
+    if args.format == CUSTOM or args.format_config is not None:
+        if args.format_config is None:
+            print("error: --format custom requires --format-config", file=sys.stderr)
+            return 2
+        try:
+            custom_format = load_spec_file(Path(args.format_config))
+        except CustomFormatError as exc:
+            print(f"error: invalid custom format ({exc.code})", file=sys.stderr)
+            return 2
+    explicit_hosts = _split_hosts(args.host_filter) + _split_hosts(args.host_alias)
+    if not explicit_hosts and args.format in (APACHE_VHOST_COMBINED, NGINX_EXTENDED):
+        # Vhost/extended sources always filter against the configured site
+        # host so foreign hosts can never be silently counted as this site.
+        explicit_hosts = [args.site_hostname]
+    host_filter: HostFilter | None = None
+    if explicit_hosts:
+        try:
+            host_filter = HostFilter(explicit_hosts)
+        except ValueError:
+            print("error: invalid host filter", file=sys.stderr)
+            return 2
+    allowed_hosts = sorted(host_filter.hosts) if host_filter is not None else None
+    payloads: list[dict] = []
+    overall = "completed"
+    for index, relative in enumerate(args.path):
+        try:
+            source = SourceConfig(
+                source_id=args.source_id,
+                format_id=args.format,
+                allowed_root=Path(args.root),
+                relative_path=relative,
+                allowed_hosts=allowed_hosts,
+            )
+        except ValueError:
+            print("error: invalid source configuration", file=sys.stderr)
+            return 2
+        result = run_import(
+            Path(args.db),
+            source=source,
+            site_id=args.site_id,
+            site_name=args.site_name,
+            site_hostname=args.site_hostname,
+            server_type=args.server_type,
+            path_alias=relative,
+            hmac_key=_hmac_key(),
+            batch_size=args.batch_size,
+            limits=Limits(
+                max_line_bytes=args.max_line_bytes,
+                max_diagnostics=args.max_diagnostics,
+            ),
+            host_filter=host_filter,
+            custom_format=custom_format,
+            gzip_limits=GzipLimits(
+                max_compressed_bytes=args.max_compressed_bytes,
+                max_uncompressed_bytes=args.max_uncompressed_bytes,
+                max_compression_ratio=args.max_compression_ratio,
+                max_gzip_members=args.max_gzip_members,
+            ),
+            autodetect_sample_lines=args.autodetect_sample_lines,
         )
-    )
-    return 0 if result.status == "completed" else 1
+        entry = _result_payload(result)
+        entry["file_index"] = index
+        entry["format_id"] = custom_format.format_id if custom_format is not None else args.format
+        payloads.append(entry)
+        if result.status != "completed":
+            overall = result.status
+    if len(payloads) == 1:
+        print(json.dumps(payloads[0]))
+    else:
+        print(json.dumps({"status": overall, "files": payloads}))
+    return 0 if overall == "completed" else 1
 
 
 def cmd_retention(args: argparse.Namespace) -> int:
@@ -120,11 +200,19 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--db", required=True, help="SQLite database file")
     sub = parser.add_subparsers(dest="command", required=True)
 
-    importer = sub.add_parser("import", help="Import one configured source file")
+    importer = sub.add_parser("import", help="Import configured source files in order")
     importer.add_argument("--source-id", required=True)
-    importer.add_argument("--format", required=True, choices=["nginx_combined", "apache_combined"])
+    importer.add_argument("--format", required=True, choices=list(_FORMAT_CHOICES))
+    importer.add_argument("--format-config", default=None, help="Validated custom-format JSON file")
     importer.add_argument("--root", required=True, help="Approved source root directory")
-    importer.add_argument("--path", required=True, help="Relative path inside the approved root")
+    importer.add_argument(
+        "--path",
+        required=True,
+        action="append",
+        help="Relative path inside the approved root (repeatable file series)",
+    )
+    importer.add_argument("--host-filter", action="append", default=None)
+    importer.add_argument("--host-alias", action="append", default=None)
     importer.add_argument("--site-id", default="default")
     importer.add_argument("--site-name", default="Example site")
     importer.add_argument("--site-hostname", default="example.org")
@@ -132,6 +220,11 @@ def build_parser() -> argparse.ArgumentParser:
     importer.add_argument("--batch-size", type=int, default=1000)
     importer.add_argument("--max-line-bytes", type=int, default=65536)
     importer.add_argument("--max-diagnostics", type=int, default=20)
+    importer.add_argument("--max-compressed-bytes", type=int, default=1073741824)
+    importer.add_argument("--max-uncompressed-bytes", type=int, default=1073741824)
+    importer.add_argument("--max-compression-ratio", type=float, default=100.0)
+    importer.add_argument("--max-gzip-members", type=int, default=64)
+    importer.add_argument("--autodetect-sample-lines", type=int, default=32)
     importer.set_defaults(func=cmd_import)
 
     retention = sub.add_parser("retention", help="Delete owned events older than N days (UTC)")

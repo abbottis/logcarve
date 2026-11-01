@@ -17,3 +17,35 @@ Required fixture variants: IPv4/IPv6, escaped quotes, unusual whitespace/request
 Reject invalid lines with bounded masked diagnostics and accurate accounting. Replay must not duplicate records; identical legitimate requests must remain distinct. Source identity/offset strategy needs explicit tests.
 
 Timing extensions are later work: Nginx seconds → milliseconds; Apache `%D` microseconds → milliseconds, `%{ms}T` already milliseconds. Common, gzip, JSONL, LiteSpeed and custom Plesk formats require new presets/fixtures before claiming support. Default Combined has no latency measurement.
+
+## T1a parity presets (2026-11-01, PAR-01)
+
+- `common`: Common Log Format without Referer/User-Agent. Grammar-disjoint
+  from Combined, so neither is ever mislabelled as the other.
+- `apache_vhost_combined`: `%v` server hostname followed by Combined
+  (Apache escapes apply). `other.example`-style foreign hosts are skipped
+  as valid foreign lines, never counted as the configured site.
+- `nginx_extended`: Combined prefixed with the server host and suffixed
+  with six measured fields: `cache` (`$upstream_cache_status`),
+  `request_time` (seconds → ms), `mime` (`$sent_http_content_type`,
+  `type/subtype`, optional `;params` without spaces), `tls`
+  (`$ssl_protocol`), and quoted `upstream_response_time` (seconds → ms,
+  summed when multi-valued with an explicit component count).
+- Referer handling adds a minimized path (`/old` from
+  `https://example.org/old?x=1`, scheme kept only for http/https,
+  credentials dropped, secrets masked) next to the existing host.
+- Measured timing normalizes to milliseconds; absent stays `None`
+  (never `0`); present-but-invalid rejects the line (`invalid_timing`,
+  `invalid_mime`, `invalid_cache`, `invalid_tls`, `invalid_host`
+  are explicit reason codes).
+- gzip sources are detected by magic bytes (`1f 8b`), never the
+  extension, and stream within compressed/uncompressed/ratio/member
+  bounds; truncated/CRC/member-limit breaches map to fixed
+  `interrupted:gzip_*` codes. Identity is logical (decompressed) bytes,
+  so the same plaintext imported plain or gzipped replays.
+- `auto` format resolves per file through sampled detection with
+  bounded confidence; Nginx/Apache Combined ties fail closed unless an
+  escape observation or an explicit `--format` decides. Administrator
+  custom mappings (`custom-*` JSON) are validated to nesting-free safe
+  regex constructs with required/allowed named fields and explicit
+  timing units; no eval, no code, no unbounded backtracking.

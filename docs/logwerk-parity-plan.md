@@ -71,3 +71,10 @@ Owner exclusions (no UI import, no translations) are explicit non-goals, not def
 ## 6. First implementation task (promptable, bounded)
 
 > T1a — gzip + preset ingestion on a scratch branch from `70aab80`: implement streamed gzip magic-detect/decompress with compressed/uncompressed/line/ratio/work bounds plus Common, Apache vhost Combined, and Nginx Extended presets with sampled autodetect and CLI override, using only new synthetic fixtures. Prove with unit/integration tests (bounds, replay identity, host-filter isolation) in `.venv`/`uv --locked` plus Ruff; preserve the 120-row fixture; no web/API/DB-schema changes yet; stop before commit for coordinator review.
+
+Status 2026-11-01: T1a implemented on `feature/logwerk-parity-2026-11-01`
+as a coherent slice commit (same branch, no rewrite), with 25 unit + 10
+integration tests green, full unit/integration suite 569 passed, Ruff
+clean; `uv --locked` BLOCKED by sandbox (coordinator re-runs). PAR-01
+partially implemented at parser/import/CLI level; no web/API/schema
+changes; independent re-inspection pending before T1b.

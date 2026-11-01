@@ -56,7 +56,7 @@ def test_tilde_and_nul_rejected():
 
 def test_unknown_format_rejected(tmp_path):
     with pytest.raises(ValidationError):
-        _config(tmp_path, "access.txt", format_id="common")
+        _config(tmp_path, "access.txt", format_id="jsonl")
 
 
 def test_symlink_escape_rejected(tmp_path):

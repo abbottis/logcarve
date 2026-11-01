@@ -42,9 +42,20 @@ from pathlib import Path
 from app.db import repositories
 from app.db.database import WriterBusy, writer_transaction
 from app.db.migrations_runner import migrate
-from app.ingestion.combined import CombinedRecord, Limits, LineRejection
-from app.ingestion.sources import SourceConfig, resolve_source_path
-from app.ingestion.stream import ImportReport, iter_records
+from app.ingestion.autodetect import AmbiguousFormat, UnmatchedFormat
+from app.ingestion.combined import (
+    APACHE_VHOST_COMBINED,
+    AUTO,
+    CUSTOM,
+    NGINX_EXTENDED,
+    CombinedRecord,
+    Limits,
+    LineRejection,
+)
+from app.ingestion.custom import CustomFormat, CustomFormatError
+from app.ingestion.gzipio import GzipError, GzipLimits
+from app.ingestion.sources import HostFilter, SourceConfig, resolve_source_path
+from app.ingestion.stream import HostSkipped, ImportReport, fingerprint_source, iter_records
 
 _FINGERPRINT_CHUNK = 1024 * 1024
 
@@ -68,6 +79,15 @@ FAILURE_CODES = (
     "interrupted:storage_error",
     "interrupted:writer_busy",
     "interrupted:import_failed",
+    "interrupted:gzip_crc_error",
+    "interrupted:gzip_truncated",
+    "interrupted:gzip_too_large",
+    "interrupted:gzip_ratio_exceeded",
+    "interrupted:gzip_member_limit",
+    "interrupted:gzip_invalid",
+    "interrupted:format_ambiguous",
+    "interrupted:format_unmatched",
+    "interrupted:custom_invalid",
 )
 _ALLOWED_SUMMARY_SEGMENTS = frozenset(
     (SOURCE_CHANGED_CODE, SOURCE_CONTENT_MISMATCH_CODE, *FAILURE_CODES)
@@ -79,6 +99,11 @@ def failure_code(exc: BaseException) -> str:
     """Map an import failure to an allowlisted code; never persist repr(exc)."""
     if isinstance(exc, WriterBusy):
         return "interrupted:writer_busy"
+    if isinstance(exc, (GzipError, CustomFormatError, AmbiguousFormat, UnmatchedFormat)):
+        code = getattr(exc, "code", "interrupted:import_failed")
+        if code in FAILURE_CODES:
+            return code
+        return "interrupted:import_failed"
     if isinstance(exc, OSError):
         return "interrupted:io_error"
     if isinstance(exc, sqlite3.Error):
@@ -110,6 +135,9 @@ class ImportResult:
     lines_rejected: int = 0
     records_inserted: int = 0
     records_replayed: int = 0
+    records_skipped_foreign: int = 0
+    is_gzip: bool = False
+    gzip_members: int = 0
     status: str = "completed"
     error_summary: str | None = None
     source_changed: bool = False
@@ -158,17 +186,55 @@ def run_import(
     clock: Callable[[], datetime] | None = None,
     after_batch: Callable[[int], None] | None = None,
     lock_timeout_s: float = 30.0,
+    host_filter: HostFilter | None = None,
+    custom_format: CustomFormat | None = None,
+    gzip_limits: GzipLimits | None = None,
+    autodetect_sample_lines: int = 32,
 ) -> ImportResult:
-    """Import one resolved source file; repeatable and interruption-safe."""
+    """Import one resolved source file; repeatable and interruption-safe.
+
+    Identity is the logical-byte fingerprint (decompressed bytes for gzip,
+    raw bytes for plain files) plus the record byte offset, so the same
+    plaintext imported plain or gzipped replays instead of duplicating,
+    while legitimate identical requests (distinct positions) stay distinct.
+    """
     if not hmac_key:
         raise ValueError("hmac_key must be non-empty")
     if batch_size < 1:
         raise ValueError("batch_size must be at least 1")
+    if source.format_id == CUSTOM and custom_format is None:
+        raise CustomFormatError("interrupted:custom_invalid")
+    if custom_format is not None and source.format_id not in (CUSTOM, custom_format.format_id):
+        raise CustomFormatError("interrupted:custom_invalid")
+    effective_filter = host_filter if host_filter is not None else source.host_filter()
+    if effective_filter is None and source.format_id in (
+        APACHE_VHOST_COMBINED,
+        NGINX_EXTENDED,
+        AUTO,
+    ):
+        # Host-bearing lines must never be silently attributed to this site:
+        # without an explicit rule the configured site hostname is the filter.
+        # Plain presets carry no host, so they pass through unaffected.
+        effective_filter = HostFilter([site_hostname])
     now = clock or (lambda: datetime.now(UTC))
     migrate(db_path)
 
     resolved = resolve_source_path(source)
-    fingerprint = sha256_file(resolved)
+    try:
+        logical = fingerprint_source(resolved, gzip_limits=gzip_limits)
+    except GzipError as exc:
+        return _failed_pre_import(
+            db_path,
+            source=source,
+            site_id=site_id,
+            site_name=site_name,
+            site_hostname=site_hostname,
+            server_type=server_type,
+            path_alias=path_alias,
+            now=now,
+            failure=exc,
+        )
+    fingerprint = logical.logical_sha256
     size_before = resolved.stat().st_size
 
     with writer_transaction(db_path, lock_timeout_s=lock_timeout_s) as conn:
@@ -209,8 +275,12 @@ def run_import(
             hmac_key=hmac_key,
             limits=limits,
             report=stream_report,
+            host_filter=effective_filter,
+            custom_format=custom_format,
+            gzip_limits=gzip_limits,
+            autodetect_sample_lines=autodetect_sample_lines,
         ):
-            if isinstance(item, LineRejection):
+            if isinstance(item, (LineRejection, HostSkipped)):
                 continue
             batch.append(
                 _event_row(item, import_id=import_id, site_id=site_id, file_fingerprint=fingerprint)
@@ -233,7 +303,8 @@ def run_import(
         failure = exc
 
     rejected_total = sum(stream_report.rejected_by_reason.values())
-    accepted = stream_report.lines_read - rejected_total
+    skipped_foreign = stream_report.foreign_skipped
+    accepted = stream_report.lines_read - rejected_total - skipped_foreign
     consumed = stream_report.consumed_sha256
     try:
         size_after = resolved.stat().st_size
@@ -243,17 +314,20 @@ def run_import(
     content_mismatch = False
     if failure is None and consumed is not None:
         # The consumed-bytes digest comes from the import reader itself:
-        # every byte the import actually read (lines, newlines, rejected
-        # and skipped oversized data). It is compared against both the
-        # pre-import fingerprint and a fresh final digest, so even a
+        # every logical byte the import actually read (lines, newlines,
+        # rejected and skipped oversized data; decompressed bytes for
+        # gzip). It is compared against both the pre-import logical
+        # fingerprint and a fresh final logical digest, so even a
         # transient same-size change that is restored before this point
         # is detected: the consumed bytes still differ from both. A
         # change that lands after the reader finished leaves the
         # consumed bytes matching but moves the file; that is flagged
         # as a source change with correctly attributed rows.
         try:
-            final_digest: str | None = sha256_file(resolved)
-        except OSError:
+            final_digest: str | None = fingerprint_source(
+                resolved, gzip_limits=gzip_limits
+            ).logical_sha256
+        except (OSError, GzipError):
             final_digest = None
         if consumed != fingerprint or (final_digest is not None and consumed != final_digest):
             content_mismatch = True
@@ -296,10 +370,80 @@ def run_import(
         lines_accepted=counts.lines_accepted,
         lines_rejected=counts.lines_rejected,
         records_inserted=counts.records_inserted,
-        records_replayed=counts.records_replayed,
+        records_replayed=accepted - inserted,
+        records_skipped_foreign=skipped_foreign,
+        is_gzip=logical.is_gzip,
+        gzip_members=stream_report.gzip_members,
         status=status,
         error_summary="; ".join(warnings) or None,
         source_changed=source_changed,
         consumed_sha256=consumed,
         rejected_by_reason=dict(stream_report.rejected_by_reason),
+    )
+
+
+def _failed_pre_import(
+    db_path: Path,
+    *,
+    source: SourceConfig,
+    site_id: str,
+    site_name: str,
+    site_hostname: str,
+    server_type: str,
+    path_alias: str,
+    now,
+    failure: Exception,
+) -> ImportResult:
+    """Record a fixed-code failure when the source cannot even be fingerprinted.
+
+    No event rows exist yet, so there is nothing to keep; the import row
+    records the interruption with an allowlisted code only.
+    """
+    migrate(db_path)
+    with writer_transaction(db_path) as conn:
+        started = now().isoformat()
+        repositories.ensure_site(
+            conn,
+            site_id=site_id,
+            name=site_name,
+            hostname=site_hostname,
+            created_at=started,
+        )
+        repositories.ensure_source(
+            conn,
+            source_id=source.source_id,
+            site_id=site_id,
+            server_type=server_type,
+            format_id=source.format_id,
+            path_alias=path_alias,
+        )
+        import_id = repositories.create_import(
+            conn,
+            source_id=source.source_id,
+            file_fingerprint="unavailable:pre_import_failed",
+            file_size=0,
+            started_at=started,
+        )
+        counts = repositories.ImportCounts(
+            lines_total=0,
+            lines_accepted=0,
+            lines_rejected=0,
+            records_inserted=0,
+            records_replayed=0,
+        )
+        repositories.finish_import(
+            conn,
+            import_id=import_id,
+            finished_at=now().isoformat(),
+            status="failed",
+            counts=counts,
+            error_summary=failure_code(failure),
+        )
+    return ImportResult(
+        import_id=import_id,
+        source_id=source.source_id,
+        file_fingerprint="unavailable:pre_import_failed",
+        status="failed",
+        error_summary=failure_code(failure),
+        source_changed=False,
     )

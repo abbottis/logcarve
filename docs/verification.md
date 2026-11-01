@@ -1807,3 +1807,40 @@ same-bucket quick view, not a metric); identity conflicts are neither
 verified fake/real nor auto-exclusion; no IPs/countries/humans/
 sessions/conversions/indexing/ranking/training claims. Product demo
 stays AI-off; AI-02 stays INCOMPLETE; no new paid calls authorized.
+
+## 2026-11-01 — Parity T1a: gzip + preset ingestion (PAR-01, implementer run)
+
+Implementer: Muse Spark 1.3 Contributor, medium, protections ON, sole
+writer, no agents. Public/synthetic only; no outside files, screenshots,
+real keys, Docker, actual Meta, push/main or deploy. No upstream LogWerk
+code copied: parsers, gzip, autodetect, custom validation and host filter
+are original implementations (77-rule bot catalog and 120-row fixture
+bytes/goldens untouched; `d7ab80c` provenance stays in
+`THIRD_PARTY_NOTICES.md`).
+
+Scope kept to ownership: `app/ingestion/*` (presets, gzip, autodetect,
+custom, host plumbing), minimal `app/db/importer.py` + `app/db/cli.py`
+plumbing, `app/config.py` import limits, new synthetic fixtures/tests.
+No web/API changes, no private-IP persistence, no schema migration
+(T1b follows). `CombinedRecord.extra` carries normalized metadata so
+T1b persists without reparsing; `request.http_version` retained.
+
+Two legacy unknown-format tests (`test_combined_parser`,
+`test_source_resolution`) moved their probe ID `common` → `jsonl`:
+`common` is now an authorized preset, so the probes needed a
+still-unknown ID. Intent (unknown IDs rejected) is preserved; no other
+legacy expectation changed.
+
+| Check | Result | Evidence |
+| --- | --- | --- |
+| Focused T1a unit `tests/unit/test_parity_t1a.py` | PASS | 25 passed: 4 presets + quotes/missing/extended MIME charset/timing units/nulls + IPv6, autodetect true/ambiguous/unmatched, custom valid/invalid/evil, gzip magic/plain/concat/CRC/truncation/zipbomb/ratio/member-limit/oversize-once/all-bytes digest/no-full-read, host isolation counts |
+| Focused T1a integration `tests/integration/test_parity_t1a_import.py` | PASS | 10 passed: gzip↔plain replay both directions, clean logical digest, fixed gzip failure code, host isolation end-to-end, auto (+ site-host default filter) and custom end-to-end, ambiguous fixed code, CLI file series per-file outcomes, series interruption/recovery, source bytes unchanged; manual CLI probes for gzip+auto and custom also completed |
+| Full `tests/unit tests/integration` | PASS | 569 passed, 2 skipped (project `.venv`, Python 3.12); legacy plaintext T6 reader-hash/replay/transient-mutation tests unchanged and green |
+| `ruff check` + `ruff format --check` | PASS | `ruff check app/ tests/` clean; format clean |
+| `uv run --locked` / `uv lock` | BLOCKED | Sandbox denies `uv` cache writes (`Operation not permitted`); no manifest/dependency change exists (`pyproject.toml`/`uv.lock` untouched), project `.venv` used directly instead; coordinator re-runs locked commands |
+| Browser/Docker/Meta proofs | NOT RUN | No browser automation, container build, or product calls from this run; coordinator runs protected-browser/offline/independent-review proofs |
+
+Acceptance impact: PAR-01 partially implemented at parser/import/CLI
+level (T1a). No performance/UI claims; T2 analytics, exports, masking,
+GeoIP, journeys and saved views remain later slices. Stopping here for
+independent re-inspection before T1b, per authorization.

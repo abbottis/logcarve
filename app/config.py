@@ -22,6 +22,11 @@ class Settings(BaseSettings):
     default_timezone: str = "UTC"
     retention_days: int = Field(default=30, ge=1)
     external_api_enabled: bool = True
+    import_max_compressed_bytes: int = Field(default=1073741824, ge=1024)
+    import_max_uncompressed_bytes: int = Field(default=1073741824, ge=1024)
+    import_max_compression_ratio: float = Field(default=100.0, ge=1.0)
+    import_max_gzip_members: int = Field(default=64, ge=1)
+    import_autodetect_sample_lines: int = Field(default=32, ge=1, le=1024)
 
     session_secret: SecretStr = Field(min_length=1)
     hmac_key: SecretStr = Field(min_length=1)
