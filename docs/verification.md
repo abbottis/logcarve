@@ -1734,3 +1734,23 @@ Both failures are test-side selector semantics; application code unchanged.
 Checks here: `pytest --collect-only` 11 tests collected; `ruff check` PASS;
 `ruff format --check` PASS (2 files). Full protected browser run stays
 coordinator-owned: browser PASS is NOT claimed here.
+
+## 2026-11-01 test-only correction (second `[hidden]` wait, no app change)
+
+Protected Chromium at 71a7808 reported 29 tests: 28 PASS, 1 FAIL, 37.74s.
+Last failure `tests/e2e/test_slice_b.py::test_explorer_columns_sanitized_and_timezone_aware`
+(line 506) is the second occurrence of the same wait bug fixed at 71a7808 in
+`test_owner_ux_browser.py`: `page.wait_for_selector(f"tr#{panel_id}[hidden]")`
+waits default VISIBLE, so the correctly hidden row never satisfies it
+(24 polls). Fix: same pattern as the prior fix — wait `[hidden]` with
+`state="attached"`, then assert the same panel occurs exactly once,
+`is_hidden()`, and `aria-expanded == "false"` after the Enter-key toggle.
+Searched all `tests/e2e` for remaining selector+`[hidden]` waits without
+explicit state: none left (`:not([hidden])` waits correctly use default
+visible). Keyboard-close, aria, full-HTML, privacy, time and row-order
+checks preserved. No app/config/fixture change.
+
+Checks here: `pytest --collect-only` 7 tests collected
+(tests/e2e/test_slice_b.py); `ruff check` PASS; `ruff format --check` PASS.
+Full protected browser run stays coordinator-owned: browser PASS is NOT
+claimed here.

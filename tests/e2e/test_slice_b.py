@@ -503,6 +503,9 @@ def test_explorer_columns_sanitized_and_timezone_aware(page, slice_base, observe
     assert "<script>alert(1)" not in (panel.evaluate("el => el.innerHTML") or "")
     toggle.focus()
     page.keyboard.press("Enter")
-    page.wait_for_selector(f"tr#{panel_id}[hidden]", timeout=10000)
+    page.wait_for_selector(f"tr#{panel_id}[hidden]", timeout=10000, state="attached")
+    panel_closed = page.locator(f"tr#{panel_id}")
+    assert panel_closed.count() == 1, "collapsed panel stays in the DOM exactly once"
+    assert panel_closed.is_hidden(), "collapsed panel is hidden after keyboard toggle"
     assert toggle.get_attribute("aria-expanded") == "false"
     _assert_clean(observed, slice_base)
