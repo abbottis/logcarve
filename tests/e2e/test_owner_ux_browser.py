@@ -182,9 +182,9 @@ def test_crawlers_names_readable_no_midword_breaks(page, ux_base, observed):
         page.set_viewport_size({"width": width, "height": 900})
         page.select_option("#theme-select", theme)
         page.goto(f"{ux_base}/crawlers?site=default&{W1}&tz=UTC")
-        page.get_by_role("heading", name="Bots by category, provider and purpose").wait_for(
-            timeout=10000
-        )
+        page.get_by_role(
+            "heading", name="Bots and automation by category, provider and purpose"
+        ).wait_for(timeout=10000)
         # No repeated claim prefix in the bot dropdown or bot table.
         options = page.eval_on_selector("#f-bot", "el => Array.from(el.options).map(o => o.text)")
         assert all(not text.startswith("Claimed ") for text in options)

@@ -1603,3 +1603,54 @@ manual acceptance still pending. Historical real AI 2-of-3
 INCOMPLETE, no-new-paid-authorization, actual-demo-AI-off and
 x86-NOT-RUN are preserved. Coding Contributor usage stays separate
 from product Standard/data-egress/caps.
+
+## 2026-11-01 — Stage B owner-UX review correction (conflict boundary, captions, Help prose)
+
+Bounded sole-writer correction on `feature/owner-ux-review-2026-11-01`
+after Stage B commit `3bcb915`, exact model
+`muse-spark-1.3-contributor`/medium/Contributor ON; sandbox + approval
+ON, no agents/push/main/deploy. Synthetic fixtures only; no schema
+migration, no 120-row/digest/seed changes, no dependency/allowance
+changes, no asset rebuild (no authored JS/CSS/template-class change).
+
+Corrections: conflict detector token boundary now treats `_` and `-`
+as word characters, so `some_Googlebot_clone/1 bingbot/2` and
+`my-Googlebot-tool/1 bingbot/2` each claim only Microsoft (no
+conflict); documented Google product variants `Googlebot-Image`,
+`Googlebot-News`, `Googlebot-Video` added explicitly (12-token known
+set, same-provider pairs stay negative; versions, semicolon pairs and
+Mozilla-only strings preserved). Crawler group title/chart renamed to
+"Bots and automation ..." with a recognized-bots-plus-automation
+membership note (counts unchanged). Help `api_body` literal
+`Bearer [REDACTED]` replaced with "scoped API tokens" (code examples keep
+`<YOUR_TOKEN>` placeholders); explorer Help now states sorts restart
+at the first page while paging advances keeping sort/scope; filter
+Help and the quick-view note state exact traffic/status replacement
+sets (traffic views replace traffic+bot/category/provider/purpose,
+status views replace status+status class, Largest presets the sort).
+Conflict Help documents the limited known set and the affix exclusion.
+
+Tests: extended `test_conflict_detection` (variant positives,
+single and combined-with-second-provider affix negatives,
+same-provider variant pairs); new `test_owner_ux_labels` caption /
+Bearer-literal / sort-paging / quick-view / known-set assertions;
+`test_web_slice_b2` and e2e crawler heading updated to the new title;
+`test_owner_ux_stage_a` quick views assert bot/category/provider/
+purpose are dropped together. No existing privacy/filter/time/count
+coverage removed.
+
+Actual results (project `.venv`, same session): review probe
+`some_Googlebot_clone/1 bingbot/2` False, `my-Googlebot-tool/1
+bingbot/2` False, `Googlebot/2.1 + bingbot/2.0` True,
+`Googlebot-Image/1.0 + bingbot/2.0` True, semicolon pair True,
+same-provider pair False, docs-URL single claim False (ALL-OK).
+Focused `pytest tests/unit/test_conflict_detection.py
+tests/unit/test_owner_ux_labels.py
+tests/integration/test_owner_ux_stage_a.py
+tests/integration/test_web_slice_b2.py
+tests/integration/test_owner_ux_stage_b.py`: 66 passed.
+`ruff check .` PASS; `ruff format --check .` PASS (167 files).
+`uv run --locked` unavailable in-session (uv cache permission denied);
+no manifest change, so `uv.lock` untouched. Browser E2E, full clean
+suites, fresh-image and runtime checks stay coordinator-owned (NOT RUN
+here). No product/provider calls.

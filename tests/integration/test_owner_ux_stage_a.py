@@ -208,8 +208,12 @@ def test_quick_views_preserve_scope_and_replace_explicitly(web):
     assert params_5xx["status_class"] == ["5xx"] and "status" not in params_5xx
     params_bots = _params(links["Bot traffic"])
     assert params_bots["traffic"] == ["claimed_bot"]
+    for dropped in ("bot", "category", "provider", "purpose"):
+        assert dropped not in params_bots, dropped
     params_humans = _params(links["Potential user traffic"])
     assert params_humans["traffic"] == ["browser_like"]
+    for dropped in ("bot", "category", "provider", "purpose"):
+        assert dropped not in params_humans, dropped
     for label in ("404 issues", "Server errors (5xx)", "Bot traffic", "Potential user traffic"):
         followed = client.get(html.unescape(links[label]))
         assert followed.status_code == 200, label

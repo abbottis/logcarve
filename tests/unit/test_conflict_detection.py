@@ -1,13 +1,15 @@
 """Stage B unit tests: conservative conflicting-bot-identity detection.
 
-Pure User-Agent assertions over the hand-authored 9-token known set:
+Pure User-Agent assertions over the hand-authored 12-token known set
+(Googlebot plus Googlebot-Image/News/Video, bingbot, GPTBot,
+ClaudeBot, AhrefsBot, SemrushBot, MJ12bot, YandexBot, Baiduspider):
 positives need unambiguous named tokens for two or more DISTINCT
 providers at actual token boundaries; everything else (single claims,
 same-provider variants, Mozilla compatibility, generic/monitoring
-markers, docs-URL substrings, affixed tokens, missing or hostile
-agents) stays negative. The SQLite scalar agrees with the Python
-helpers, and first-match classification of conflicting agents is
-unchanged.
+markers, docs-URL substrings, alphanumeric or underscore/hyphen
+affixed pseudo-names, missing or hostile agents) stays negative. The
+SQLite scalar agrees with the Python helpers, and first-match
+classification of conflicting agents is unchanged.
 """
 
 import sqlite3
@@ -30,12 +32,15 @@ BOT_RULES = load_rules(ROOT / "config" / "bot_rules.yaml").rules
 
 
 def test_known_set_is_explicit_and_pairwise_distinct():
-    assert len(KNOWN_CONFLICT_IDENTITIES) >= 9
+    assert len(KNOWN_CONFLICT_IDENTITIES) >= 12
     tokens = [token for token, _ in KNOWN_CONFLICT_IDENTITIES]
     assert len(set(tokens)) == len(tokens)
-    providers = [provider for _, provider in KNOWN_CONFLICT_IDENTITIES]
-    assert len(set(providers)) == len(providers)
     assert dict(KNOWN_CONFLICT_IDENTITIES)["Googlebot"] == "Google"
+    for variant in ("Googlebot-Image", "Googlebot-News", "Googlebot-Video"):
+        assert dict(KNOWN_CONFLICT_IDENTITIES)[variant] == "Google"
+    # Tokens are unambiguous; only providers repeat (Google owns four).
+    providers = [provider for _, provider in KNOWN_CONFLICT_IDENTITIES]
+    assert len(set(providers)) == len(providers) - 3
 
 
 def test_rule_reference_constants_match_shipped_rule():
@@ -55,6 +60,11 @@ def test_positive_two_provider_claims():
     assert is_conflicting("AhrefsBot/7.0; SemrushBot/7~bl (+http://example.org/)")
     assert is_conflicting("MJ12bot/v1.4.8 (+http://mj12bot.example/) YandexBot/3.0")
     assert is_conflicting("Baiduspider/2.0 (+http://www.baidu.com/search/spider.htm) GPTBot/1.0")
+    # Documented Google product variants are real Google identity.
+    assert is_conflicting("Googlebot-Image/1.0; bingbot/2.0")
+    assert is_conflicting("Googlebot-News/1.0; bingbot/2.0")
+    assert is_conflicting("Googlebot-Video/1.0; bingbot/2.0")
+    assert conflict_providers("Googlebot-Image/1.0; bingbot/2.0") == {"Google", "Microsoft"}
 
 
 def test_semicolon_joined_pair_conflicts():
@@ -78,12 +88,39 @@ def test_normal_single_claims_stay_negative():
     assert not is_conflicting("generic-bot-crawler/1.0")
     assert not is_conflicting("notgooglebot/1.0")
     assert not is_conflicting("MyGooglebotClone/1.0 (+https://example.org/)")
+    assert not is_conflicting("some_Googlebot_clone/1.0 (+https://example.org/)")
+    assert not is_conflicting("my-Googlebot-tool/1.0 (+https://example.org/)")
+    assert not is_conflicting("Googlebot-Image/1.0 (+https://example.org/)")
+    assert not is_conflicting("Googlebot-News/1.0")
+    assert not is_conflicting("Googlebot-Video/1.0")
+
+
+def test_affixed_pseudo_names_with_second_provider_stay_negative():
+    # Each affixed pseudo-name combined with a legitimate second provider
+    # must stay negative: only one real provider is claimed, so there is
+    # no two-provider conflict to report.
+    for pseudo in (
+        "some_Googlebot_clone/1.0",
+        "my-Googlebot-tool/1.0",
+        "notgooglebot/1.0",
+        "MyGooglebotClone/1.0",
+        "xbingbot-y/1.0",
+        "super_GPTBot_clone/2.0",
+    ):
+        ua = f"Mozilla/5.0 (compatible; {pseudo}; bingbot/2.0)"
+        if "bingbot" in pseudo.lower().replace("_", "").replace("-", ""):
+            ua = f"Mozilla/5.0 (compatible; {pseudo}; GPTBot/1.0)"
+        providers = conflict_providers(ua)
+        assert not is_conflicting(ua), pseudo
+        assert len(providers) <= 1, (pseudo, providers)
 
 
 def test_same_provider_variants_stay_negative():
     # Googlebot plus another Google-only claim is one provider, not a conflict.
     assert not is_conflicting("Googlebot/2.1 Googlebot-Image/1.2")
     assert conflict_providers("Googlebot/2.1 Googlebot-Image/1.2") == {"Google"}
+    assert not is_conflicting("Googlebot/2.1 Googlebot-News/1.2 Googlebot-Video/1.0")
+    assert conflict_providers("Googlebot-Image/1.2 Googlebot-Video/1.0") == {"Google"}
 
 
 def test_docs_url_substrings_and_non_tokens_stay_negative():

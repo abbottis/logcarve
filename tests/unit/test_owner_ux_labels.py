@@ -7,12 +7,20 @@ map categories and format signed offsets including DST, fractions,
 Etc/GMT reversal and historical sub-minute values. Synthetic only.
 """
 
+import json
 from datetime import datetime
+from pathlib import Path
 
 import pytest
 
 from app.web import routes as routes_mod
 from app.web import timezones as tzmod
+
+ROOT = Path(__file__).resolve().parent.parent.parent
+
+
+def _locale():
+    return json.loads((ROOT / "config" / "locales" / "en.json").read_text(encoding="utf-8"))
 
 
 def _instant(text):
@@ -143,3 +151,47 @@ def test_zone_objects_cached_bounded():
     assert after_second.hits > after_first.hits
     with pytest.raises(ZoneInfoNotFoundError):
         tzmod._zone("Nope/Zone")
+
+
+def test_crawler_group_captions_cover_bots_and_automation():
+    locale = _locale()
+    assert locale["crawlers.groups_title"] == (
+        "Bots and automation by category, provider and purpose"
+    )
+    assert locale["crawlers.groups_chart"] == "Bots and automation requests by provider"
+    note = locale["crawlers.groups_note"]
+    assert "other automation" in note
+    assert "not only the Bots traffic bucket" in note
+    assert "never proof of training use" in note
+
+
+def test_help_has_no_bearer_token_literal():
+    locale = _locale()
+    assert "Bearer [REDACTED]" not in json.dumps(locale), (
+        "public Help prose must not carry a Bearer credential literal"
+    )
+    assert "scoped API tokens" in locale["help.api_body"]
+    assert "analytics:read" in locale["help.api_body"]
+
+
+def test_help_sort_paging_and_quick_view_semantics():
+    locale = _locale()
+    explorer = locale["help.explorer_body"]
+    assert "Choosing a sort restarts at the first page" in explorer
+    assert "paging links advance" in explorer
+    assert "keeping the sort direction" in explorer
+    filters = locale["help.filters_body"]
+    assert "traffic quick view replaces the traffic, bot, category" in filters.lower()
+    assert "status quick view replaces status and status class" in filters.lower()
+    assert "Largest responses only presets" in filters
+    quick = locale["quick.note"]
+    assert "only the stated filter" not in quick
+    assert "traffic views replace traffic with bot" in quick
+
+
+def test_help_conflict_documents_limited_known_set():
+    locale = _locale()
+    body = locale["help.conflict_body"]
+    for token in ("Googlebot-Image", "Googlebot-News", "Googlebot-Video", "bingbot"):
+        assert token in body, token
+    assert "some_Googlebot_clone" in body or "underscore" in body

@@ -13,7 +13,9 @@ after URL substrings are stripped, so documentation links such as
 ``+http://www.google.com/bot.html`` never count as an identity claim.
 Excluded by construction: ``Mozilla`` compatibility markers, generic
 ``bot``/``crawl``/``curl``/monitoring substrings, ``notgooglebot``-style
-affixed tokens, and two variants of the SAME provider (only one provider
+alphanumeric affixes and ``some_Googlebot_clone``/``my-Googlebot-tool``
+underscore/hyphen pseudo-names, and two variants of the SAME provider
+(such as ``Googlebot`` with ``Googlebot-Image``, only one provider
 matches, so no conflict).
 
 The same pure, cached helpers back the SQLite scalar
@@ -28,11 +30,19 @@ import re
 from functools import lru_cache
 
 #: Explicit known set: (token, provider). Every token is unambiguous
-#: (exactly one provider); providers are pairwise distinct so any two
-#: token hits mean two distinct providers. Coverage is documented here
-#: and in Help rather than broadened by guessing.
+#: (exactly one provider). Several providers legitimately own more than
+#: one token (Google owns ``Googlebot`` plus the documented
+#: ``Googlebot-Image``/``Googlebot-News``/``Googlebot-Video`` product
+#: variants), so a conflict needs two or more DISTINCT providers, not
+#: two tokens. Coverage is documented here and in Help rather than
+#: broadened by guessing: arbitrary hyphen/underscore affixes such as
+#: ``some_Googlebot_clone`` or ``my-Googlebot-tool`` are NOT Google
+#: identity and never conflict on their own.
 KNOWN_CONFLICT_IDENTITIES: tuple[tuple[str, str], ...] = (
     ("Googlebot", "Google"),
+    ("Googlebot-Image", "Google"),
+    ("Googlebot-News", "Google"),
+    ("Googlebot-Video", "Google"),
     ("bingbot", "Microsoft"),
     ("GPTBot", "OpenAI"),
     ("ClaudeBot", "Anthropic"),
@@ -50,13 +60,18 @@ CONFLICT_CATEGORY = "conflicting_bot_identity"
 
 _URL_RE = re.compile(r"https?://\S+", re.IGNORECASE)
 
-# Token boundaries are ASCII alphanumerics: "notgooglebot" (affixed) and
-# version suffixes ("Googlebot/2.1") behave correctly — the former never
-# matches, the latter always does. Matching is case-insensitive, like the
-# versioned classifier.
+# Token boundaries treat ASCII alphanumerics plus "_" and "-" as word
+# characters: "notgooglebot", "some_Googlebot_clone" and
+# "my-Googlebot-tool" (affixed pseudo-names) never match, while version
+# suffixes ("Googlebot/2.1"), semicolon/space/parenthesis delimiters and
+# the explicit "Googlebot-Image/News/Video" product variants do.
+# Matching is case-insensitive, like the versioned classifier.
 _TOKEN_RES: tuple[tuple[re.Pattern[str], str], ...] = tuple(
     (
-        re.compile(r"(?<![A-Za-z0-9])" + re.escape(token) + r"(?![A-Za-z0-9])", re.IGNORECASE),
+        re.compile(
+            r"(?<![A-Za-z0-9_-])" + re.escape(token) + r"(?![A-Za-z0-9_-])",
+            re.IGNORECASE,
+        ),
         provider,
     )
     for token, provider in KNOWN_CONFLICT_IDENTITIES

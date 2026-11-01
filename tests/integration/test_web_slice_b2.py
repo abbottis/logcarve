@@ -142,7 +142,7 @@ def test_bot_groups_exact_and_pagination_independent(web):
     _login(client)
     base = f"site=default&{WINDOW_QS}&tz=UTC"
     page = client.get(f"/crawlers?{base}").text
-    assert "Bots by category, provider and purpose" in page
+    assert "Bots and automation by category, provider and purpose" in page
     assert "configured catalog claims" in page
     assert 'id="bot-provider-groups-data"' in page
     # Grouped shares ignore the table page limit/offset exactly.
