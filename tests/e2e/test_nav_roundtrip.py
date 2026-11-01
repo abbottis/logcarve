@@ -28,6 +28,7 @@ ENTRIES = [
     ("/security", "Security"),
     ("/crawlers", "Crawlers"),
     ("/errors", "Errors"),
+    ("/requests", "Requests"),
     ("/ask", "Ask AI"),
     ("/settings", "Settings"),
     ("/data-sources", "Data Sources"),

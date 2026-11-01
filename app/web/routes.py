@@ -20,8 +20,11 @@ from fastapi.templating import Jinja2Templates
 from pydantic import ValidationError
 
 from app.analytics import queries, service
+from app.analytics.classification import build_classifier, resolve_selector_indexes
 from app.analytics.contracts import (
     AnalyticsFilter,
+    BotTableQuery,
+    ExplorerQuery,
     TimeWindow,
     TopPathsQuery,
     TopReferrersQuery,
@@ -189,12 +192,57 @@ def _parse_matchers(q) -> tuple[dict | None, str | None]:
     referer_host = (q.get("referer_host") or "").strip() or None
     if referer_host is not None and len(referer_host) > 253:
         return None, "error.bad_params"
+    status_class = (q.get("status_class") or "").strip() or None
+    if status_class is not None and status_class not in ("2xx", "3xx", "4xx", "5xx"):
+        return None, "error.bad_params"
+    traffic = (q.get("traffic") or "").strip() or None
+    if traffic is not None and traffic not in (
+        "all",
+        "browser_like",
+        "claimed_bot",
+        "other_automation",
+        "unknown",
+    ):
+        return None, "error.bad_params"
+    selectors: dict[str, object] = {}
+    for name, bound in (
+        ("bot", 64),
+        ("category", 64),
+        ("provider", 120),
+        ("purpose", 120),
+    ):
+        value = (q.get(name) or "").strip() or None
+        if value is not None and (len(value) > bound or not value.isascii()):
+            return None, "error.bad_params"
+        selectors[name] = value
+    # Bounded LogWerk-style text search over stored sanitized fields.
+    # LIKE metacharacters are escaped downstream; control characters and
+    # DEL are rejected so the value always replays as plain text.
+    search = (q.get("search") or "").strip() or None
+    if search is not None and (
+        len(search) > 128 or any(ord(char) < 0x20 or ord(char) == 0x7F for char in search)
+    ):
+        return None, "error.bad_params"
     return {
         "method": raw_method,
         "status": status,
+        "status_class": status_class,
         "path_prefix": path_prefix,
         "referer_host": referer_host,
+        "traffic": traffic,
+        "search": search,
+        **selectors,
     }, None
+
+
+def _parse_sort(q, allowed: tuple[str, ...], default: str) -> tuple[str | None, str | None]:
+    """Allowlisted sort key; unknown values reject instead of defaulting."""
+    raw = (q.get("sort") or "").strip() or None
+    if raw is None:
+        return default, None
+    if raw not in allowed:
+        return None, "error.bad_params"
+    return raw, None
 
 
 def _parse_paging(q, default: int = 20) -> tuple[dict | None, str | None]:
@@ -293,16 +341,43 @@ def _checked_base_filter(params, site: str) -> AnalyticsFilter:
         raise _InvalidFilter from exc
 
 
+def _checked_selectors(filt: AnalyticsFilter, rules) -> None:
+    """Validate named selectors against the versioned rules; 400 on unknown.
+
+    Unknown bots/providers/purposes or contradictory combinations are
+    client input, so they map to the safe filter error instead of 500.
+    """
+    try:
+        clf = build_classifier(list(rules))
+        resolve_selector_indexes(
+            clf,
+            bot=filt.bot,
+            category=filt.category,
+            provider=filt.provider,
+            purpose=filt.purpose,
+        )
+    except ValueError as exc:
+        raise _InvalidFilter from exc
+
+
 def _base_filter(params, site: str) -> AnalyticsFilter:
     """Window-level event filter: matchers apply, paging never does."""
+    matchers = params["matchers"]
     return AnalyticsFilter(
         site_id=site,
         window=params["window"],
         source_id=params["source"],
-        method=params["matchers"]["method"],
-        status=params["matchers"]["status"],
-        path_prefix=params["matchers"]["path_prefix"],
-        referer_host=params["matchers"]["referer_host"],
+        method=matchers["method"],
+        status=matchers["status"],
+        status_class=matchers.get("status_class"),
+        path_prefix=matchers["path_prefix"],
+        referer_host=matchers["referer_host"],
+        search=matchers.get("search"),
+        traffic=matchers.get("traffic") or "all",
+        bot=matchers.get("bot"),
+        category=matchers.get("category"),
+        provider=matchers.get("provider"),
+        purpose=matchers.get("purpose"),
         limit=100,
         offset=0,
     )
@@ -318,7 +393,7 @@ def _source_or_error(conn, site: str, source: str | None) -> str | None:
     return None if row else "error.bad_params"
 
 
-def _overview_context(conn, rules, params) -> tuple[dict | None, str | None]:
+def _overview_context(request, conn, rules, params) -> tuple[dict | None, str | None]:
     site, sites, error = _site_or_error(conn, params)
     if error is not None:
         return None, error
@@ -326,16 +401,28 @@ def _overview_context(conn, rules, params) -> tuple[dict | None, str | None]:
     if error is not None:
         return None, error
     try:
-        filt = _checked_base_filter(params, site)
+        context = _base_context(request, params, site, sites, "/", rules)
     except _InvalidFilter:
         return None, "error.bad_params"
-    summary = service.summarize(conn, filt)
+    filt = context["filt"]
+    summary = service.summarize(conn, filt, rules)
     span = params["window"].time_to - params["window"].time_from
     bucket = params["bucket"] or ("day" if span > timedelta(hours=48) else "hour")
-    series = service.timeseries(conn, filt, bucket)
+    series = service.timeseries(conn, filt, bucket, rules)
     table_filt = filt.model_copy(update={"limit": params["limit"], "offset": params["offset"]})
-    top_paths = service.top_paths(conn, TopPathsQuery(filt=table_filt))
-    top_referrers = service.top_referrers(conn, TopReferrersQuery(filt=table_filt))
+    clients_filt = filt.model_copy(update={"limit": 10, "offset": 0})
+    top_paths = service.top_paths(conn, TopPathsQuery(filt=table_filt), rules)
+    top_referrers = service.top_referrers(conn, TopReferrersQuery(filt=table_filt), rules)
+    traffic = service.traffic_breakdown(conn, filt, rules)
+    resources = service.resource_breakdown(conn, filt, rules)
+    browsers = service.browser_breakdown(conn, filt, rules)
+    try:
+        heatmap = service.heatmap(conn, filt, rules, tz_name=params["tz_name"])
+        heatmap_error = None
+    except ValueError:
+        heatmap = None
+        heatmap_error = "overview.heatmap_unavailable"
+    clients = service.client_top(conn, clients_filt, rules)
     claims = service.crawler_claims(conn, filt, rules)[:5]
     findings = service.security_findings(conn, filt, rules)[:5]
     totals = summary["totals"]
@@ -355,37 +442,31 @@ def _overview_context(conn, rules, params) -> tuple[dict | None, str | None]:
         }
         for b in series["buckets"]
     ]
-    return {
-        "t": t,
-        "sites": [{"id": row[0], "name": row[1]} for row in sites],
-        "site": site,
-        "range": params["range"],
-        "tz_name": params["tz_name"],
-        "display_from": params["display_from"],
-        "display_to": params["display_to"],
-        "window_from": filt.window.time_from.isoformat(),
-        "window_to": filt.window.time_to.isoformat(),
-        "canonical_url": _canonical("/", params, site),
-        "nav_query": _nav_query(params, site),
-        "fragment_url": "/partials/overview",
-        "page_url": lambda path, **overrides: _page_url(path, params, site, **overrides),
-        "evidence_url": _evidence_url,
-        "matchers": {k: v for k, v in params["matchers"].items() if v is not None},
-        "params_source": params["source"],
-        "summary": summary,
-        "totals": totals,
-        "error_share": error_share,
-        "top_claim": top_claim,
-        "timeline": timeline,
-        "status_rows": summary["status_distribution"],
-        "paths": top_paths,
-        "referrers": top_referrers,
-        "claims": claims,
-        "findings": findings,
-        "bucket": bucket,
-        "limit": params["limit"],
-        "offset": params["offset"],
-    }, None
+    context.update(
+        {
+            "fragment_url": "/partials/overview",
+            "summary": summary,
+            "totals": totals,
+            "error_share": error_share,
+            "top_claim": top_claim,
+            "timeline": timeline,
+            "bucket": bucket,
+            "status_rows": summary["status_distribution"],
+            "paths": top_paths,
+            "referrers": top_referrers,
+            "traffic": traffic,
+            "resources": resources,
+            "browsers": browsers,
+            "heatmap": heatmap,
+            "heatmap_error": heatmap_error,
+            "heatmap_hours": list(range(24)),
+            "heatmap_days": list(range(7)),
+            "clients": clients,
+            "claims": claims,
+            "findings": findings,
+        }
+    )
+    return context, None
 
 
 def _error_page(request: Request, key: str, status: int) -> HTMLResponse:
@@ -416,7 +497,7 @@ def overview_page(request: Request):
     if error is not None:
         return _error_page(request, error, 400)
     with read_store(request) as conn:
-        context, error = _overview_context(conn, request.app.state.rules, params)
+        context, error = _overview_context(request, conn, request.app.state.rules, params)
     if error is not None:
         return _error_page(request, error, 400 if error != "error.unknown_site" else 404)
     context["request"] = request
@@ -436,7 +517,7 @@ def overview_partial(request: Request):
             f'<p class="alert alert-error" role="alert">{t(error)}</p>', status_code=400
         )
     with read_store(request) as conn:
-        context, error = _overview_context(conn, request.app.state.rules, params)
+        context, error = _overview_context(request, conn, request.app.state.rules, params)
     if error is not None:
         return HTMLResponse(
             f'<p class="alert alert-error" role="alert">{t(error)}</p>', status_code=400
@@ -450,9 +531,38 @@ def overview_partial(request: Request):
     return response
 
 
-def _base_context(request: Request, params, site: str, sites, path: str) -> dict:
+def _filter_options(rules) -> dict:
+    """Select options for the traffic/bot filter controls (server-built).
+
+    Options come from the versioned rule catalog so the bar can only
+    submit values the backend accepts; unknown values still 400.
+    """
+    bots = [rule for rule in rules if rule.ua_contains or rule.ua_regex]
+    categories = sorted({rule.category for rule in bots})
+    providers = sorted({rule.provider for rule in bots if rule.provider})
+    purposes = sorted({rule.purpose for rule in bots if rule.purpose})
+    return {
+        "traffic": ["all", "browser_like", "claimed_bot", "other_automation", "unknown"],
+        "status_classes": ["all", "2xx", "3xx", "4xx", "5xx"],
+        "bots": [
+            {
+                "id": rule.id,
+                "title": rule.title,
+                "category": rule.category,
+                "provider": rule.provider,
+            }
+            for rule in bots
+        ],
+        "categories": categories,
+        "providers": providers,
+        "purposes": purposes,
+    }
+
+
+def _base_context(request: Request, params, site: str, sites, path: str, rules=None) -> dict:
     """Shell context shared by every data page (single filter source)."""
     filt = _checked_base_filter(params, site)
+    _checked_selectors(filt, rules)
     return {
         "t": t,
         "request": request,
@@ -474,6 +584,7 @@ def _base_context(request: Request, params, site: str, sites, path: str) -> dict
         "limit": params["limit"],
         "offset": params["offset"],
         "filt": filt,
+        "filter_options": _filter_options(rules),
     }
 
 
@@ -509,12 +620,21 @@ def _finding_view(site: str, filt: AnalyticsFilter, finding: Finding) -> dict:
     return view
 
 
-def _paging_nav(path: str, params, site: str, total: int) -> dict:
-    """Bounded offset navigation state for large tables."""
+def _paging_nav(path: str, params, site: str, total: int, extra: dict | None = None) -> dict:
+    """Bounded offset navigation state for large tables.
+
+    ``extra`` carries page-local state (such as a table sort) that is
+    not part of the shared window params but must survive paging.
+    """
     offset, limit = params["offset"], params["limit"]
-    prev_url = _page_url(path, params, site, offset=max(offset - limit, 0)) if offset > 0 else None
+    keep = dict(extra or {})
+    prev_url = (
+        _page_url(path, params, site, offset=max(offset - limit, 0), **keep) if offset > 0 else None
+    )
     next_url = (
-        _page_url(path, params, site, offset=offset + limit) if offset + limit < total else None
+        _page_url(path, params, site, offset=offset + limit, **keep)
+        if offset + limit < total
+        else None
     )
     return {
         "total": total,
@@ -543,11 +663,11 @@ def _security_context(request: Request, conn, params):
     if error is not None:
         return None, error
     try:
-        context = _base_context(request, params, site, sites, "/security")
+        context = _base_context(request, params, site, sites, "/security", request.app.state.rules)
     except _InvalidFilter:
         return None, "error.bad_params"
     filt = context["filt"]
-    summary = service.summarize(conn, filt)
+    summary = service.summarize(conn, filt, request.app.state.rules)
     findings_all = service.security_findings(conn, filt, request.app.state.rules)
     offset, limit = params["offset"], params["limit"]
     items = [
@@ -578,25 +698,41 @@ def _crawlers_context(request: Request, conn, params):
     if error is not None:
         return None, error
     try:
-        context = _base_context(request, params, site, sites, "/crawlers")
+        context = _base_context(request, params, site, sites, "/crawlers", request.app.state.rules)
     except _InvalidFilter:
         return None, "error.bad_params"
     filt = context["filt"]
-    summary = service.summarize(conn, filt)
-    details = service.crawler_details(conn, filt, request.app.state.rules)
-    robots = queries.summary_counts(
-        conn, filt.model_copy(update={"path_prefix": "/robots.txt", "limit": 100, "offset": 0})
+    summary = service.summarize(conn, filt, request.app.state.rules)
+    sort, error = _parse_sort(
+        request.query_params,
+        ("requests_desc", "name_asc", "category_asc", "errors_desc", "bytes_desc"),
+        "requests_desc",
     )
-    sitemap = queries.summary_counts(
-        conn, filt.model_copy(update={"path_prefix": "/sitemap.xml", "limit": 100, "offset": 0})
+    if error is not None:
+        return None, error
+    page_filt = filt.model_copy(update={"limit": params["limit"], "offset": params["offset"]})
+    table = service.bot_table(
+        conn, BotTableQuery(filt=page_filt, sort=sort), request.app.state.rules
     )
+    details = {
+        item["rule_id"]: item
+        for item in service.crawler_details(conn, filt, request.app.state.rules)
+    }
+    for row in table["items"]:
+        row["detail"] = details.get(row["rule_id"])
+    clf = service.classifier_for_filter(filt, request.app.state.rules)
+    robots_requests = queries.scoped_path_count(conn, filt, clf, path="/robots.txt")
+    sitemap_requests = queries.scoped_path_count(conn, filt, clf, path_prefix="/sitemap.xml")
     context.update(
         {
             "summary": summary,
             "totals": summary["totals"],
+            "table": table,
+            "bots_sort": sort,
             "details": details,
-            "robots_requests": robots["requests"],
-            "sitemap_requests": sitemap["requests"],
+            "robots_requests": robots_requests,
+            "sitemap_requests": sitemap_requests,
+            "paging": _paging_nav("/crawlers", params, site, table["total_rules"], {"sort": sort}),
             "fragment_url": "/partials/crawlers",
         }
     )
@@ -611,20 +747,55 @@ def _errors_context(request: Request, conn, params):
     if error is not None:
         return None, error
     try:
-        context = _base_context(request, params, site, sites, "/errors")
+        context = _base_context(request, params, site, sites, "/errors", request.app.state.rules)
     except _InvalidFilter:
         return None, "error.bad_params"
     filt = context["filt"]
     page_filt = filt.model_copy(update={"limit": params["limit"], "offset": params["offset"]})
-    groups, total = queries.error_groups(conn, page_filt)
-    summary = service.summarize(conn, filt)
+    table = service.error_groups(conn, page_filt, request.app.state.rules)
+    summary = service.summarize(conn, filt, request.app.state.rules)
     context.update(
         {
             "summary": summary,
             "totals": summary["totals"],
-            "groups": groups,
-            "paging": _paging_nav("/errors", params, site, total),
+            "groups": table["items"],
+            "paging": _paging_nav("/errors", params, site, table["total_groups"]),
             "fragment_url": "/partials/errors",
+        }
+    )
+    return context, None
+
+
+def _requests_context(request: Request, conn, params):
+    site, sites, error = _site_or_error(conn, params)
+    if error is not None:
+        return None, error
+    error = _source_or_error(conn, site, params["source"])
+    if error is not None:
+        return None, error
+    try:
+        context = _base_context(request, params, site, sites, "/requests", request.app.state.rules)
+    except _InvalidFilter:
+        return None, "error.bad_params"
+    filt = context["filt"]
+    sort, error = _parse_sort(request.query_params, ("newest", "oldest"), "newest")
+    if error is not None:
+        return None, error
+    page_filt = filt.model_copy(update={"limit": params["limit"], "offset": params["offset"]})
+    explorer = service.request_explorer(
+        conn, ExplorerQuery(filt=page_filt, sort=sort), request.app.state.rules
+    )
+    summary = service.summarize(conn, filt, request.app.state.rules)
+    context.update(
+        {
+            "summary": summary,
+            "totals": summary["totals"],
+            "rows": explorer["items"],
+            "explorer_sort": sort,
+            "paging": _paging_nav(
+                "/requests", params, site, explorer["total_rows"], {"sort": sort}
+            ),
+            "fragment_url": "/partials/requests",
         }
     )
     return context, None
@@ -641,11 +812,11 @@ def _ask_context(request: Request, conn, params):
     if error is not None:
         return None, error
     try:
-        context = _base_context(request, params, site, sites, "/ask")
+        context = _base_context(request, params, site, sites, "/ask", request.app.state.rules)
     except _InvalidFilter:
         return None, "error.bad_params"
     filt = context["filt"]
-    summary = service.summarize(conn, filt)
+    summary = service.summarize(conn, filt, request.app.state.rules)
     settings = load_settings()
     starters = [
         {
@@ -869,6 +1040,43 @@ def errors_partial(request: Request):
             f'<p class="alert alert-error" role="alert">{t(error)}</p>', status_code=400
         )
     response = templates.TemplateResponse(request, "partials/errors_content.html", context)
+    response.headers["HX-Push-Url"] = context["canonical_url"]
+    return response
+
+
+@router.get("/requests", response_class=HTMLResponse)
+def requests_page(request: Request):
+    params, gate = _data_page(request)
+    if gate == "redirect":
+        return _redirect_to_login(request)
+    if gate is not None:
+        return _error_page(request, gate, 400)
+    with read_store(request) as conn:
+        context, error = _requests_context(request, conn, params)
+    if error is not None:
+        return _error_page(request, error, 400 if error != "error.unknown_site" else 404)
+    return templates.TemplateResponse(request, "pages/requests.html", context)
+
+
+@router.get("/partials/requests", response_class=HTMLResponse)
+def requests_partial(request: Request):
+    if _session_or_none(request) is None:
+        return HTMLResponse(
+            f'<p class="alert alert-warning" role="alert">{t("auth.login.title")}</p>',
+            status_code=401,
+        )
+    params, gate = _data_page(request)
+    if gate is not None:
+        return HTMLResponse(
+            f'<p class="alert alert-error" role="alert">{t(gate)}</p>', status_code=400
+        )
+    with read_store(request) as conn:
+        context, error = _requests_context(request, conn, params)
+    if error is not None:
+        return HTMLResponse(
+            f'<p class="alert alert-error" role="alert">{t(error)}</p>', status_code=400
+        )
+    response = templates.TemplateResponse(request, "partials/requests_content.html", context)
     response.headers["HX-Push-Url"] = context["canonical_url"]
     return response
 

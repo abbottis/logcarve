@@ -18,71 +18,81 @@
   </div>
 </section>
 
-<section class="card mt-6 bg-base-100 shadow" aria-labelledby="crawl-fam-h">
+<section class="card mt-6 bg-base-100 shadow" aria-labelledby="bots-h">
   <div class="card-body">
-    <h2 id="crawl-fam-h" class="card-title text-base">{{ t("crawlers.families") }}</h2>
-    {% if details %}
-    <ul class="space-y-4">
-      {% for family in details %}
-      <li class="rounded-lg border border-base-300 p-3">
-        <p class="font-medium">{{ family.title }}</p>
-        <p class="text-sm text-base-content/70">
-          <span class="tech">{{ family.rule_id }} v{{ family.rule_version }}</span>
-          · {{ t("crawler.claimed") }}
-          · <span class="tech">{{ family.requests }}</span> {{ t("table.requests") | lower }}
-          · <span class="tech">{{ family.distinct_agents }}</span> {{ t("crawlers.agents") | lower }}
-        </p>
-        <p class="mt-1 text-sm">{{ family.meaning }}</p>
-        {% if family.top_agents %}
-        <h3 class="mt-2 text-sm font-medium">{{ t("crawlers.agents_sample", shown=family.agents_shown, total=family.agents_total) }}</h3>
-        <ul class="mt-1 space-y-1">
-          {% for agent in family.top_agents %}
-          <li class="tech break-all text-sm">{{ agent }}</li>
+    <h2 id="bots-h" class="card-title text-base">{{ t("crawlers.table") }}</h2>
+    {% if table["items"] %}
+    <div class="table-scroll overflow-x-auto">
+      <table class="table table-sm">
+        <caption class="sr-only">{{ t("crawlers.table") }}</caption>
+        <thead><tr>
+          <th scope="col" {% if bots_sort == "name_asc" %}aria-sort="ascending"{% endif %}><a href="{{ page_url("/crawlers", sort="name_asc", offset=0) }}">{{ t("table.rule") }}</a></th>
+          <th scope="col" {% if bots_sort == "category_asc" %}aria-sort="ascending"{% endif %}><a href="{{ page_url("/crawlers", sort="category_asc", offset=0) }}">{{ t("filter.category") }}</a></th>
+          <th scope="col" class="text-right" {% if bots_sort == "requests_desc" %}aria-sort="descending"{% endif %}><a href="{{ page_url("/crawlers", sort="requests_desc", offset=0) }}">{{ t("table.requests") }}</a></th>
+          <th scope="col" class="text-right" {% if bots_sort == "errors_desc" %}aria-sort="descending"{% endif %}><a href="{{ page_url("/crawlers", sort="errors_desc", offset=0) }}">{{ t("crawlers.errors") }}</a></th>
+          <th scope="col" class="text-right" {% if bots_sort == "bytes_desc" %}aria-sort="descending"{% endif %}><a href="{{ page_url("/crawlers", sort="bytes_desc", offset=0) }}">{{ t("crawlers.bytes") }}</a></th>
+        </tr></thead>
+        <tbody>
+          {% for row in table["items"] %}
+          <tr>
+            <td>
+              <details>
+                <summary class="cursor-pointer font-medium">{{ row.title }} <span class="tech text-sm text-base-content/70">{{ row.rule_id }} v{{ row.rule_version }}</span></summary>
+                <div class="mt-2 rounded-lg border border-base-300 p-3 text-sm">
+                  <p class="text-base-content/70">{{ row.meaning }}</p>
+                  <dl class="mt-2 flex flex-wrap gap-x-6 gap-y-1">
+                    <div><dt class="inline text-base-content/70">{{ t("crawlers.provider") }}: </dt><dd class="inline tech">{{ row.provider or "—" }}</dd></div>
+                    <div><dt class="inline text-base-content/70">{{ t("crawlers.purpose") }}: </dt><dd class="inline tech">{{ row.purpose or "—" }}</dd></div>
+                    <div><dt class="inline text-base-content/70">{{ t("crawlers.traffic") }}: </dt><dd class="inline tech">{{ t("traffic." + row.traffic) }}</dd></div>
+                    <div><dt class="inline text-base-content/70">{{ t("crawlers.agents") }}: </dt><dd class="inline tech">{{ row.distinct_agents }}</dd></div>
+                  </dl>
+                  {% if row.detail %}
+                  {% if row.detail.top_agents %}
+                  <h3 class="mt-3 font-medium">{{ t("crawlers.agents_sample", shown=row.detail.agents_shown, total=row.detail.agents_total) }}</h3>
+                  <ul class="mt-1 space-y-1">
+                    {% for agent in row.detail.top_agents %}
+                    <li class="tech break-all text-sm">{{ agent }}</li>
+                    {% endfor %}
+                  </ul>
+                  {% endif %}
+                  {% if row.detail.top_paths %}
+                  <h3 class="mt-3 font-medium">{{ t("crawlers.top_paths") }}</h3>
+                  <ul class="mt-1 space-y-1">
+                    {% for path_row in row.detail.top_paths %}
+                    <li class="tech break-all">{{ path_row.path }} · {{ path_row.status }} · {{ path_row.requests }}</li>
+                    {% endfor %}
+                  </ul>
+                  {% endif %}
+                  {% if row.detail.not_found %}
+                  <h3 class="mt-3 font-medium">{{ t("crawlers.not_found") }}</h3>
+                  <ul class="mt-1 space-y-1">
+                    {% for path_row in row.detail.not_found %}
+                    <li class="tech break-all">{{ path_row.path }} · {{ path_row.requests }}</li>
+                    {% endfor %}
+                  </ul>
+                  {% endif %}
+                  {% if row.detail.limitations %}
+                  <h3 class="mt-3 font-medium">{{ t("finding.limitations") }}</h3>
+                  <ul class="list-disc space-y-1 pl-5 text-sm text-base-content/70">
+                    {% for limitation in row.detail.limitations %}
+                    <li>{{ limitation }}</li>
+                    {% endfor %}
+                  </ul>
+                  {% endif %}
+                  {% endif %}
+                </div>
+              </details>
+            </td>
+            <td class="tech">{{ row.category }}</td>
+            <td class="text-right tech">{{ row.requests }}</td>
+            <td class="text-right tech">{{ row.errors_4xx + row.errors_5xx }}</td>
+            <td class="text-right tech">{{ row.bytes_total }}</td>
+          </tr>
           {% endfor %}
-        </ul>
-        {% endif %}
-        {% if family.paths_truncated %}
-        <p class="mt-1 text-sm text-base-content/70" role="note">{{ t("crawlers.paths_truncated", cap=family.paths_agent_cap) }}</p>
-        {% endif %}
-        {% if family.top_paths %}
-        <h3 class="mt-2 text-sm font-medium">{{ t("crawlers.top_paths") }}</h3>
-        <div class="table-scroll overflow-x-auto">
-          <table class="table table-sm">
-            <caption class="sr-only">{{ family.title }} — {{ t("crawlers.top_paths") }}</caption>
-            <thead><tr><th scope="col">{{ t("table.path") }}</th><th scope="col">{{ t("table.status") }}</th><th scope="col" class="text-right">{{ t("table.requests") }}</th></tr></thead>
-            <tbody>
-              {% for row in family.top_paths %}
-              <tr><td class="tech break-all">{{ row.path }}</td><td class="tech">{{ row.status }}</td><td class="text-right tech">{{ row.requests }}</td></tr>
-              {% endfor %}
-            </tbody>
-          </table>
-        </div>
-        {% endif %}
-        {% if family.not_found %}
-        <h3 class="mt-2 text-sm font-medium">{{ t("crawlers.not_found") }}</h3>
-        <div class="table-scroll overflow-x-auto">
-          <table class="table table-sm">
-            <caption class="sr-only">{{ family.title }} — {{ t("crawlers.not_found") }}</caption>
-            <thead><tr><th scope="col">{{ t("table.path") }}</th><th scope="col" class="text-right">{{ t("table.requests") }}</th></tr></thead>
-            <tbody>
-              {% for row in family.not_found %}
-              <tr><td class="tech break-all">{{ row.path }}</td><td class="text-right tech">{{ row.requests }}</td></tr>
-              {% endfor %}
-            </tbody>
-          </table>
-        </div>
-        {% endif %}
-        {% if family.limitations %}
-        <h3 class="mt-2 text-sm font-medium">{{ t("finding.limitations") }}</h3>
-        <ul class="list-disc space-y-1 pl-5 text-sm text-base-content/70">
-          {% for limitation in family.limitations %}
-          <li>{{ limitation }}</li>
-          {% endfor %}
-        </ul>
-        {% endif %}
-      </li>
-      {% endfor %}
-    </ul>
+        </tbody>
+      </table>
+    </div>
+    {% include "partials/paging.html" %}
     {% else %}
     <p class="text-sm text-base-content/70" role="status">{{ t("crawlers.no_claims") }}</p>
     {% endif %}

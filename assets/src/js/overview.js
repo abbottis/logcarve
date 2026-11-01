@@ -101,6 +101,48 @@
         options: baseOptions(false),
       }));
     }
+    var breakdownCanvas = document.getElementById("traffic-breakdown");
+    var breakdown = readData("traffic-breakdown-data");
+    if (breakdownCanvas && breakdown) {
+      var buckets = breakdown.buckets || [];
+      charts.push(new window.Chart(breakdownCanvas, {
+        type: "doughnut",
+        data: {
+          labels: buckets.map(function (b) { return b.traffic; }),
+          datasets: [
+            {
+              label: breakdown.requestsLabel || "Requests",
+              data: buckets.map(function (b) { return b.requests; }),
+            },
+          ],
+        },
+        options: {
+          responsive: true,
+          maintainAspectRatio: false,
+          plugins: { legend: { display: true, labels: { color: colors.tick } } },
+        },
+      }));
+    }
+    var browserCanvas = document.getElementById("browser-families");
+    var browserData = readData("browser-families-data");
+    if (browserCanvas && browserData) {
+      var families = browserData.rows || [];
+      var labelKey = browserData.labelKey || "family";
+      charts.push(new window.Chart(browserCanvas, {
+        type: "bar",
+        data: {
+          labels: families.map(function (r) { return String(r[labelKey]); }),
+          datasets: [
+            {
+              label: browserData.requestsLabel || "Requests",
+              data: families.map(function (r) { return r.requests; }),
+              backgroundColor: colors.line,
+            },
+          ],
+        },
+        options: baseOptions(false),
+      }));
+    }
   }
 
   // Re-render on viewport changes: a canvas sized for a wide layout

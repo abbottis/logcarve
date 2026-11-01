@@ -92,6 +92,11 @@ def _needs_classifier(filt: AnalyticsFilter) -> bool:
     )
 
 
+def classifier_for_filter(filt: AnalyticsFilter, rules: list[Rule] | None) -> Classifier | None:
+    """Public read-only classifier for dashboard query composition."""
+    return _classifier_for(filt, rules)
+
+
 def _classifier_for(filt: AnalyticsFilter, rules: list[Rule] | None) -> Classifier | None:
     """Versioned classifier for selector filters; None when unneeded.
 
@@ -319,6 +324,7 @@ def crawler_details(
         sample = queries.bot_sample_agents(conn, filt, clf, index, limit=10)
         top_paths = queries.bot_top_paths(conn, filt, clf, index, limit=10)
         not_found = queries.bot_top_paths(conn, filt, clf, index, status=404, limit=10)
+        narrowed = filt.model_copy(update={"bot": rule.id, "limit": 100, "offset": 0})
         details.append(
             {
                 "rule_id": rule.id,
@@ -327,6 +333,9 @@ def crawler_details(
                 "title": rule.title,
                 "severity": rule.severity,
                 "meaning": rule.meaning,
+                "provider": rule.provider,
+                "purpose": rule.purpose,
+                "traffic": clf.traffic[index],
                 "requests": int(stats["requests"]),
                 "distinct_agents": int(stats["distinct_agents"]),
                 "agents_truncated": False,
@@ -337,6 +346,12 @@ def crawler_details(
                 "not_found": not_found,
                 "paths_truncated": False,
                 "paths_agent_cap": None,
+                "robots_requests": queries.scoped_path_count(
+                    conn, narrowed, clf, path="/robots.txt"
+                ),
+                "sitemap_requests": queries.scoped_path_count(
+                    conn, narrowed, clf, path_prefix="/sitemap"
+                ),
                 "limitations": [*LIMITATIONS_BOT, *LIMITATIONS_LOGS],
             }
         )

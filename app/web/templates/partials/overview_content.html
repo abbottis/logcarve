@@ -122,6 +122,131 @@
   </section>
 </div>
 
+<div class="mt-6 grid gap-6 xl:grid-cols-2">
+  <section class="card bg-base-100 shadow" aria-labelledby="traffic-type-h">
+    <div class="card-body">
+      <h2 id="traffic-type-h" class="card-title text-base">{{ t("overview.traffic_breakdown") }}</h2>
+      <div class="chart-frame"><canvas id="traffic-breakdown" aria-label="{{ t("overview.traffic_breakdown") }}" role="img"></canvas></div>
+      <script id="traffic-breakdown-data" type="application/json">{{ {"buckets": traffic["buckets"], "requestsLabel": t("table.requests")} | tojson }}</script>
+      <div class="table-scroll overflow-x-auto">
+        <table class="table table-sm">
+          <caption class="sr-only">{{ t("overview.traffic_breakdown") }}</caption>
+          <thead><tr><th scope="col">{{ t("filter.traffic") }}</th><th scope="col" class="text-right">{{ t("table.requests") }}</th><th scope="col" class="text-right">{{ t("table.errors") }}</th></tr></thead>
+          <tbody>
+            {% for bucket in traffic["buckets"] %}
+            <tr><td>{{ t("traffic." + bucket.traffic) }}</td><td class="text-right tech">{{ bucket.requests }}</td><td class="text-right tech">{{ bucket.errors_4xx + bucket.errors_5xx }}</td></tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+    </div>
+  </section>
+  <section class="card bg-base-100 shadow" aria-labelledby="resource-h">
+    <div class="card-body">
+      <h2 id="resource-h" class="card-title text-base">{{ t("overview.resources") }}</h2>
+      <div class="table-scroll overflow-x-auto">
+        <table class="table table-sm">
+          <caption class="sr-only">{{ t("overview.resources") }}</caption>
+          <thead><tr><th scope="col">{{ t("table.detail") }}</th><th scope="col" class="text-right">{{ t("table.requests") }}</th><th scope="col" class="text-right">{{ t("table.errors") }}</th></tr></thead>
+          <tbody>
+            {% for item in resources["items"] %}
+            <tr><td class="tech">{{ item.kind }}</td><td class="text-right tech">{{ item.requests }}</td><td class="text-right tech">{{ item.errors }}</td></tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+    </div>
+  </section>
+</div>
+
+<div class="mt-6 grid gap-6 xl:grid-cols-2">
+  <section class="card bg-base-100 shadow" aria-labelledby="browser-h">
+    <div class="card-body">
+      <h2 id="browser-h" class="card-title text-base">{{ t("overview.browsers") }}</h2>
+      <div class="chart-frame"><canvas id="browser-families" aria-label="{{ t("overview.browsers") }}" role="img"></canvas></div>
+      <script id="browser-families-data" type="application/json">{{ {"rows": browsers["families"], "labelKey": "family", "requestsLabel": t("table.requests")} | tojson }}</script>
+      <div class="table-scroll overflow-x-auto">
+        <table class="table table-sm">
+          <caption class="sr-only">{{ t("overview.browsers") }}</caption>
+          <thead><tr><th scope="col">{{ t("table.family") }}</th><th scope="col" class="text-right">{{ t("table.requests") }}</th></tr></thead>
+          <tbody>
+            {% for row in browsers["families"] %}
+            <tr><td>{{ row.family }}</td><td class="text-right tech">{{ row.requests }}</td></tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+      <h3 class="mt-4 text-sm font-medium">{{ t("overview.os") }}</h3>
+      <div class="table-scroll overflow-x-auto">
+        <table class="table table-sm">
+          <caption class="sr-only">{{ t("overview.os") }}</caption>
+          <thead><tr><th scope="col">{{ t("table.value") }}</th><th scope="col" class="text-right">{{ t("table.requests") }}</th></tr></thead>
+          <tbody>
+            {% for row in browsers["systems"] %}
+            <tr><td>{{ row.os }}</td><td class="text-right tech">{{ row.requests }}</td></tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+    </div>
+  </section>
+  <section class="card bg-base-100 shadow" aria-labelledby="clients-h">
+    <div class="card-body">
+      <h2 id="clients-h" class="card-title text-base">{{ t("overview.clients") }}</h2>
+      <div class="table-scroll overflow-x-auto">
+        <table class="table table-sm">
+          <caption class="sr-only">{{ t("overview.clients") }}</caption>
+          <thead><tr><th scope="col">{{ t("finding.client_pseudonym") }}</th><th scope="col" class="text-right">{{ t("table.requests") }}</th><th scope="col" class="text-right">{{ t("table.errors") }}</th><th scope="col" class="text-right">{{ t("table.paths") }}</th></tr></thead>
+          <tbody>
+            {% for row in clients["items"] %}
+            <tr><td class="tech break-all">{{ row.client_pseudonym }}</td><td class="text-right tech">{{ row.requests }}</td><td class="text-right tech">{{ row.errors }}</td><td class="text-right tech">{{ row.paths }}</td></tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+    </div>
+  </section>
+</div>
+
+<section class="card mt-6 bg-base-100 shadow" aria-labelledby="heat-h">
+  <div class="card-body">
+    <h2 id="heat-h" class="card-title text-base">{{ t("overview.heatmap") }} ({{ heatmap.timezone if heatmap else tz_name }})</h2>
+    {% if heatmap %}
+    <div class="table-scroll overflow-x-auto">
+      <table class="table table-sm">
+        <caption class="sr-only">{{ t("overview.heatmap") }}</caption>
+        <thead><tr><th scope="col"></th>{% for hour in heatmap_hours %}<th scope="col" class="text-right tech">{{ hour }}</th>{% endfor %}</tr></thead>
+        <tbody>
+          {% for day in heatmap_days %}
+          <tr><th scope="row">{{ t("overview.weekday_" + (day + 1) | string) }}</th>{% for hour in heatmap_hours %}<td class="text-right tech">{{ heatmap.matrix[day][hour] }}</td>{% endfor %}</tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+    {% else %}
+    <p class="text-sm text-base-content/70" role="note">{{ t("overview.heatmap_unavailable") }}</p>
+    {% endif %}
+  </div>
+</section>
+
+{% if claims %}
+<section class="card mt-6 bg-base-100 shadow" aria-labelledby="bots-h">
+  <div class="card-body">
+    <h2 id="bots-h" class="card-title text-base">{{ t("overview.claimed_bots") }}</h2>
+    <ul class="space-y-2">
+      {% for claim in claims %}
+      <li class="flex flex-wrap items-baseline gap-x-3 rounded-lg border border-base-300 p-3">
+        <a class="font-medium link" href="{{ page_url("/crawlers", bot=claim.rule_id) }}">{{ claim.title }}</a>
+        <span class="tech text-sm text-base-content/70">{{ claim.rule_id }} v{{ claim.rule_version }}</span>
+        <span class="ms-auto tech text-sm">{{ claim.counts.requests }} {{ t("table.requests") | lower }}</span>
+      </li>
+      {% endfor %}
+    </ul>
+    <p class="mt-2"><a class="link text-sm" href="{{ page_url("/crawlers") }}">{{ t("overview.view_all") }}</a></p>
+  </div>
+</section>
+{% endif %}
+
 {% if findings %}
 <section class="card mt-6 bg-base-100 shadow" aria-labelledby="find-h">
   <div class="card-body">

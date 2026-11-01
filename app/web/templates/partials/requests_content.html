@@ -1,0 +1,56 @@
+<p class="tech mb-4 text-sm text-base-content/70" data-observation-window>{{ window_from }} → {{ window_to }}</p>
+{% include "partials/active_matchers.html" %}
+{% if summary.warnings %}
+<div class="mb-4 space-y-2" role="status">
+  {% for warning in summary.warnings %}
+  <p class="alert alert-warning text-sm">{% include "icons/triangle-alert.svg" %}{{ warning }}</p>
+  {% endfor %}
+</div>
+{% endif %}
+
+<section class="card bg-base-100 shadow" aria-labelledby="req-h">
+  <div class="card-body">
+    <h2 id="req-h" class="card-title text-base">{{ t("requests.rows") }}</h2>
+    {% if rows %}
+    <div class="mb-3 flex gap-2 text-sm">
+      <a class="link" href="{{ page_url("/requests", sort="newest", offset=0) }}" {% if explorer_sort == "newest" %}aria-current="true"{% endif %}>{{ t("requests.newest") }}</a>
+      <span aria-hidden="true">·</span>
+      <a class="link" href="{{ page_url("/requests", sort="oldest", offset=0) }}" {% if explorer_sort == "oldest" %}aria-current="true"{% endif %}>{{ t("requests.oldest") }}</a>
+    </div>
+    <div class="table-scroll overflow-x-auto">
+      <table class="table table-sm">
+        <caption class="sr-only">{{ t("requests.rows") }}</caption>
+        <thead><tr>
+          <th scope="col">{{ t("requests.time") }}</th>
+          <th scope="col">{{ t("table.method") }}</th>
+          <th scope="col">{{ t("table.path") }}</th>
+          <th scope="col" class="text-right">{{ t("table.status") }}</th>
+          <th scope="col">{{ t("filter.traffic") }}</th>
+          <th scope="col">{{ t("requests.agent") }}</th>
+          <th scope="col">{{ t("requests.client") }}</th>
+        </tr></thead>
+        <tbody>
+          {% for row in rows %}
+          <tr>
+            <td class="tech">{{ row.ts_utc }}</td>
+            <td class="tech">{{ row.method }}</td>
+            <td class="tech break-all">{{ row.path }}</td>
+            <td class="text-right tech">{{ row.status }}</td>
+            <td class="tech">{{ t("traffic." + row.traffic) if row.traffic else "—" }}</td>
+            <td class="tech break-all">{{ row.user_agent or "—" }}</td>
+            <td class="tech break-all">{{ row.client_pseudonym }}</td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+    {% include "partials/paging.html" %}
+    {% else %}
+    <p class="text-sm text-base-content/70" role="status">{{ t("requests.no_rows") }}</p>
+    {% endif %}
+  </div>
+</section>
+
+<div class="mt-6 space-y-2 text-sm text-base-content/70">
+  <p>{{ t("data.events", count=summary.coverage.unique_events) }} · {{ t("data.observed", min=summary.coverage.observed_min, max=summary.coverage.observed_max) }}</p>
+</div>

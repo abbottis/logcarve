@@ -202,11 +202,20 @@ def test_exact_replay_preserves_valid_values():
         {"method": "get", "path_prefix": "*", "referer_host": "Example.ORG", "status": "404"}
     )
     assert error is None
+    # Slice A trusted-filter contract: the matchers dict carries every
+    # selector (traffic/bot/category/provider/purpose/search unset here).
     assert matchers == {
         "method": "get",
         "status": 404,
+        "status_class": None,
         "path_prefix": "*",
         "referer_host": "Example.ORG",
+        "traffic": None,
+        "search": None,
+        "bot": None,
+        "category": None,
+        "provider": None,
+        "purpose": None,
     }
     matchers, error = web_routes._parse_matchers({"method": "OPTIONS"})
     assert error is None and matchers["method"] == "OPTIONS"

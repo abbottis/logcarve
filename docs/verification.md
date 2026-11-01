@@ -695,3 +695,52 @@ prerequisite completed (tracked `app/web/static/app.css` banner refresh;
 - Pre-existing/environmental, unchanged by Slice A: `test_t8...guard`
   needed built assets (resolved by the prerequisite build); 2 loopback
   skips; browser/e2e execution stays with the independent local runner.
+
+## 2026-11-01 — Slice A independent review (ed24256)
+
+Independent coordinator review on committed candidate ed24256
+(feature/traffic-analytics), clean tree confirmed. No blocking backend
+finding; UI/demo/release gates explicitly not closed.
+
+- Own hand-counted 28-row synthetic API probe: 53/53 PASS, zero model
+  calls (buckets 6/15/5/2, requests 28, 4xx 8, 5xx 3, bytes 3485,
+  measured 27; priority, literal search/privacy, bot-sort,
+  conflict/selector rejection, all new endpoints, foreign-source denial,
+  unchanged source).
+- Maintained focused tests: 41 PASS, no skips (classification, traffic
+  services/API, hostile assistant scope, valid narrowing/replay, both
+  external-client real loopback cases — resolving the 2 sandbox-only
+  skips from the coding run).
+- Coding full suite observed 378 PASS + 2 sandbox skips, lint/format/lock
+  clean.
+- Nonblocking follow-ups carried into Slice B: stale root
+  scaffold/licensing status, visibly bounded sample labels, whole-page
+  latency as a C gate with no performance guarantee.
+
+## 2026-11-01 — Slice B implementation (uncommitted → commit, independent review pending)
+
+Coding session delivery for Slice B (rich charts, traffic/bot/filter
+controls, sortable bot drilldowns, sanitized request explorer, global
+URL/Ask state). Directly observed in this session unless noted.
+
+- Full suite: 384 PASS + 2 sandbox loopback skips
+  (`uv run --frozen pytest tests/unit tests/integration -q`), after
+  updating one stale Slice A matchers-shape expectation in
+  `test_t8_preparation.py` (matchers now carry the full trusted selector
+  contract) and one stale crawlers-view UI assertion.
+- New `tests/integration/test_web_slice_b.py` (7 tests): conjunctive
+  robots/sitemap cards under `path_prefix=/docs/` and `/no-match`;
+  `traffic=error` rejected with 400; every data page
+  (/, /security, /crawlers, /errors, /requests, /ask) 200 under
+  `traffic=claimed_bot` and bot filter with unknown-bot 400; overview
+  panels + filter controls render; crawler/request sort validation.
+- Gates: `ruff check`, `ruff format --check`, `uv lock --check` clean;
+  `npm run build` completed (tracked `app/web/static/app.css` refresh).
+- Early-review cases closed: scoped cards use conjunctive
+  `scoped_path_count`; no `traffic="error"` bucket (errors stay
+  orthogonal status criteria); all data-page service reads pass the
+  versioned rules; paging carries sort; Jinja `range` shadowing fixed.
+- NOT RUN here: browser/e2e (loopback skips in sandbox; coordinator
+  runs Playwright incl. extended nav roundtrip with /requests).
+- Coverage: ANA-05, API-05 (service layer; external API unchanged),
+  UI-05 implementation done; independent browser review before C.

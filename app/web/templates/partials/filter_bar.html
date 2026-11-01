@@ -8,7 +8,9 @@
      deliberately: a new window always starts at the first page, while
      prev/next links carry explicit offsets. #}
   {% for key, value in matchers.items() %}
+  {% if key not in ["traffic", "bot", "category", "provider", "purpose", "status_class", "search", "path_prefix"] %}
   <input type="hidden" name="{{ key }}" value="{{ value }}">
+  {% endif %}
   {% endfor %}
   {% if params_source %}<input type="hidden" name="source" value="{{ params_source }}">{% endif %}
   {% if limit is defined %}<input type="hidden" name="limit" value="{{ limit }}">{% endif %}
@@ -44,6 +46,66 @@
       <option value="UTC" {% if tz_name == "UTC" %}selected{% endif %}>UTC</option>
       <option value="Europe/Berlin" {% if tz_name == "Europe/Berlin" %}selected{% endif %}>Europe/Berlin</option>
     </select>
+  </div>
+  <div class="form-control">
+    <label class="label py-1" for="f-traffic"><span class="label-text">{{ t("filter.traffic") }}</span></label>
+    <select id="f-traffic" name="traffic" class="select select-bordered select-sm">
+      {% for bucket in filter_options.traffic %}
+      <option value="{{ bucket }}" {% if filt.traffic == bucket %}selected{% endif %}>{{ t("traffic." + bucket) }}</option>
+      {% endfor %}
+    </select>
+  </div>
+  <div class="form-control">
+    <label class="label py-1" for="f-bot"><span class="label-text">{{ t("filter.bot") }}</span></label>
+    <select id="f-bot" name="bot" class="select select-bordered select-sm">
+      <option value="" {% if not filt.bot %}selected{% endif %}>{{ t("filter.all_bots") }}</option>
+      {% for bot in filter_options.bots %}
+      <option value="{{ bot.id }}" {% if filt.bot == bot.id %}selected{% endif %}>{{ bot.title }}</option>
+      {% endfor %}
+    </select>
+  </div>
+  <div class="form-control">
+    <label class="label py-1" for="f-category"><span class="label-text">{{ t("filter.category") }}</span></label>
+    <select id="f-category" name="category" class="select select-bordered select-sm">
+      <option value="" {% if not filt.category %}selected{% endif %}>{{ t("filter.all") }}</option>
+      {% for category in filter_options.categories %}
+      <option value="{{ category }}" {% if filt.category == category %}selected{% endif %}>{{ category }}</option>
+      {% endfor %}
+    </select>
+  </div>
+  <div class="form-control">
+    <label class="label py-1" for="f-provider"><span class="label-text">{{ t("filter.provider") }}</span></label>
+    <select id="f-provider" name="provider" class="select select-bordered select-sm">
+      <option value="" {% if not filt.provider %}selected{% endif %}>{{ t("filter.all") }}</option>
+      {% for provider in filter_options.providers %}
+      <option value="{{ provider }}" {% if filt.provider == provider %}selected{% endif %}>{{ provider }}</option>
+      {% endfor %}
+    </select>
+  </div>
+  <div class="form-control">
+    <label class="label py-1" for="f-purpose"><span class="label-text">{{ t("filter.purpose") }}</span></label>
+    <select id="f-purpose" name="purpose" class="select select-bordered select-sm">
+      <option value="" {% if not filt.purpose %}selected{% endif %}>{{ t("filter.all") }}</option>
+      {% for purpose in filter_options.purposes %}
+      <option value="{{ purpose }}" {% if filt.purpose == purpose %}selected{% endif %}>{{ purpose }}</option>
+      {% endfor %}
+    </select>
+  </div>
+  <div class="form-control">
+    <label class="label py-1" for="f-status-class"><span class="label-text">{{ t("filter.status_class") }}</span></label>
+    <select id="f-status-class" name="status_class" class="select select-bordered select-sm">
+      {% for class in filter_options.status_classes %}
+      <option value="{{ "" if class == "all" else class }}" {% if (filt.status_class or "all") == class %}selected{% endif %}>{{ t("filter.class_" + class) if class != "all" else t("filter.all") }}</option>
+      {% endfor %}
+    </select>
+  </div>
+  <div class="form-control">
+    <label class="label py-1" for="f-path-prefix"><span class="label-text">{{ t("filter.path_prefix") }}</span></label>
+    <input id="f-path-prefix" name="path_prefix" type="text" value="{{ filt.path_prefix or "" }}" maxlength="1024" class="input input-bordered input-sm tech" placeholder="/docs/">
+  </div>
+  <div class="form-control">
+    <label class="label py-1" for="f-search"><span class="label-text">{{ t("filter.search") }}</span></label>
+    <input id="f-search" name="search" type="search" value="{{ filt.search or "" }}" maxlength="200" class="input input-bordered input-sm" placeholder="{{ t("filter.search_placeholder") }}">
   </div>
   <button type="submit" class="btn btn-primary btn-sm">{{ t("filter.apply") }}</button>
   <p class="w-full text-sm text-base-content/70">{{ t("filter.times_in", tz=tz_name) }}</p>

@@ -231,13 +231,13 @@ def test_crawlers_view(web):
     client, _ = web
     _login(client)
     html = client.get(f"/crawlers?site=default&{WINDOW_QS}&tz=UTC").text
-    assert "Claimed crawler families" in html
-    assert "Well-known path observations" in html
+    assert "Named bots" in html
     assert "robots.txt requests" in html
     # v3 catalog: the shared fixture's curl and ExampleCrawler rows match
-    # versioned rules, so families render as claims with limitations.
+    # versioned rules, so the sortable table renders claims with drilldowns.
     assert "bot-auto-curl" in html
     assert "bot-suspected-generic" in html
+    assert "aria-sort" in html
     assert "No claimed crawlers in this window." not in html
     assert "identity not verified" in html or "never a crawler" in html
 
