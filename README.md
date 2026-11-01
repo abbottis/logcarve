@@ -2,10 +2,14 @@
 
 AI-assisted, self-hosted web access-log analytics for security, crawler activity and development.
 
-**Development checkpoint — 1 November 2026.** The parser, SQLite storage,
+**Analytics closeout — 1 November 2026.** The parser, SQLite storage,
 deterministic analytics, authenticated REST API, bounded Meta assistant,
-browser dashboard and local synthetic demo are implemented. This branch is
-an intermediate review snapshot; remaining issues are listed below.
+browser dashboard and local synthetic demo are implemented. Fundamental
+traffic graphs, traffic selection with a 77-rule bot catalog, bot sorting
+and drilldowns, and a sanitized request explorer are available on
+`feature/traffic-analytics` (clean source `e81d2d0`); independent runtime
+verification is recorded in the [verification history](docs/verification.md).
+No `main` merge, release claim or deployment is included.
 
 ## Run the local synthetic demo
 
@@ -17,9 +21,10 @@ Requires Docker with Docker Compose, host Python 3 and curl. From the repository
 ./scripts/demo/health.sh
 ```
 
-Open the [fixed demo window](http://127.0.0.1:8080/?site=default&range=custom&from=2026-10-26T00:00:00%2B00:00&to=2026-10-29T00:00:00%2B00:00&tz=Europe%2FBerlin&source=example-combined).
-It covers all 30 synthetic events and remains usable after the default
-seven-day window has moved beyond the fixture dates.
+Open the [fixed demo window](http://127.0.0.1:8080/?site=default&range=custom&from=2026-10-26T00:00:00%2B00:00&to=2026-11-01T00:00:00%2B00:00&tz=Europe%2FBerlin&source=example-combined).
+It covers all 120 synthetic events (30 legacy rows 26–28 Oct plus 90 rich
+rows 29–31 Oct) and remains usable after the default seven-day window has
+moved beyond the fixture dates.
 
 Log in as `demo-admin`; the generated password is in the protected local
 `artifacts/local-demo-secrets/demo.env` file (`LOGCARVE_ADMIN_PASSWORD`).
@@ -38,23 +43,43 @@ replays the verified synthetic fixture without resetting auth or usage.
 - One deterministic analytics layer shared by the dashboard, API and tools.
 - Server-side admin sessions and separate scoped, site-bound API tokens.
 - Overview, Security, Crawlers, Errors, Ask AI, Settings and Data Sources.
+- Fundamental request/error/byte timelines, traffic and bot shares, paths,
+  referrers, resource kinds, claimed browser/OS distributions, weekday/hour
+  heatmap and pseudonymized client aggregates.
+- Traffic selection (all / browser-like / claimed bot / automation /
+  unknown), 77-rule named-bot catalog with category/provider/purpose,
+  allowlisted bot sorting, named-bot drilldowns and a sanitized paginated
+  request explorer.
 - Locally served assets, themes, charts, table alternatives and pagination.
 - An independent [read-only external API](docs/external-api.md) and
   [stdlib client](clients/logcarve_api_client.py) that need no model key.
 
 ## Verification and remaining work
 
-The recorded development checkpoint passed 341 unit/integration tests,
-15 browser E2E tests, 28 container-browser cases and 23 isolated Docker
-smoke checks. These are observed results on macOS ARM64 / Linux ARM64
-containers; native Linux x86-64 installation is **NOT RUN**.
+The independently verified analytics closeout passed 428 unit/integration
+tests, 22 protected browser E2E tests, a 53/53 synthetic API probe, Ruff
+check and format on 152 files, `uv lock --check` on 40 packages, the asset
+build with no-external-references check, fully redacted Gitleaks
+tracked-export and full-history scans (only the known
+`technical-spec.md:787` cost-heading false positive), an 8/0 Docker Compose
+candidate run, a 24/0 internal-network offline smoke run and a 32-case
+built-image browser matrix on both the isolated candidate and the updated
+persistent demo. These are observed results reported by the independent
+local runner on macOS ARM64 / Linux ARM64 containers; native Linux x86-64
+installation and standalone Linux host install are **NOT RUN**, and no
+full release, hackathon or all-project QA approval is claimed.
 
-The separately authorized real Meta test completed two investigations with
-tool evidence. The third stopped at its context bound, so the three-case
-AI demonstration remains **incomplete**. Context minimization, a returned
-cost-display double count and citation wording remain follow-up work.
-The settled usage ledger and execution caps were unaffected by the display
-issue. No additional real model calls are authorized by this snapshot.
+Deferred scope stays deferred: gzip, custom formats, live ingestion,
+GeoIP, sessions, export/import UX, webhooks and the MCP product server.
+The product AI path stays off in the demo (AI disabled, empty model key,
+no Internet in offline proof); the separately authorized real Meta test
+completed two investigations with tool evidence while the third stopped at
+its context bound, so the three-case AI demonstration remains
+**incomplete**. Context minimization, a returned cost-display double count
+and citation wording remain follow-up work. The settled usage ledger and
+execution caps were unaffected by the display issue. No additional real or
+paid model calls are authorized by this snapshot. Muse coding-model usage
+is separate from product app caps and the product Standard data-mode gate.
 
 See [verification history](docs/verification.md), [checkpoint notes](docs/publication.md)
 and [next-session tasks](docs/next-session.md). The local demo uses a normal

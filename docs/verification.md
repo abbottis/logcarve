@@ -1014,3 +1014,90 @@ message and echoed by the authenticated chat 400. Synthetic repro only
 - Observed: 4 new tests PASS; 61 PASS across corrections, assistant
   scope, assistant and classification suites; full corrections file
   24 PASS; `ruff check` and `ruff format --check` clean.
+
+## 2026-11-01 — Analytics completion independent verification (reported, append-only)
+
+Independent local runner evidence for clean source `e81d2d0` on
+`feature/traffic-analytics`, exactly as supplied in
+`artifacts/task-inputs/final-verification-evidence.md`. This section only
+transcribes the runner's reported outcome; the documentation writer did
+not re-execute coordinator checks, read private runtime or credentials,
+make provider/product calls, or change code, tests, fixtures,
+configuration or assets. Historical PASS/FAIL/BLOCKED/NOT RUN records
+above are preserved unchanged.
+
+- Full locked unit+integration: 428 passed, 0 skipped in a clean
+  environment, and 428 passed, 0 skipped with `AI_ENABLED=true
+  LLM_WARN_AT_USD=999`.
+- Maintained protected Chromium E2E: 22 passed, 0 skipped. Actual
+  Chart.js datasets/tables, new filters/nav/settings/Ask capture,
+  groups/sort/paging, heatmap and explorer, both themes at 390px, no
+  off-origin requests or errors.
+- Own independent 28-row API probe: 53/53 passed on the final
+  application source.
+- Ruff check + format check: 152 files clean; `uv lock --check` 40
+  packages PASS; asset build and no-external-references check PASS.
+- Fully redacted Gitleaks tracked-export directory and full 10-commit
+  public history scans: exit 1 only for the known
+  `technical-spec.md:787` cost-heading false positive (history
+  occurrence in `b52a9fb`). No broad allowlist, no new finding.
+- Docker Compose candidate: 8 PASS / 0 FAIL from a fresh tracked
+  export, 120 rows, old 30 / new 90, replay 0/30 + 0/90, restart
+  persistence, full owned teardown.
+- Docker internal-network offline smoke: 24 PASS / 0 FAIL, 120 rows,
+  authenticated API with AI off, no model key and no Internet, backup /
+  isolated restore / retention, source immutability, no leftover owned
+  containers/networks/volumes.
+- Built-image browser matrix: 32 PASS on the isolated candidate; same
+  32 PASS on the actual persistent localhost 8080 demo after update
+  (8 routes, light/dark, 1440px/390px), no console errors, off-origin
+  or failed responses. Real filter Apply and sidebar keep 45 claimed
+  requests; the named GPT filter selects 16.
+- Independent text-only fixture recount (no product imports): 120 rows,
+  127744 known bytes, 44 distinct source addresses before HMAC; traffic
+  buckets browser-like 48 / claimed bot 45 / other automation 18 /
+  unknown 9; status 86x200, 3x301, 28x404, 3x500; paths, methods,
+  referrer, day, rule counts match goldens. Immutable T8 SHA
+  `d765393f…ebeb65`; final rich SHA `b9479a8e…52ca45f`.
+- 100k repeated-UA whole-page profile (same seeded source/order before
+  and after the targeted N+1 fix; single observations, not percentiles
+  or guarantees): 100000 lines to 98969 accepted / 1031 intentional
+  rejects, import 1.7969 s; Overview all 1.2911 s, claimed 2.7859 s
+  (before 2.3153 / 8.8252 s); Crawlers all 1.0946 s / claimed
+  1.2778 s; Requests all 0.2705 s / claimed 0.6873 s. 19855 Googlebot
+  rows independently counted from source. SQLite integrity ok, source
+  unchanged, DB+sidecars 45916160 bytes, cumulative runner peak RSS
+  165.94 MiB. Hardware: Apple M5 Pro, 18 logical CPUs, 48 GiB RAM,
+  macOS 27.0.1 arm64, Python 3.12.16. The profile identified
+  100-per-client path scans; one bounded batched query replaced them
+  with the same evidence/count/order/caps and every scope selector. No
+  schema, dependency, cache, write-on-read change.
+- Local demo outcome: existing canonical project folder updated on a
+  separate local branch, previous branch/history preserved, main
+  unchanged, NO GitHub push. The entire tracked integration tree
+  matched the tested public candidate before this documentation
+  closeout. The running demo uses the EXACT tested image (not an
+  unverified host build), UID 10001, loopback `127.0.0.1:8080`, AI off,
+  key empty, read-only sources. Online backup retained 0600 plus the
+  old image rollback ref. Upgrade 30 to 120 succeeded: all 30 legacy
+  rows byte-identical; credentials, users/tokens, preexisting sessions
+  and usage state preserved; schema 4 unchanged; SQLite integrity ok.
+  The original 26–29 Oct exclusive window still returns 30. The
+  existing token works; the actual stdlib client succeeds on all 3
+  supported replies. No new product model/provider calls, no allowance
+  reset, no real logs. Muse coding-model usage is separate and not
+  covered by product app caps. Temporary candidate credential/runtime
+  directories and all owned test resources were removed; the
+  persistent 8080 demo remains running.
+- Platform limit: actual Docker Linux ARM64 only. Linux x86-64 and
+  standalone Linux host install NOT RUN; no full release, hackathon or
+  all-project QA approval is claimed. UI-05 / ANA-04 / ANA-05 /
+  API-05 local gates are satisfied. Deferred: gzip, custom formats,
+  live ingestion, GeoIP/sessions, export/import UX.
+- Fixed demo entry window for recording:
+  `http://127.0.0.1:8080/?site=default&range=custom&from=2026-10-26T00:00:00%2B00:00&to=2026-11-01T00:00:00%2B00:00&tz=Europe%2FBerlin&source=example-combined`.
+
+Acceptance impact: UI-05, ANA-04/05 and API-05 local gates are satisfied
+at `e81d2d0` per the independent runner; deferred scope and the
+incomplete three-case AI demonstration are unchanged. No paid replay or
+new product calls were made for this documentation closeout.

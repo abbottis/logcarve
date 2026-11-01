@@ -1,9 +1,13 @@
 # Analytics completion plan — traffic analysis, rich charts, bot drilldown
 
-Status: **PLAN — 2026-11-01, revised after 2026-11-01 independent review.**
+Status: **DELIVERED and independently verified — 2026-11-01, closeout.**
 ANA-04/ANA-05 accepted; API-05 and UI-05 added to
 [acceptance criteria](acceptance-criteria.md). No application changes in this
-document. Slice A implementation authorized; STOP for reinspection before B.
+document. Slices A, B and C were implemented on
+`feature/traffic-analytics` and verified by the independent local runner
+(see `docs/verification.md`); implementation plus independent AI-assisted
+planning, review and testing produced the result, with no exclusive
+single-tool or manual-only authorship claim.
 
 Owner request: complete fundamental log analysis, LogWerk-style traffic
 selection and named-bot sorting, then implement and test. References:
@@ -242,8 +246,8 @@ Docker/browser execution stays with the independent local runner; no
 retry or weakening of controls from the coding session.
 Acceptance: ING-04, DB-01, OPS-02, OPS-03, QA-01.
 
-Status 2026-11-01: authorized via `artifacts/task-inputs/slice-c-delivery.md`;
-delivered on `feature/traffic-analytics` as the combined 120-row dataset
+Status 2026-11-01 closeout: Slice C was delivered on
+`feature/traffic-analytics` as the combined 120-row dataset
 (30 T8 rows 26–28 Oct untouched + 90 rich rows 29–31 Oct under unchanged
 `example-combined`), pinned expectations in
 `tests/fixtures/expected/demo_slice_c.json`, two-fixture probe/seeder,
@@ -253,8 +257,9 @@ loopback 8091), combined-window demo URL (26 Oct–01 Nov), and the accepted
 B legacy-test update (`status=404` preserved across navigation; behavior
 unchanged). STOP for independent runtime verification (candidate Docker
 run, offline smoke, protected Playwright incl. the updated B case, and
-the typical whole-page 100k benchmark) before any original-demo change.
-No claim beyond the evidence in `docs/verification.md`.
+the typical whole-page 100k benchmark, and the persistent-demo update at
+clean source `e81d2d0`. No claim beyond the evidence in
+`docs/verification.md`.
 
 Non-goals (recorded, not silently promoted): gzip/custom formats, rotation,
 GeoIP, raw-IP views, session reconstruction, live ingestion, MCP server,
