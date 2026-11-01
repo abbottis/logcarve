@@ -94,12 +94,18 @@ mkdir -p "$WORK/export"
 git -C "$ROOT" archive HEAD | tar -x -C "$WORK/export"
 test -f "$WORK/export/Dockerfile"
 test -f "$WORK/export/tests/fixtures/combined/t8_smoke.txt"
-# Authoritative digest of the 30-row synthetic fixture (26–28 Oct 2026):
-# the smoke provenance check pins this value, never the mount's own bytes.
+test -f "$WORK/export/tests/fixtures/combined/demo_rich_29_31oct.txt"
+# Authoritative digests of the combined synthetic dataset (26-31 Oct 2026:
+# 30 T8 rows plus 90 rich rows): the smoke provenance check pins these
+# values, never the mounts' own bytes.
 FIXTURE_SHA=d765393fb016cc147cf2359f9612b4bb6b6582a9caf1966fb1fe380daeebeb65
+RICH_SHA=2c424fcf559e5d822db84102b15b9d0519b8a5b566977391fdfa9a1bf32e0d3f
 actual_sha=$(python3 -c 'import hashlib,sys; print(hashlib.sha256(open(sys.argv[1],"rb").read()).hexdigest())' \
   "$WORK/export/tests/fixtures/combined/t8_smoke.txt")
-[ "$actual_sha" = "$FIXTURE_SHA" ] || { echo "exported fixture digest drift" >&2; exit 1; }
+[ "$actual_sha" = "$FIXTURE_SHA" ] || { echo "exported T8 digest drift" >&2; exit 1; }
+rich_sha=$(python3 -c 'import hashlib,sys; print(hashlib.sha256(open(sys.argv[1],"rb").read()).hexdigest())' \
+  "$WORK/export/tests/fixtures/combined/demo_rich_29_31oct.txt")
+[ "$rich_sha" = "$RICH_SHA" ] || { echo "exported rich digest drift" >&2; exit 1; }
 # Portable host stat (macOS stat -c does not exist): size + mtime via Python.
 src_stat_before=$(python3 -c 'import os,sys; st = os.stat(sys.argv[1]); print(st.st_size, int(st.st_mtime))' \
   "$WORK/export/tests/fixtures/combined/t8_smoke.txt")
@@ -151,6 +157,7 @@ services:
     volumes:
       - smoke-data:/data
       - $WORK/export/tests/fixtures/combined/t8_smoke.txt:/logs/smoke-access.log:ro
+      - $WORK/export/tests/fixtures/combined/demo_rich_29_31oct.txt:/logs/smoke-rich-access.log:ro
     networks:
       - smoke-net
 volumes:
@@ -203,19 +210,29 @@ echo "== seed (private one-offs, nothing printed) =="
 run() { compose run --rm --no-deps -T app "$@"; }
 run python -m app.auth.cli --db /data/smoke.sqlite3 create-admin --username smoke-admin >/dev/null
 good "admin created (password never shown)"
-import_json=$(run python -m app.db.cli --db /data/smoke.sqlite3 import \
-  --source-id example-combined --format nginx_combined --root /logs --path smoke-access.log \
-  --site-id default --site-name "Smoke site" --site-hostname example.org --server-type nginx)
-echo "$import_json" | python3 -c 'import json,sys; d = json.load(sys.stdin); assert (d["status"], d["records_inserted"]) == ("completed", 30), d'
-good "import 30 rows, completed"
-replay_json=$(run python -m app.db.cli --db /data/smoke.sqlite3 import \
-  --source-id example-combined --format nginx_combined --root /logs --path smoke-access.log \
-  --site-id default --site-name "Smoke site" --site-hostname example.org --server-type nginx)
-echo "$replay_json" | python3 -c 'import json,sys; d = json.load(sys.stdin); assert (d["records_inserted"], d["records_replayed"]) == (0, 30), d'
-good "replay adds zero rows"
+for spec in "smoke-access.log 30" "smoke-rich-access.log 90"; do
+  set -- $spec
+  import_json=$(run python -m app.db.cli --db /data/smoke.sqlite3 import \
+    --source-id example-combined --format nginx_combined --root /logs --path "$1" \
+    --site-id default --site-name "Smoke site" --site-hostname example.org --server-type nginx)
+  echo "import $1: $import_json"
+  echo "$import_json" | python3 -c 'import json,sys; d = json.load(sys.stdin); assert (d["status"], d["records_inserted"]) == ("completed", int(sys.argv[1])), d' "$2"
+done
+good "combined import completes (30 T8 + 90 rich rows)"
+for spec in "smoke-access.log 0 30" "smoke-rich-access.log 0 90"; do
+  set -- $spec
+  replay_json=$(run python -m app.db.cli --db /data/smoke.sqlite3 import \
+    --source-id example-combined --format nginx_combined --root /logs --path "$1" \
+    --site-id default --site-name "Smoke site" --site-hostname example.org --server-type nginx)
+  echo "$replay_json" | python3 -c 'import json,sys; d = json.load(sys.stdin); assert (d["records_inserted"], d["records_replayed"]) == tuple(int(x) for x in sys.argv[1:3]), d' "$2" "$3"
+done
+good "replay adds zero rows (0/30, 0/90)"
 container_sha=$(compose exec -T app sha256sum /logs/smoke-access.log | cut -d' ' -f1)
-[ "$container_sha" = "$FIXTURE_SHA" ] && good "source sha matches authoritative digest" \
-  || bad "source sha mismatch ($container_sha)"
+[ "$container_sha" = "$FIXTURE_SHA" ] && good "T8 source sha matches authoritative digest" \
+  || bad "T8 source sha mismatch ($container_sha)"
+container_rich_sha=$(compose exec -T app sha256sum /logs/smoke-rich-access.log | cut -d' ' -f1)
+[ "$container_rich_sha" = "$RICH_SHA" ] && good "rich source sha matches authoritative digest" \
+  || bad "rich source sha mismatch ($container_rich_sha)"
 # -c keeps code in argv so stdin stays the token-JSON pipe.
 run python -m app.auth.cli --db /data/smoke.sqlite3 issue-token \
   --name smoke-client --site-id default --scopes analytics:read \
@@ -229,7 +246,7 @@ echo "== offline probe: readiness, client, chat guard (inside network) =="
 # endpoint answers 503, which would mask the distinction).
 if probe_out=$(offline_probe); then
   echo "$probe_out"
-  good "offline probe: liveness, 401 gating, private readyz, client 30 rows, chat guard"
+  good "offline probe: liveness, 401 gating, private readyz, client 120 rows, chat guard"
 else
   echo "${probe_out:-offline probe produced no output}"
   bad "offline probe failed"
@@ -239,7 +256,7 @@ echo "== restart persistence =="
 compose restart app
 if probe_out=$(offline_probe --wait && offline_probe); then
   echo "$probe_out"
-  good "30 rows survive restart (in-network re-verified)"
+  good "120 rows survive restart (in-network re-verified)"
 else
   echo "${probe_out:-offline probe produced no output after restart}"
   bad "post-restart probe failed"
@@ -253,8 +270,8 @@ mode=$(compose exec -T app stat -c %a "$backup_path")
 [ "$mode" = "600" ] && good "backup permissions 0600" || bad "backup permissions $mode"
 # Restore AND verify in the SAME ephemeral container: /tmp is per-container,
 # so a split run/exec pair would assert a file that no longer exists.
-run sh -c "python -m app.db.cli --db /data/smoke.sqlite3 restore --backup '$backup_path' --dest /tmp/smoke-restored.sqlite3 --retention-days 30 && python -c \"import sqlite3; c = sqlite3.connect('file:/tmp/smoke-restored.sqlite3?mode=ro', uri=True); assert c.execute('SELECT COUNT(*) FROM requests').fetchone()[0] == 30; assert c.execute('PRAGMA integrity_check').fetchone()[0] == 'ok'\""
-good "isolated restore: 30 rows, integrity ok, retention reapplied in restore"
+run sh -c "python -m app.db.cli --db /data/smoke.sqlite3 restore --backup '$backup_path' --dest /tmp/smoke-restored.sqlite3 --retention-days 30 && python -c \"import sqlite3; c = sqlite3.connect('file:/tmp/smoke-restored.sqlite3?mode=ro', uri=True); assert c.execute('SELECT COUNT(*) FROM requests').fetchone()[0] == 120; assert c.execute('PRAGMA integrity_check').fetchone()[0] == 'ok'\""
+good "isolated restore: 120 rows, integrity ok, retention reapplied in restore"
 retention_json=$(run python -m app.db.cli --db /data/smoke.sqlite3 retention --days 30)
 echo "$retention_json" | python3 -c 'import json,sys; assert json.load(sys.stdin)["deleted"] == 0, "retention deleted rows"'
 good "retention --days 30 deletes nothing (all rows in window)"

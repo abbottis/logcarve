@@ -13,9 +13,10 @@
 #   ./scripts/demo/stop.sh    # stop, keep data
 #   ./scripts/demo/reset.sh   # nondestructive verified reseed (no down -v)
 #
-# Recording-day entry URL (custom window covers the full 30-row T8 fixture,
-# 26–28 Oct 2026, usable on 3 Nov long after the default 7d window ages out):
-#   http://127.0.0.1:8080/?site=default&range=custom&from=2026-10-26T00:00:00%2B00:00&to=2026-10-29T00:00:00%2B00:00&tz=Europe%2FBerlin&source=example-combined
+# Recording-day entry URL (custom window covers the combined 120-row
+# synthetic dataset: 30 T8 rows 26–28 Oct plus 90 rich rows 29–31 Oct 2026,
+# usable on 3 Nov long after the default 7d window ages out):
+#   http://127.0.0.1:8080/?site=default&range=custom&from=2026-10-26T00:00:00%2B00:00&to=2026-11-01T00:00:00%2B00:00&tz=Europe%2FBerlin&source=example-combined
 name: logcarve-demo
 
 services:
@@ -39,6 +40,7 @@ services:
     volumes:
       - demo-data:/data
       - ./tests/fixtures/combined/t8_smoke.txt:/logs/demo-access.log:ro
+      - ./tests/fixtures/combined/demo_rich_29_31oct.txt:/logs/demo-rich-access.log:ro
     # Least privilege from the image (USER 10001); no privileged mode,
     # no Docker socket, no extra capabilities, read-only source mount.
 

@@ -1,5 +1,88 @@
 # Verification record
 
+## 2026-11-01 — Slice C delivery + B legacy-test update (independent runtime verification pending)
+
+Owner-authorized Slice C (`artifacts/task-inputs/slice-c-delivery.md`) on clean
+`36eb09f`, branch `feature/traffic-analytics`. Sole Muse writer, exact model
+`muse-spark-1.3-contributor`/medium/Contributor ON; sandbox + approval ON, no
+agents. Synthetic fixtures only; T8 fixture byte-identical
+(`d765393f…ebeb65`, 30 rows). No database/usage reset, no push/main change,
+no new dependency, no Docker-socket access, no parent-runtime/secret reads.
+No product model/provider calls in any PRODUCT test below (Muse coding-model
+usage is separate and never touches product paths).
+
+Slice B legacy-test update (from `slice-b-final-independent-review.md`):
+`tests/e2e/test_dashboard.py::test_errors_apply_preserves_matchers_source_and_nav`
+no longer expects `status=404` to disappear on sidebar Security navigation —
+`status` is a global matcher (`MATCHER_KEYS`, `app/web/routes.py`), so
+preservation is the accepted behavior. Product behavior untouched; only the
+outdated expectation/comment changed.
+
+- New `tests/integration/test_nav_status_matcher.py` (1 test): Errors page
+  sidebar Security href preserves `status=404` + source + window, and the
+  followed link renders 200. PASS — server-side positive evidence for the
+  updated browser expectation (browser re-run is coordinator-owned).
+- New `tests/fixtures/combined/demo_rich_29_31oct.txt` (90 rows, 30/30/30
+  over 29–31 Oct 2026, `2c424fcf…32e0d3f`): every UA verified per-rule
+  against the classifier before pinning (google/gpt/claude/bing/ccbot,
+  curl/python/uptimerobot/suspected, browser, `-` unknown).
+- New `tests/fixtures/expected/demo_slice_c.json`: hand-derived with
+  awk/grep/sort (never the product parser) — combined 120 rows,
+  200×86/301×3/404×28/500×3, GET×107/POST×9/HEAD×3/OPTIONS×1,
+  claimed×45/automation×18/browser×48/unknown×9, bytes 127744, 44 distinct
+  clients. One byte-sum scare (`597238`) was the author's own probe snippet
+  summing `byte_offset` instead of `bytes`; product data always agreed with
+  the independent awk sum (127744).
+- `scripts/demo/probe_store.py`: pins both digests; FRESH / PARTIAL (empty,
+  legacy T8-only upgrade, rich-only, no-admin, interrupted-with-known-fingerprints)
+  / SEEDED (30+90, both fingerprints, admin present) / FOREIGN (drift, unknown
+  site/source/rows/fingerprint, unresumed unknown-provenance failures). A failed
+  attempt is superseded only by a clean completed import of the same source
+  bytes, so interrupted-then-resumed stores converge instead of sticking.
+  Two genuine probe strictness gaps found by the new tests and fixed:
+  a foreign site with zero rows stayed PARTIAL (now FOREIGN), and a failed
+  import row blocked SEEDED forever (now superseded on resume).
+- `scripts/demo/seed.sh`: imports both fixtures under unchanged
+  `example-combined`, replay-zero `(0,30)` + `(0,90)`, token/admin/history/
+  spend preservation kept, FOREIGN refused.
+- `scripts/demo/verify_candidate.sh` (new, tracked): isolated candidate on
+  unique project `logcarve-demo-candidate`, loopback 8091, temp owned
+  runtime, `git archive HEAD` build, both digest pins, SEEDED-120 +
+  replay-zero + restart proof, teardown of owned resources only.
+- `docker-compose.demo.yml` (+rich mount), `scripts/demo/lib.sh`,
+  `docs/demo.md`, `docs/demo-script-3min.md`: combined-window URL
+  (26 Oct–01 Nov), 120-row narration.
+- `scripts/smoke_demo.sh` + `scripts/smoke_offline_probe.py`: offline proof
+  now covers the combined dataset (30+90 imports, 120-row client summary,
+  120-row restore).
+
+| Check | Result | Evidence |
+| --- | --- | --- |
+| Focused `pytest tests/integration/test_demo_slice_c.py test_demo_probe.py test_nav_status_matcher.py` | PASS | 21 passed (12 Slice C + 8 probe + 1 nav) |
+| Full `pytest tests/unit tests/integration` (clean env) | PASS | 408 passed, 2 skipped (pre-existing loopback-bind skips) |
+| `ruff check .` | PASS | All checks passed |
+| `ruff format --check .` | PASS | 151 files already formatted |
+| `uv lock --check` (`UV_CACHE_DIR=/tmp/uv-cache`) | PASS | 40 packages, lockfile current, no new dependency |
+| `npm run build` + `check:external` | PASS | Rebuilt clean; no fetch-vector external references (exit 0) |
+| `pytest tests/e2e --collect-only` | PASS | 22 collected |
+| Gitleaks 8.30.1, fully redacted, all 17 changed/new files | PASS | Exit 0 on every file; no finding (tracked-file scan; full-history scan repeats at release) |
+| `pytest tests/e2e` execution (this sandbox) | BLOCKED | Chromium cannot launch in this macOS shell sandbox (recorded protection); coordinator runs outside |
+| Docker/candidate/smoke execution | BLOCKED | No socket access from this sandbox; never attempted; coordinator owns runtime/backup/rollback/testing |
+| Linux x86-64 | NOT RUN | ARM64 only; x86 distinction preserved |
+| Real product model/provider calls | NOT RUN | AI-off posture throughout; exhausted allowance untouched |
+
+Acceptance impact: ING-04 (additive replay/idempotent upgrade, interruption
+convergence, foreign refusal), DB-01 (restart persistence, preserved history,
+no reset/delete/recreate), OPS-02/03 (candidate + offline-smoke procedures
+ready for coordinator execution; 100k benchmark already recorded, typical
+whole-page run is coordinator-owned), QA-01 (independent review still
+required; B legacy update keeps the accepted behavior). Deferred gzip/custom
+formats, GeoIP, sessions, live ingestion, export/import UX unchanged — no
+LogWerk parity claimed. Ruff note: never pass `tests/fixtures/expected/*.json`
+as explicit `ruff format` paths — this ruff emits trailing commas into JSON
+(invalid); directory-wide `ruff format --check .` leaves the single-line
+fixtures alone.
+
 ## 2026-11-01 — Slice B correction (independent-review gaps closed, reinspection pending)
 
 Coding delivery closing every accepted gap from `artifacts/task-inputs/slice-b-independent-review.md`

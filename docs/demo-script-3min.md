@@ -3,7 +3,7 @@
 Recording-day entry URL (paste as-is):
 
 ```text
-http://127.0.0.1:8080/?site=default&range=custom&from=2026-10-26T00:00:00%2B00:00&to=2026-10-29T00:00:00%2B00:00&tz=Europe%2FBerlin&source=example-combined
+http://127.0.0.1:8080/?site=default&range=custom&from=2026-10-26T00:00:00%2B00:00&to=2026-11-01T00:00:00%2B00:00&tz=Europe%2FBerlin&source=example-combined
 ```
 
 Start the stack before recording: `./scripts/demo/start.sh` (healthy when
@@ -13,11 +13,12 @@ Start the stack before recording: `./scripts/demo/start.sh` (healthy when
 ## 0:00–0:30 — What this is
 
 "LogCarve is a self-hosted access-log analysis tool. This demo runs fully
-offline on synthetic Nginx logs: thirty rows from 26 to 28 October, one site,
+offline on synthetic Nginx logs: one hundred twenty rows from 26 to 31 October
+— thirty original rows plus ninety rich traffic rows — one site,
 one read-only source. The assistant is off on purpose — everything you see
 comes from the same deterministic analytics layer that also serves the API."
 
-Show: Overview totals (30 requests), the custom window in the filter bar,
+Show: Overview totals (120 requests), the custom window in the filter bar,
 Europe/Berlin display timezone.
 
 ## 0:30–1:20 — Three synthetic stories
@@ -37,7 +38,7 @@ to Overview — site, source, window and timezone are preserved.
 
 "Machines get the same answers without chat." Terminal: run
 `clients/logcarve_api_client.py --endpoint all` for the window; read the
-summary totals aloud (30 requests). "Bearer tokens are scoped and
+summary totals aloud (120 requests). "Bearer tokens are scoped and
 site-limited; they cannot import, escalate, or reach the model."
 
 ## 2:10–2:50 — Honest limits
@@ -51,7 +52,7 @@ Linux x86-64 verification is still outstanding; this runs on ARM64 loopback."
 
 ## 2:50–3:00 — Recovery
 
-Stop and restart the demo (`stop.sh`, `start.sh`): the same 30 rows return.
+Stop and restart the demo (`stop.sh`, `start.sh`): the same 120 rows return.
 "Backups restore into isolated paths; retention only deletes LogCarve-owned
 data; source logs are never modified."
 

@@ -11,7 +11,7 @@ retries, no proxy, no new dependency.
 Inputs (environment only, never argv): SMOKE_BASE_URL (default
 http://app:8080), LOGCARVE_ADMIN_PASSWORD, SMOKE_ADMIN_USER (default
 smoke-admin), SMOKE_TOKEN_FILE (default /run/smoke/token.txt),
-SMOKE_WINDOW_FROM/TO (default the 30-row fixture window).
+SMOKE_WINDOW_FROM/TO (default the combined 120-row dataset window).
 
 Output: `PASS: ...` lines plus a final `OFFLINE_RESULT pass=N fail=M` line.
 Exit 0 only when every check passes. Prints counts and statuses only —
@@ -28,7 +28,7 @@ import urllib.request
 
 TIMEOUT_S = 10
 WINDOW_FROM = os.environ.get("SMOKE_WINDOW_FROM", "2026-10-26T00:00:00+00:00")
-WINDOW_TO = os.environ.get("SMOKE_WINDOW_TO", "2026-10-29T00:00:00+00:00")
+WINDOW_TO = os.environ.get("SMOKE_WINDOW_TO", "2026-11-01T00:00:00+00:00")
 CHAT_QUESTION = "What claimed AI crawler activity is visible?"
 
 
@@ -168,8 +168,8 @@ def main() -> int:
         )
         try:
             assert summary_status == 200
-            assert json.loads(summary_payload)["totals"]["requests"] == 30
-            good("scoped client summary, 30 requests, no model key")
+            assert json.loads(summary_payload)["totals"]["requests"] == 120
+            good("scoped client summary, 120 requests, no model key")
         except (AssertionError, ValueError, KeyError):
             bad("scoped client summary", f"HTTP {summary_status}")
         for endpoint in ("crawlers", "security/findings"):

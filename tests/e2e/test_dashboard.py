@@ -590,9 +590,13 @@ def test_errors_apply_preserves_matchers_source_and_nav(page, live_base, observe
     assert "status=404" in active_href, active_href
     assert "source=example-combined" in active_href, active_href
     assert "from=2026-10-27T10" in active_href, active_href
+    # Global matchers (including status) are preserved across navigation by
+    # design: MATCHER_KEYS in app/web/routes.py lists "status" as shared nav
+    # state, so the sidebar Security link keeps status=404 (accepted
+    # behavior; the old baseline expectation of it disappearing is outdated).
     reloaded_security = page.get_attribute('#side-nav a[href^="/security"]', "href")
     assert reloaded_security is not None and "site=default" in reloaded_security
-    assert "status=404" not in reloaded_security, reloaded_security
+    assert "status=404" in reloaded_security, reloaded_security
     # Same-page navigation now reuses the NEW window, not the shell hrefs.
     nav_href = page.get_attribute('#side-nav a[href^="/errors"]', "href")
     assert nav_href is not None

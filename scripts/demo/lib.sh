@@ -9,7 +9,7 @@ DEMO_SECRET_DIR="$DEMO_ROOT/artifacts/local-demo-secrets"
 DEMO_ENV_FILE="$DEMO_SECRET_DIR/demo.env"
 DEMO_TOKEN_FILE="$DEMO_SECRET_DIR/demo-token.txt"
 DEMO_BASE_URL="http://127.0.0.1:8080"
-DEMO_ENTRY_URL="$DEMO_BASE_URL/?site=default&range=custom&from=2026-10-26T00:00:00%2B00:00&to=2026-10-29T00:00:00%2B00:00&tz=Europe%2FBerlin&source=example-combined"
+DEMO_ENTRY_URL="$DEMO_BASE_URL/?site=default&range=custom&from=2026-10-26T00:00:00%2B00:00&to=2026-11-01T00:00:00%2B00:00&tz=Europe%2FBerlin&source=example-combined"
 
 compose() {
   docker compose -p "$DEMO_PROJECT" -f "$DEMO_COMPOSE_FILE" "$@"

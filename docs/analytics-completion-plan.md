@@ -229,7 +229,7 @@ Tests: integration (filter propagation, URL state) + repeatable Playwright
 local assets only, real Chart datasets, paging/sorting), console/network
 clean.
 
-### Slice C — synthetic demo data, compatibility, measured scale (DECIDED, NOT AUTHORIZED YET)
+### Slice C — synthetic demo data, compatibility, measured scale (AUTHORIZED 2026-11-01, DELIVERED FOR INDEPENDENT RUNTIME VERIFICATION)
 
 Decision (concrete, review-accepted): preserve the original T8 fixture
 untouched; add one additive synthetic fixture with hand counts exercising
@@ -241,6 +241,20 @@ and original live demo stay unchanged until a tested candidate exists.
 Docker/browser execution stays with the independent local runner; no
 retry or weakening of controls from the coding session.
 Acceptance: ING-04, DB-01, OPS-02, OPS-03, QA-01.
+
+Status 2026-11-01: authorized via `artifacts/task-inputs/slice-c-delivery.md`;
+delivered on `feature/traffic-analytics` as the combined 120-row dataset
+(30 T8 rows 26–28 Oct untouched + 90 rich rows 29–31 Oct under unchanged
+`example-combined`), pinned expectations in
+`tests/fixtures/expected/demo_slice_c.json`, two-fixture probe/seeder,
+tracked isolated candidate procedure
+(`scripts/demo/verify_candidate.sh`, project `logcarve-demo-candidate`,
+loopback 8091), combined-window demo URL (26 Oct–01 Nov), and the accepted
+B legacy-test update (`status=404` preserved across navigation; behavior
+unchanged). STOP for independent runtime verification (candidate Docker
+run, offline smoke, protected Playwright incl. the updated B case, and
+the typical whole-page 100k benchmark) before any original-demo change.
+No claim beyond the evidence in `docs/verification.md`.
 
 Non-goals (recorded, not silently promoted): gzip/custom formats, rotation,
 GeoIP, raw-IP views, session reconstruction, live ingestion, MCP server,
