@@ -117,6 +117,26 @@
   white-space: nowrap;
 }
 
+/* Requests explorer: the table fills the main width; client pseudonyms
+   stay on one compact line (full value in details/title); paths wrap at
+   word boundaries instead of splitting every letter. Detail panels span
+   the full table width inside the scroll container and wrap normally. */
+.req-table {
+  width: 100%;
+}
+.req-client {
+  white-space: nowrap;
+}
+.req-path {
+  overflow-wrap: anywhere;
+}
+.req-detail td {
+  white-space: normal;
+}
+.req-detail .tech {
+  overflow-wrap: anywhere;
+}
+
 /* Local htmx request indicators (htmx includeIndicatorStyles is off so
    no style element is injected at runtime, keeping style-src 'self'). */
 .htmx-indicator {

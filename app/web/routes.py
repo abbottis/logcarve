@@ -582,8 +582,11 @@ def _overview_context(request, conn, rules, params) -> tuple[dict | None, str | 
             ),
         },
         {
+            # "Largest responses" sorts individual requests by known bytes
+            # (Requests bytes_desc), not the aggregated per-path byte sums
+            # on this page, so the metric stays exact per response.
             "label": t("quick.largest"),
-            "url": _quick_url("/", params, site, (), paths_sort="bytes_desc"),
+            "url": _quick_url("/requests", params, site, (), sort="bytes_desc"),
         },
     ]
     timeline = [
@@ -748,6 +751,14 @@ def status_label(code: int) -> str:
         return f"{code} · {HTTPStatus(code).phrase}"
     except ValueError:
         return t("status.unregistered", code=code)
+
+
+def status_phrase(code: int) -> str:
+    """Registered reason phrase for a status; honest fallback for unknowns."""
+    try:
+        return HTTPStatus(code).phrase
+    except ValueError:
+        return "unregistered"
 
 
 def human_bytes(value: int | None) -> str:
@@ -1104,6 +1115,94 @@ def _errors_context(request: Request, conn, params):
     return context, None
 
 
+#: Allowlisted explorer sorts for the Requests page, in front-column
+#: order (Action is never sortable; Access is a derived display).
+EXPLORER_SORTS = (
+    "newest",
+    "oldest",
+    "time_asc",
+    "time_desc",
+    "client_asc",
+    "client_desc",
+    "method_asc",
+    "method_desc",
+    "path_asc",
+    "path_desc",
+    "status_asc",
+    "status_desc",
+    "bytes_asc",
+    "bytes_desc",
+)
+
+#: Sortable Requests columns: (key, default sort when the column is
+#: not current). The Time group keeps the legacy ``newest``/``oldest``
+#: values alongside the explicit ``time_*`` pair; every other column
+#: toggles its ascending/descending pair.
+_EXPLORER_SORT_COLUMNS: tuple[tuple[str, str], ...] = (
+    ("client", "client_asc"),
+    ("time", "newest"),
+    ("method", "method_asc"),
+    ("path", "path_asc"),
+    ("status", "status_asc"),
+    ("bytes", "bytes_desc"),
+)
+
+
+def _sort_headers(page_url_fn, current: str, tz_name: str) -> list[dict[str, object]]:
+    """Header view models for the sortable Requests columns.
+
+    Each header carries its label, current direction (for ``aria-sort``
+    and the visible marker), and the toggle link that keeps the full
+    filter scope while resetting the offset to the first page.
+    """
+    labels = {
+        "client": t("requests.client"),
+        "time": t("requests.time_in", tz=tz_name),
+        "method": t("table.method"),
+        "path": t("table.path"),
+        "status": t("table.status"),
+        "bytes": t("table.bytes"),
+    }
+    headers = []
+    for key, default in _EXPLORER_SORT_COLUMNS:
+        if key == "time":
+            members = {"newest", "oldest", "time_asc", "time_desc"}
+            active = current in members
+            if current in ("newest", "time_desc"):
+                nxt = "oldest" if current == "newest" else "time_asc"
+                direction: str | None = "descending"
+            elif current in ("oldest", "time_asc"):
+                nxt = "newest" if current == "oldest" else "time_desc"
+                direction = "ascending"
+            else:
+                nxt, direction = default, None
+        else:
+            asc, desc = f"{key}_asc", f"{key}_desc"
+            active = current in (asc, desc)
+            if not active:
+                nxt, direction = default, None
+            elif current == asc:
+                nxt, direction = desc, "ascending"
+            else:
+                nxt, direction = asc, "descending"
+        headers.append(
+            {
+                "key": key,
+                "label": labels[key],
+                "active": active,
+                "direction": direction,
+                "direction_label": (
+                    t("requests.sorted_asc")
+                    if direction == "ascending"
+                    else (t("requests.sorted_desc") if direction == "descending" else "")
+                ),
+                "next_sort": nxt,
+                "href": page_url_fn("/requests", sort=nxt, offset=0),
+            }
+        )
+    return headers
+
+
 def _requests_context(request: Request, conn, params):
     site, sites, error = _site_or_error(conn, params)
     if error is not None:
@@ -1116,7 +1215,7 @@ def _requests_context(request: Request, conn, params):
     except _InvalidFilter:
         return None, "error.bad_params"
     filt = context["filt"]
-    sort, error = _parse_sort(request.query_params, ("newest", "oldest"), "newest")
+    sort, error = _parse_sort(request.query_params, EXPLORER_SORTS, "newest")
     if error is not None:
         return None, error
     page_filt = filt.model_copy(update={"limit": params["limit"], "offset": params["offset"]})
@@ -1125,26 +1224,63 @@ def _requests_context(request: Request, conn, params):
     )
     summary = service.summarize(conn, filt, request.app.state.rules)
     _attach_observed_options(conn, context, filt, request.app.state.rules)
+    # Named-bot metadata for the per-row details panel comes from the
+    # versioned in-memory catalog (no per-row query); stored values stay
+    # exact while labels read human-friendly.
+    bot_rules = {
+        rule.id: rule for rule in request.app.state.rules if rule.ua_contains or rule.ua_regex
+    }
     # Display timestamps in the selected timezone; the UTC instant stays
     # in the title attribute so both instants are inspectable. Stored
     # values are UTC ISO strings; unparsable ones fall back to verbatim.
     rows = []
-    for row in explorer["items"]:
-        display = row["ts_utc"]
+    for index, row in enumerate(explorer["items"]):
+        display = str(row["ts_utc"])
+        offset = params["tz_name"]
         try:
             moment = datetime.fromisoformat(str(row["ts_utc"]))
             if moment.tzinfo is None:
                 moment = moment.replace(tzinfo=UTC)
             display = moment.astimezone(params["tz"]).strftime("%Y-%m-%d %H:%M %Z")
-        except (ValueError, TypeError):
+            offset = format_offset_suffix(params["tz_name"], moment)
+        except (ValueError, TypeError, OverflowError, OSError):
             pass
-        rows.append({**row, "ts_display": display})
+        rule_meta = None
+        if row["rule_id"] is not None:
+            rule = bot_rules.get(str(row["rule_id"]))
+            if rule is not None:
+                rule_meta = {
+                    "id": rule.id,
+                    "version": rule.version,
+                    "title": display_bot_title(rule.title),
+                    "meaning": rule.meaning,
+                    "category": category_label(rule.category),
+                    "provider": provider_label(rule.provider),
+                    "purpose": purpose_label(rule.purpose),
+                    "provider_raw": rule.provider,
+                    "purpose_raw": rule.purpose,
+                }
+        rows.append(
+            {
+                **row,
+                "ts_display": display,
+                "ts_offset": offset,
+                "status_phrase": status_phrase(int(row["status"])),
+                "rule_meta": rule_meta,
+                "detail_id": f"req-detail-{params['offset'] + index}",
+            }
+        )
     context.update(
         {
             "summary": summary,
             "totals": summary["totals"],
             "rows": rows,
             "explorer_sort": sort,
+            "sort_headers": _sort_headers(
+                lambda path, **overrides: _page_url(path, params, site, **overrides),
+                sort,
+                params["tz_name"],
+            ),
             "paging": _paging_nav(
                 "/requests", params, site, explorer["total_rows"], {"sort": sort}
             ),

@@ -16,7 +16,7 @@ def test_shipped_rule_files_load_with_versions():
     bots = load_rules(BOT_RULES)
     sec = load_rules(SEC_RULES)
     assert bots.version == 3
-    assert sec.version == 1
+    assert sec.version == 2
     assert len(bots.rules) == 77
     assert bots.provenance and sec.provenance
     assert {rule.id for rule in bots.rules} >= {
@@ -26,7 +26,18 @@ def test_shipped_rule_files_load_with_versions():
         "bot-ai-claude",
         "bot-ai-perplexity",
     }
-    assert {rule.id for rule in sec.rules} == {"sec-sensitive-path", "sec-repeated-client-errors"}
+    assert {rule.id for rule in sec.rules} == {
+        "sec-sensitive-path",
+        "sec-repeated-client-errors",
+        "sec-conflicting-bot-identity",
+    }
+    conflict = next(r for r in sec.rules if r.id == "sec-conflicting-bot-identity")
+    assert conflict.version == 1
+    assert conflict.category == "conflicting_bot_identity"
+    assert conflict.conflicting_identities is True
+    assert not conflict.ua_contains and not conflict.ua_regex
+    assert not conflict.path_contains and conflict.min_client_errors is None
+    assert "never" in conflict.meaning and "fake" in conflict.meaning
 
 
 def test_ua_matching_is_case_insensitive_claim_only():

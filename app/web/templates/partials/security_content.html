@@ -1,5 +1,6 @@
 {% if oob_notice %}<p id="filter-times-notice" hx-swap-oob="true" class="w-full text-sm text-base-content/70">{{ t("filter.times_in", tz=tz_name) }} ({{ tz_offset }}; {{ t("filter.offset_note", date=window_start_date) }})</p>{% endif %}
 <p class="tech mb-4 text-sm text-base-content/70" data-observation-window>{{ window_from }} → {{ window_to }}</p>
+{% include "partials/filter_oob.html" %}
 {% include "partials/active_matchers.html" %}
 {% if summary.warnings %}
 <div class="mb-4 space-y-2" role="status">
@@ -61,6 +62,15 @@
           </table>
         </div>
         <p class="mt-1 text-sm text-base-content/70">{{ t("finding.sample_paths", shown=finding.evidence.paths_shown, total=finding.evidence.paths_total) }}</p>
+        {% endif %}
+        {% if finding.evidence.agents %}
+        <h3 class="mt-2 text-sm font-medium">{{ t("finding.evidence") }}</h3>
+        <ul class="mt-1 space-y-1">
+          {% for agent in finding.evidence.agents %}
+          <li class="tech break-all text-sm">{{ agent.user_agent }} · {{ agent.requests }}</li>
+          {% endfor %}
+        </ul>
+        <p class="mt-1 text-sm text-base-content/70">{{ t("finding.sample_agents", shown=finding.evidence.agents_shown, total=finding.evidence.agents_total) }}</p>
         {% endif %}
         {% if finding.evidence.client_pseudonym %}
         <h3 class="mt-2 text-sm font-medium">{{ t("finding.evidence") }}</h3>

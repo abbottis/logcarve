@@ -1547,3 +1547,59 @@ sandbox — chromium launch denied by the enclosing sandbox
 (MachPortRendezvous permission, kill EPERM); no retry, no weakening;
 coordinator runs `uv run --locked pytest tests/e2e -q` outside it.
 Docker/8080 NOT RUN here. No product/provider calls, no purchases.
+
+## 2026-11-01 — Stage B owner-UX review (Requests overview, conflicting-bot signal, A-findings fixes)
+
+Bounded implementation on `feature/owner-ux-review-2026-11-01`, sole
+writer, exact model `muse-spark-1.3-contributor`/medium/Contributor ON;
+sandbox + approval ON, no agents/calls/push/main merge/production/
+deployment. Synthetic fixtures only; no schema migration, no
+120-row/digest/seed changes; original demo fixtures byte-identical.
+
+Change: B1 8-column Requests overview + expandable per-row details +
+14 allowlisted server sorts (legacy `newest`/`oldest` stable,
+timestamp/id tie-breaks, NULL-bytes-last, filters/paging before/after
+sorting); B2 original `sec-conflicting-bot-identity` v1 (security
+ruleset v1→v2, bot catalog 77 unchanged, first-match order unchanged)
+with explicit 9-token URL-stripped token-boundary detection shared
+across a SQLite UDF, exact all-row aggregation and the deterministic
+`security_findings` path (API + assistant tools see identical
+counts/rule-version/limitations); B3 "Largest responses" → Requests
+`bytes_desc` plus status-phrase/byte polish. Stage A coordinator
+findings fixed: ZoneInfo cache 1024, OOB option-label refresh,
+largest-link retarget, Edge/Opera-before-Chrome, bots+automation note,
+unique e2e basename, semantic identity-legend assertion. No
+DNS/HTTP/GeoIP/unmasking, bot removal, model tools, shell/files
+actions, or allowance/dependency changes.
+
+Actual results (project .venv, Python 3.12.16, same session, clean
+tree before commit): new `tests/unit/test_conflict_detection.py`
+(10 tests) PASS; new
+`tests/integration/test_owner_ux_stage_b.py` (17 tests: every sort
+asc/desc with hand-derived orders, paging/filter/API-vs-service
+agreement, hostile-sort 400, cross-site/source bounds, legacy sort
+stability, privacy, conflict positives/negatives, exact counts,
+5100-distinct-agent exactness, bounded samples, AI projection caps,
+browser-family regression, web columns/details/OOB/quick-link/API
+agreement) PASS; updated maintained tests
+(`test_owner_ux_stage_a` +OOB test, `test_web_slice_b2` 8-column
+headers, `test_rules` ruleset v2 + new rule, `test_traffic_api`
+`ua_truncated`/`conflict` fields) PASS; renamed
+`tests/e2e/test_owner_ux_browser.py` (unique basename, semantic
+legend, new sort/details keyboard/back/reload coverage). Full
+`tests/unit tests/integration`: 529 passed, 2 skipped (pre-existing
+skips). `ruff check .` PASS; `ruff format --check .` PASS (167
+files). Authored assets rebuilt locally (`npm run build:js`,
+`npm run build:css`; generated `app/web/static/app.css` diff
+inspected; `static/js` outputs stay gitignored per project
+convention) and `node scripts/check_no_external.mjs` PASS (no remote
+refs). New e2e file: NOT RUN in this sandbox (chromium launch
+denied as in Stage A; no retry, no weakening); coordinator runs
+`uv run --locked pytest tests/e2e -q` outside it. Docker/8080 NOT
+RUN here. No product/provider calls, no purchases.
+
+Acceptance impact: owner-UX Stage B complete at this anchor; owner
+manual acceptance still pending. Historical real AI 2-of-3
+INCOMPLETE, no-new-paid-authorization, actual-demo-AI-off and
+x86-NOT-RUN are preserved. Coding Contributor usage stays separate
+from product Standard/data-egress/caps.

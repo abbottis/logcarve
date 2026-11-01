@@ -136,8 +136,16 @@ def sqlite_classify_ua(user_agent: object, spec: object) -> int | None:
 
 
 def register_sqlite_functions(conn) -> None:
-    """Register the classifier scalar on one DB-API connection."""
+    """Register the classifier + conflict scalars on one DB-API connection.
+
+    ``conflicting_bot`` carries a fixed hand-authored token set (no
+    parameters, no client input): the same pure detection the Python
+    helpers use, so SQL aggregation and per-row signals always agree.
+    """
+    from app.analytics.conflict import sqlite_conflicting_bot
+
     conn.create_function("classify_ua", 2, sqlite_classify_ua, deterministic=True)
+    conn.create_function("conflicting_bot", 1, sqlite_conflicting_bot, deterministic=True)
 
 
 def classify_one(user_agent: str | None, classifier: Classifier) -> tuple[int | None, str]:

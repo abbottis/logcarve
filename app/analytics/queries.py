@@ -739,24 +739,62 @@ def scoped_path_count(
     )
 
 
+#: Allowlisted explorer orders: each contract sort literal maps to ONE
+#: fixed ORDER BY fragment. Filters/site/source/time/matchers apply in
+#: WHERE before sorting; limits/offsets apply after. No client input is
+#: ever interpolated into SQL. Ties break by timestamp then id so paging
+#: is stable; byte sorts compare numeric values with NULLs last (never
+#: formatted strings).
+_EXPLORER_ORDER: dict[str, str] = {
+    "newest": "ts_utc DESC, id DESC",
+    "oldest": "ts_utc ASC, id ASC",
+    "time_desc": "ts_utc DESC, id DESC",
+    "time_asc": "ts_utc ASC, id ASC",
+    "client_asc": "client_pseudonym ASC NULLS LAST, ts_utc ASC, id ASC",
+    "client_desc": "client_pseudonym DESC NULLS LAST, ts_utc ASC, id ASC",
+    "method_asc": "method ASC NULLS LAST, ts_utc ASC, id ASC",
+    "method_desc": "method DESC NULLS LAST, ts_utc ASC, id ASC",
+    "path_asc": "path ASC NULLS LAST, ts_utc ASC, id ASC",
+    "path_desc": "path DESC NULLS LAST, ts_utc ASC, id ASC",
+    "status_asc": "status ASC NULLS LAST, ts_utc ASC, id ASC",
+    "status_desc": "status DESC NULLS LAST, ts_utc ASC, id ASC",
+    "bytes_asc": "bytes ASC NULLS LAST, ts_utc ASC, id ASC",
+    "bytes_desc": "bytes DESC NULLS LAST, ts_utc ASC, id ASC",
+}
+
+#: Scalar for the conservative conflicting-identity signal: fixed
+#: hand-authored token set, no parameters, shared with the Python
+#: helpers in :mod:`app.analytics.conflict`.
+_CONFLICT = "conflicting_bot(user_agent)"
+
+
 def request_rows(
     conn: sqlite3.Connection, query: ExplorerQuery, classifier: Classifier
 ) -> tuple[list[dict[str, object]], int]:
-    """Sanitized paginated request rows: newest/oldest with stable id ties.
+    """Sanitized paginated request rows in one allowlisted server sort.
 
     Exposes only minimized fields: no raw lines, original IPs, query
-    values or full user agents (truncated to 200 chars).
+    values or full user agents (truncated to 200 chars with an explicit
+    truncation flag). The conflict flag is a derived boolean computed
+    from the full stored sanitized agent — the full value itself never
+    leaves the database.
     """
     filt = query.filt
     where, params = _where(filt, classifier)
     traffic_case, traffic_params = traffic_case_sql(classifier)
     rule_case, rule_params = rule_id_case_sql(classifier)
     total = conn.execute(f"SELECT COUNT(*) FROM requests WHERE {where}", params).fetchone()[0]
-    order = "ts_utc DESC, id DESC" if query.sort == "newest" else "ts_utc ASC, id ASC"
+    try:
+        order = _EXPLORER_ORDER[query.sort]
+    except KeyError as exc:
+        raise ValueError(f"unknown explorer sort: {query.sort!r}") from exc
     rows = conn.execute(
         "SELECT ts_utc, method, path, status, bytes, referer_host,"
-        " substr(user_agent, 1, 200), client_pseudonym,"
-        f" {traffic_case} AS traffic, {rule_case} AS rule_id"
+        " substr(user_agent, 1, 200),"
+        " CASE WHEN user_agent IS NOT NULL AND LENGTH(user_agent) > 200 THEN 1 ELSE 0 END,"
+        " client_pseudonym,"
+        f" {traffic_case} AS traffic, {rule_case} AS rule_id,"
+        f" {_CONFLICT} AS conflict"
         f" FROM requests WHERE {where} ORDER BY {order} LIMIT ? OFFSET ?",
         [*traffic_params, *rule_params, *params, filt.limit, filt.offset],
     ).fetchall()
@@ -770,13 +808,76 @@ def request_rows(
                 "bytes": nbytes,
                 "referer_host": host,
                 "user_agent": agent,
+                "ua_truncated": bool(truncated),
                 "client_pseudonym": pseudonym,
                 "traffic": traffic,
                 "rule_id": rule_id,
+                "conflict": bool(conflict),
             }
-            for ts, method, path, status, nbytes, host, agent, pseudonym, traffic, rule_id in rows
+            for (
+                ts,
+                method,
+                path,
+                status,
+                nbytes,
+                host,
+                agent,
+                truncated,
+                pseudonym,
+                traffic,
+                rule_id,
+                conflict,
+            ) in rows
         ],
         total,
+    )
+
+
+def conflict_counts(
+    conn: sqlite3.Connection, filt: AnalyticsFilter, classifier: Classifier | None = None
+) -> dict[str, int]:
+    """Exact conflicting-identity totals over the ENTIRE selected scope.
+
+    A single all-row SQL aggregation (no distinct-UA scan cap, no Python
+    row loading, no N+1): one row per request counts toward ``requests``
+    while ``distinct_agents`` counts stored sanitized agents exactly,
+    however many there are.
+    """
+    where, params = _where(filt, classifier)
+    row = conn.execute(
+        f"SELECT COUNT(*), COUNT(DISTINCT user_agent) FROM requests WHERE {where} AND {_CONFLICT}",
+        params,
+    ).fetchone()
+    return {"requests": int(row[0]), "distinct_agents": int(row[1])}
+
+
+def conflict_sample_agents(
+    conn: sqlite3.Connection,
+    filt: AnalyticsFilter,
+    classifier: Classifier | None = None,
+    *,
+    limit: int = 10,
+) -> tuple[list[dict[str, object]], int]:
+    """Bounded conflicting-UA sample (200-char truncation) + exact total.
+
+    Returns the top ``limit`` conflicting agents by request count plus the
+    exact distinct-agent total so callers label samples explicitly
+    (``shown``/``total``) instead of silently narrowing them.
+    """
+    where, params = _where(filt, classifier)
+    total = conn.execute(
+        f"SELECT COUNT(DISTINCT user_agent) FROM requests WHERE {where} AND {_CONFLICT}",
+        params,
+    ).fetchone()[0]
+    rows = conn.execute(
+        "SELECT substr(user_agent, 1, 200) AS agent, COUNT(*) AS requests"
+        f" FROM requests WHERE {where} AND {_CONFLICT} AND user_agent IS NOT NULL"
+        " GROUP BY user_agent ORDER BY requests DESC, user_agent ASC LIMIT ?",
+        [*params, limit],
+    ).fetchall()
+    return (
+        [{"user_agent": agent, "requests": count} for agent, count in rows],
+        int(total),
     )
 
 
@@ -820,11 +921,14 @@ def resource_breakdown(
 
 #: Claimed browser family/OS from UA heuristics, applied only to
 #: browser-like rows. Families are claim labels, never verified identities.
+#: Edge and Opera markers precede the generic Chrome marker: both vendors
+#: ship a Chromium UA that also contains ``Chrome`` (and ``Safari``), so
+#: testing Chrome first would mislabel every Edge/Opera row as Chrome.
 _BROWSER_FAMILY_CASE = """CASE
-        WHEN lower(user_agent) LIKE '%chrome%' OR lower(user_agent) LIKE '%crios%' THEN 'Chrome'
-        WHEN lower(user_agent) LIKE '%firefox%' OR lower(user_agent) LIKE '%fxios%' THEN 'Firefox'
         WHEN lower(user_agent) LIKE '%edg/%' OR lower(user_agent) LIKE '%edgios%' THEN 'Edge'
         WHEN lower(user_agent) LIKE '%opr/%' OR lower(user_agent) LIKE '%opera%' THEN 'Opera'
+        WHEN lower(user_agent) LIKE '%chrome%' OR lower(user_agent) LIKE '%crios%' THEN 'Chrome'
+        WHEN lower(user_agent) LIKE '%firefox%' OR lower(user_agent) LIKE '%fxios%' THEN 'Firefox'
         WHEN lower(user_agent) LIKE '%safari%' THEN 'Safari'
         ELSE 'Other' END"""
 _BROWSER_OS_CASE = """CASE

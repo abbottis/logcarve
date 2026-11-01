@@ -61,6 +61,31 @@ def test_unobserved_valid_selection_retained(web):
     assert "Status 599 (unregistered)" in page
 
 
+def test_apply_refreshes_option_labels_out_of_band(web):
+    client, _ = web
+    _login(client)
+    # Full pages carry exactly one of each control id: no duplicate form.
+    full = client.get(f"/?site=default&{WINDOW_QS}&tz=UTC").text
+    assert full.count('id="f-tz"') == 1
+    assert full.count('id="f-method"') == 1
+    assert full.count('id="f-status"') == 1
+    assert full.count('id="filter-times-notice"') == 1
+    # A successful winter Apply labels Berlin +01:00 in notice AND options.
+    winter = client.get(f"/partials/overview?site=default&{WINDOW_QS}&tz=Europe%2FBerlin").text
+    assert "UTC+01:00" in winter
+    # A summer window moves the same zone to +02:00 everywhere.
+    summer_qs = "range=custom&from=2026-07-27T00:00:00%2B00:00&to=2026-07-28T00:00:00%2B00:00"
+    summer = client.get(f"/partials/overview?site=default&{summer_qs}&tz=Europe%2FBerlin").text
+    assert "UTC+02:00" in summer, "option offsets follow the applied window start"
+    oob_tz = re.findall(
+        r'<select id="f-tz"[^>]*hx-swap-oob="true"[^>]*>(.*?)</select>', summer, re.DOTALL
+    )
+    assert len(oob_tz) == 1 and "UTC+02:00" in oob_tz[0]
+    assert re.search(r'<select id="f-method"[^>]*hx-swap-oob="true"', summer)
+    assert re.search(r'<select id="f-status"[^>]*hx-swap-oob="true"', summer)
+    assert summer.count('id="filter-times-notice"') == 1
+
+
 def test_named_bot_dropdown_drops_claimed_prefix(web):
     client, _ = web
     _login(client)

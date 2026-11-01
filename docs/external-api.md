@@ -16,7 +16,7 @@
 | `GET /api/v1/crawlers` | Claimed crawler families, counts, paths and statuses |
 | `GET /api/v1/bots` | Named-bot table with allowlisted sort and paging |
 | `GET /api/v1/bots/{rule_id}` | One named bot: totals, top paths/404s, robots/sitemap, samples |
-| `GET /api/v1/requests` | Sanitized paginated request explorer (`newest`/`oldest`, bounded `search`) |
+| `GET /api/v1/requests` | Sanitized paginated request explorer (allowlisted sorts incl. legacy `newest`/`oldest` plus `time/client/method/path/status/bytes` ascending/descending with timestamp/id tie-breaks and NULL-bytes-last, bounded `search`); rows carry the 200-char agent sample with an explicit `ua_truncated` flag and a derived `conflict` boolean for the conflicting-bot-identity candidate |
 | `GET /api/v1/errors` | Error groups by path/status/referrer |
 | `GET /api/v1/security/findings` | Deterministic investigation candidates with rule/evidence refs |
 | `GET /api/v1/paths` | Top paths/methods/counts/errors/bytes |

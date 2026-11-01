@@ -126,6 +126,20 @@ def test_zone_objects_cached_bounded():
     from zoneinfo import ZoneInfoNotFoundError
 
     assert tzmod._zone("Europe/Berlin") is tzmod._zone("Europe/Berlin")
-    assert tzmod._zone.cache_info().maxsize == 128
+    # Capacity covers the whole installed catalogue (~599 keys): two
+    # full renderings share every zone object instead of re-opening
+    # hundreds of zone files, while untrusted input never reaches here
+    # (only exact installed catalogue keys are constructed).
+    assert tzmod._zone.cache_info().maxsize == 1024
+    tzmod._zone.cache_clear()
+    ref = _instant("2026-10-27T00:00:00+00:00")
+    tzmod.display_options(None, ref)
+    after_first = tzmod._zone.cache_info()
+    tzmod.display_options(None, ref)
+    after_second = tzmod._zone.cache_info()
+    assert after_second.misses == after_first.misses, (
+        "a second full catalogue rendering must not re-open zone files"
+    )
+    assert after_second.hits > after_first.hits
     with pytest.raises(ZoneInfoNotFoundError):
         tzmod._zone("Nope/Zone")

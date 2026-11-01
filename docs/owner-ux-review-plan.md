@@ -140,6 +140,65 @@ IDs: UI-02, UI-05, ANA-05.
   limitation.
 - Not claimed implemented in Stage A; reported as deferred below.
 
+## Stage B status — 2026-11-01 (implemented on `feature/owner-ux-review-2026-11-01`)
+
+Bounded implementation, same sole-writer public/synthetic checkout,
+exact model `muse-spark-1.3-contributor`/medium, sandbox/approval ON,
+no agents/calls/push/main merge/production. Synthetic fixtures only;
+no schema migration, 120-row fixtures/digests/seeds untouched.
+
+- B1 done: Requests is an 8-column log overview (Client compact HMAC,
+  Access, Time in selected zone with UTC retained, Method badge, Path,
+  Status badge+phrase, Size with explicit units/`unavailable`, Details
+  action) with expandable per-row panels (200-char UA sample with
+  honest truncation note, referrer host, traffic/bot/category/provider/
+  purpose metadata, full HMAC, UTC+local timestamps with offset, rule
+  ID/version, unavailable-timing note; never raw lines, IPs, query
+  values or countries). Server sorts for Client/Time/Method/Path/
+  Status/Size ascending+descending with aria-sort, visible direction
+  and timestamp/id tie-breaks; legacy `newest`/`oldest` kept stable;
+  Action unsortable. Details use native buttons + delegated external
+  `assets/src/js/requests.js` (CSP `self`, no inline/eval), keyboard
+  accessible, working after htmx Apply/paging; narrow viewports scroll
+  inside the contained table.
+- B2 done: `sec-conflicting-bot-identity` v1 (new category
+  `conflicting_bot_identity`; security ruleset v1→v2, old rules/
+  versions untouched, bot catalog stays 77 rules with unchanged
+  first-match order) fires only for unambiguous named tokens of two
+  or more distinct providers from an explicit 9-token known set
+  (`app/analytics/conflict.py`: URL-stripped token-boundary matching;
+  Mozilla/generic/curl/monitoring/`notgooglebot`/docs-URL/same-provider
+  negatives). Shared pure cached detection backs a SQLite UDF
+  (`conflicting_bot`), all-row exact SQL aggregation (no 5k cap, no
+  full-table Python rows, no N+1) with bounded explicitly-labelled
+  samples; the candidate rides the deterministic `security_findings`
+  path so the dashboard, API `/security/findings` and assistant tools
+  see identical counts/rule-version/limitations, and rows show a
+  potential-identity signal computed from the full stored UA (never
+  exposing it). Help documents the candidate plus the primary Google
+  verification reference; unknown agents stay unknown, absence of the
+  candidate proves nothing, no removal from counts, no auto-block.
+- B3 done: "Largest responses" sorts individual Requests by
+  `bytes_desc` (metric exact); status phrases and known-byte formats in
+  the Requests table; quick views keep site/source/window with explicit
+  matcher replacement and paging reset.
+- Stage A coordinator findings fixed in the same checkout: ZoneInfo
+  cache 128→1024 (two full catalogue renders share every zone, proven
+  by miss-count test); successful Apply refreshes the timezone/method/
+  status option labels out-of-band alongside the notice (exactly one of
+  each DOM id per response); Edge/Opera browser markers precede generic
+  Chrome; Crawlers groups note covers bots AND automation; e2e file
+  renamed to a unique basename; identity legend asserted as semantic
+  visible text.
+- Evidence: new `tests/unit/test_conflict_detection.py` (10),
+  `tests/integration/test_owner_ux_stage_b.py` (sorts/paging/API-vs-
+  service/hostile sorts/cross-site/source/privacy/conflict exactness/
+  5100-agent counts/samples/projection/browser regression/web columns/
+  details/OOB/quick-link/API agreement), updated maintained tests
+  (`test_web_slice_b2`, `test_traffic_api`, `test_rules`,
+  `test_owner_ux_stage_a`, renamed e2e with new sort/details browser
+  coverage). See `verification.md` for actuals.
+
 ## Conditional decisions (truthful)
 
 - C1. Presentation-only label changes (A1/A3): bot rule YAML, API

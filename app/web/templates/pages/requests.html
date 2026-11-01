@@ -1,5 +1,6 @@
 {% extends "base.html" %}
 {% set active = "requests" %}
+{% block head %}<script src="/static/js/requests.js" defer></script>{% endblock %}
 {% block content %}
 <div class="mb-4 flex flex-wrap items-baseline gap-x-3 gap-y-1">
   <h1 class="text-2xl font-semibold">{{ t("requests.title") }}</h1>

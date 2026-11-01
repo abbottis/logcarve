@@ -1,11 +1,18 @@
-# LogCarve security-candidate rules, version 1.
+# LogCarve security-candidate rules, version 2.
 #
 # Provenance: hand-authored for the LogCarve MVP from common sensitive
 # paths and failure patterns (no LogWerk material reused). Every match
 # is an INVESTIGATION CANDIDATE, never proof of compromise or
 # attribution. Thresholds are explicit parameters, not verdicts.
-version: 1
-provenance: "LogCarve MVP hand-authored security candidates; matches are investigation leads only"
+# v2 adds one ORIGINAL conservative conflicting-bot-identity candidate
+# (2026-11-01, owner-UX Stage B): a User-Agent carrying unambiguous
+# named identity tokens for two or more DISTINCT providers is a
+# POTENTIAL spoof/inconsistency lead, never a verified fake bot and
+# never a reason to auto-block or to remove rows from counts. Detection
+# lives in `app/analytics/conflict.py` (explicit 9-token known set,
+# URL-stripped token-boundary matching); older rules/versions unchanged.
+version: 2
+provenance: "LogCarve MVP hand-authored security candidates v2: sensitive-path and repeated-error rules unchanged, plus one original conflicting-bot-identity candidate; matches are investigation leads only"
 rules:
   - id: sec-sensitive-path
     version: 1
@@ -20,4 +27,11 @@ rules:
     title: "Repeated client errors from one pseudonym"
     meaning: "One client pseudonym produced repeated 4xx responses; investigation candidate only"
     min_client_errors: 5
+    severity: candidate
+  - id: sec-conflicting-bot-identity
+    version: 1
+    category: conflicting_bot_identity
+    title: "Conflicting bot identities in one User-Agent"
+    meaning: "One User-Agent claims named bot identities from two or more distinct providers; a potential spoof or inconsistency lead, never proof of a fake bot and never a reason to block"
+    conflicting_identities: true
     severity: candidate

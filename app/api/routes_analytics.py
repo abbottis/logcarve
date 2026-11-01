@@ -1030,7 +1030,25 @@ def get_requests(
     limit: Limit = 100,
     offset: Offset = 0,
     timezone: Timezone = "UTC",
-    sort: Annotated[Literal["newest", "oldest"], Query()] = "newest",
+    sort: Annotated[
+        Literal[
+            "newest",
+            "oldest",
+            "time_asc",
+            "time_desc",
+            "client_asc",
+            "client_desc",
+            "method_asc",
+            "method_desc",
+            "path_asc",
+            "path_desc",
+            "status_asc",
+            "status_desc",
+            "bytes_asc",
+            "bytes_desc",
+        ],
+        Query(),
+    ] = "newest",
 ):
     _, filt, err = _prepare(
         request,

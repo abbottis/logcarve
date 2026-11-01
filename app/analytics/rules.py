@@ -28,6 +28,7 @@ RuleCategory = Literal[
     "automation_tool",
     "sensitive_path",
     "repeated_client_errors",
+    "conflicting_bot_identity",
 ]
 
 ClaimSeverity = Literal["info", "candidate"]
@@ -45,6 +46,7 @@ class Rule(BaseModel):
     ua_regex: list[str] = Field(default_factory=list)
     path_contains: list[str] = Field(default_factory=list)
     min_client_errors: int | None = Field(default=None, ge=1)
+    conflicting_identities: bool = False
     severity: ClaimSeverity = "info"
 
     @field_validator("ua_contains", "ua_regex", "path_contains")
@@ -72,6 +74,7 @@ class Rule(BaseModel):
             and not self.ua_regex
             and not self.path_contains
             and self.min_client_errors is None
+            and not self.conflicting_identities
         ):
             raise ValueError(f"rule {self.id} needs at least one matcher")
         return self

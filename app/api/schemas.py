@@ -150,9 +150,11 @@ class ExplorerRowOut(BaseModel):
     bytes: int | None = None
     referer_host: str | None = None
     user_agent: str | None = None
+    ua_truncated: bool = False
     client_pseudonym: str
     traffic: str
     rule_id: str | None = None
+    conflict: bool = False
 
 
 class ExplorerResponse(BaseModel):

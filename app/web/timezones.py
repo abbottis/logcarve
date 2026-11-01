@@ -78,9 +78,16 @@ def is_supported(name: object) -> bool:
     return True
 
 
-@lru_cache(maxsize=128)
+@lru_cache(maxsize=1024)
 def _zone(name: str) -> ZoneInfo:
-    """Bounded cache of constructed zones; one object reused per request."""
+    """Bounded cache of constructed zones; one object reused per request.
+
+    Capacity 1024 covers the whole installed catalogue (currently ~599
+    keys), so two full catalogue renderings share every zone object
+    instead of re-opening hundreds of zone files per request. Caller
+    input never reaches the cache key unchecked: only exact installed
+    catalogue keys are constructed.
+    """
     return ZoneInfo(name)
 
 

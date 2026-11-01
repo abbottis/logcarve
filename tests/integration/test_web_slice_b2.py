@@ -109,8 +109,20 @@ def test_explorer_columns_timezone_and_sanitization(web):
     _login(client)
     base = f"site=default&{WINDOW_QS}&tz=UTC"
     page = client.get(f"/requests?{base}").text
-    for header in ("Bytes", "Referring domain", "Rule", "Time (UTC)"):
+    # Eight readable columns in front order with sortable headers.
+    for header in (
+        "Client",
+        "Access",
+        "Time (UTC)",
+        "Method",
+        "Path",
+        "Status",
+        "Bytes",
+        "Details",
+    ):
         assert header in page
+    assert 'aria-sort="descending"' in page
+    assert "sort=bytes_desc" in page
     # The seeded attack UA is truncated to 200 chars and escaped.
     assert "<script>" not in page
     assert "&lt;script&gt;" in page

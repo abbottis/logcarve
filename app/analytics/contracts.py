@@ -21,7 +21,27 @@ TopReferrerSort = Literal["requests_desc"]
 TrafficFilter = Literal["all", "browser_like", "claimed_bot", "other_automation", "unknown"]
 StatusClass = Literal["2xx", "3xx", "4xx", "5xx"]
 BotTableSort = Literal["requests_desc", "name_asc", "category_asc", "errors_desc", "bytes_desc"]
-ExplorerSort = Literal["newest", "oldest"]
+#: Request explorer sorts. ``newest``/``oldest`` are the legacy time sorts
+#: (kept stable: time DESC/ASC with id ties); the explicit ``time_*``
+#: pair spells the same orders. Every other pair sorts one data column
+#: ascending/descending with timestamp/id tie-breaks; byte sorts order
+#: NULLs last and compare numeric values, never formatted strings.
+ExplorerSort = Literal[
+    "newest",
+    "oldest",
+    "time_asc",
+    "time_desc",
+    "client_asc",
+    "client_desc",
+    "method_asc",
+    "method_desc",
+    "path_asc",
+    "path_desc",
+    "status_asc",
+    "status_desc",
+    "bytes_asc",
+    "bytes_desc",
+]
 
 
 def _as_utc(value: datetime) -> datetime:

@@ -1,4 +1,5 @@
 {% if oob_notice %}<p id="filter-times-notice" hx-swap-oob="true" class="w-full text-sm text-base-content/70">{{ t("filter.times_in", tz=tz_name) }} ({{ tz_offset }}; {{ t("filter.offset_note", date=window_start_date) }})</p>{% endif %}
+{% include "partials/filter_oob.html" %}
 <p class="tech mb-4 text-sm text-base-content/70" data-observation-window>{{ window_from }} → {{ window_to }}</p>
 {% include "partials/active_matchers.html" %}
 {% if summary.warnings %}
@@ -13,39 +14,82 @@
   <div class="card-body">
     <h2 id="req-h" class="card-title text-base">{{ t("requests.rows") }}</h2>
     {% if rows %}
-    <div class="mb-3 flex gap-2 text-sm">
-      <a class="link" href="{{ page_url("/requests", sort="newest", offset=0) }}" {% if explorer_sort == "newest" %}aria-current="true"{% endif %}>{{ t("requests.newest") }}</a>
-      <span aria-hidden="true">·</span>
-      <a class="link" href="{{ page_url("/requests", sort="oldest", offset=0) }}" {% if explorer_sort == "oldest" %}aria-current="true"{% endif %}>{{ t("requests.oldest") }}</a>
-    </div>
     <div class="table-scroll overflow-x-auto">
-      <table class="table table-sm">
+      <table class="table table-sm req-table">
         <caption class="sr-only">{{ t("requests.rows") }}</caption>
         <thead><tr>
-          <th scope="col">{{ t("requests.time_in", tz=tz_name) }}</th>
-          <th scope="col">{{ t("table.method") }}</th>
-          <th scope="col">{{ t("table.path") }}</th>
-          <th scope="col" class="text-right">{{ t("table.status") }}</th>
-          <th scope="col" class="text-right">{{ t("table.bytes") }}</th>
-          <th scope="col">{{ t("table.referrer") }}</th>
-          <th scope="col">{{ t("filter.traffic") }}</th>
-          <th scope="col">{{ t("table.rule") }}</th>
-          <th scope="col">{{ t("requests.agent") }}</th>
-          <th scope="col">{{ t("requests.client") }}</th>
+          {% set client_header = sort_headers[0] %}
+          <th scope="col" {% if client_header.active %}aria-sort="{{ client_header.direction }}"{% endif %}>
+            <a class="link" href="{{ client_header.href }}">{{ client_header.label }}
+              {% if client_header.active %}<span class="sr-only">({{ client_header.direction_label }})</span><span aria-hidden="true">{% if client_header.direction == "ascending" %}▲{% else %}▼{% endif %}</span>{% endif %}
+            </a>
+          </th>
+          <th scope="col">{{ t("requests.access") }}</th>
+          {% for header in sort_headers[1:] %}
+          <th scope="col" {% if header.active %}aria-sort="{{ header.direction }}"{% endif %}>
+            <a class="link" href="{{ header.href }}">{{ header.label }}
+              {% if header.active %}<span class="sr-only">({{ header.direction_label }})</span><span aria-hidden="true">{% if header.direction == "ascending" %}▲{% else %}▼{% endif %}</span>{% endif %}
+            </a>
+          </th>
+          {% endfor %}
+          <th scope="col">{{ t("requests.details") }}</th>
         </tr></thead>
         <tbody>
           {% for row in rows %}
           <tr>
+            <td><span class="tech req-client" title="{{ row.client_pseudonym }}"><span class="sr-only">{{ row.client_pseudonym }}</span><span aria-hidden="true">{{ row.client_pseudonym[:12] }}…</span></span></td>
+            <td>
+              {% if row.traffic == "browser_like" %}
+              <span class="badge badge-info">{{ t("traffic.browser_like") }}</span>
+              {% elif row.traffic == "claimed_bot" and row.rule_meta %}
+              <span class="font-medium">{{ row.rule_meta.title }}</span>
+              <span class="text-sm text-base-content/70">{{ row.rule_meta.category }}{% if row.rule_meta.provider_raw %} · {{ row.rule_meta.provider }}{% endif %}</span>
+              {% elif row.traffic == "other_automation" %}
+              <span class="font-medium">{% if row.rule_meta %}{{ row.rule_meta.title }}{% else %}{{ t("traffic.other_automation") }}{% endif %}</span>
+              {% if row.rule_meta %}<span class="text-sm text-base-content/70">{{ row.rule_meta.category }}</span>{% endif %}
+              {% else %}
+              <span class="text-sm text-base-content/70">{{ t("traffic.unknown") }}</span>
+              {% endif %}
+              {% if row.conflict %}
+              <span class="badge badge-warning">{{ t("requests.conflict_signal") }}</span>
+              {% endif %}
+            </td>
             <td class="tech" title="{{ row.ts_utc }}">{{ row.ts_display }}</td>
-            <td class="tech">{{ row.method }}</td>
-            <td class="tech break-all">{{ row.path }}</td>
-            <td class="text-right tech">{{ row.status }}</td>
-            <td class="text-right tech">{{ row.bytes if row.bytes is not none else "—" }}</td>
-            <td class="tech break-all">{{ row.referer_host or "—" }}</td>
-            <td class="tech">{{ t("traffic." + row.traffic) if row.traffic else "—" }}</td>
-            <td class="tech break-all">{{ row.rule_id or "—" }}</td>
-            <td class="tech break-all">{{ row.user_agent or "—" }}</td>
-            <td class="tech break-all">{{ row.client_pseudonym }}</td>
+            <td><span class="badge badge-ghost tech">{{ row.method }}</span></td>
+            <td class="tech req-path">{{ row.path }}</td>
+            <td><span class="badge badge-neutral">{{ row.status }}</span> <span class="text-sm">{{ row.status_phrase }}</span></td>
+            <td class="text-right tech">{{ human_bytes(row.bytes) if row.bytes is not none else t("requests.bytes_unavailable") }}</td>
+            <td><button type="button" class="btn btn-ghost btn-xs" data-detail-toggle aria-expanded="false" aria-controls="{{ row.detail_id }}" aria-label="{{ t("requests.show_details") }}" data-label-show="{{ t("requests.show_details") }}" data-label-hide="{{ t("requests.hide_details") }}">{{ t("requests.details") }}</button></td>
+          </tr>
+          <tr id="{{ row.detail_id }}" class="req-detail" hidden>
+            <td colspan="8">
+              <div class="rounded-lg border border-base-300 p-3 text-sm">
+                <h3 class="font-medium">{{ t("requests.detail_title") }}</h3>
+                <dl class="mt-2 space-y-1">
+                  <div><dt class="inline text-base-content/70">{{ t("finding.client_pseudonym") }}: </dt><dd class="inline tech break-all">{{ row.client_pseudonym }}</dd></div>
+                  <div><dt class="inline text-base-content/70">{{ t("requests.local_time") }} ({{ tz_name }}): </dt><dd class="inline tech">{{ row.ts_display }} ({{ row.ts_offset }})</dd></div>
+                  <div><dt class="inline text-base-content/70">{{ t("requests.utc_instant") }}: </dt><dd class="inline tech break-all">{{ row.ts_utc }}</dd></div>
+                  <div><dt class="inline text-base-content/70">{{ t("requests.agent") }}: </dt><dd class="inline tech break-all">{{ row.user_agent or "—" }}</dd></div>
+                  {% if row.ua_truncated %}
+                  <div><dd class="text-sm text-base-content/70">{{ t("requests.ua_note") }}</dd></div>
+                  {% endif %}
+                  <div><dt class="inline text-base-content/70">{{ t("filter.referrer") }}: </dt><dd class="inline tech break-all">{{ row.referer_host or "—" }}</dd></div>
+                  <div><dt class="inline text-base-content/70">{{ t("filter.traffic") }}: </dt><dd class="inline">{{ t("traffic." + row.traffic) if row.traffic else "—" }}</dd></div>
+                  {% if row.rule_meta %}
+                  <div><dt class="inline text-base-content/70">{{ t("table.rule") }}: </dt><dd class="inline tech">{{ row.rule_meta.id }} v{{ row.rule_meta.version }}</dd></div>
+                  <div><dt class="inline text-base-content/70">{{ t("crawlers.provider") }}: </dt><dd class="inline">{{ row.rule_meta.provider }}</dd></div>
+                  <div><dt class="inline text-base-content/70">{{ t("crawlers.purpose") }}: </dt><dd class="inline">{{ row.rule_meta.purpose }}</dd></div>
+                  <div><dd class="text-base-content/70">{{ row.rule_meta.meaning }}</dd></div>
+                  {% elif row.rule_id %}
+                  <div><dt class="inline text-base-content/70">{{ t("table.rule") }}: </dt><dd class="inline tech">{{ row.rule_id }}</dd></div>
+                  {% endif %}
+                  {% if row.conflict %}
+                  <div><dd><span class="badge badge-warning">{{ t("requests.conflict_signal") }}</span></dd></div>
+                  {% endif %}
+                  <div><dd class="text-base-content/70">{% include "icons/clock.svg" %}{{ t("data.response_time_unavailable") }}</dd></div>
+                </dl>
+              </div>
+            </td>
           </tr>
           {% endfor %}
         </tbody>

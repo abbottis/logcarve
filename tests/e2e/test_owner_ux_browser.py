@@ -1,5 +1,6 @@
-"""Stage A owner-review browser suite: native method/status dropdowns,
-window-start offset notice, readable Crawlers names and the Help page.
+"""Owner-review browser suite: native method/status dropdowns,
+window-start offset notice, readable Crawlers names, the Help page and
+the Stage B sortable Requests explorer with per-row details.
 
 Real interaction against a loopback server with synthetic fixtures at
 1440/1024/768/390 widths in both themes. Chromium sandbox stays engaged
@@ -187,7 +188,10 @@ def test_crawlers_names_readable_no_midword_breaks(page, ux_base, observed):
         # No repeated claim prefix in the bot dropdown or bot table.
         options = page.eval_on_selector("#f-bot", "el => Array.from(el.options).map(o => o.text)")
         assert all(not text.startswith("Claimed ") for text in options)
-        assert "Identified from User-Agent; identity not verified" in page.content()
+        # One clear identity legend as semantic visible text.
+        page.get_by_text("identified from User-Agent; identity not verified").first.wait_for(
+            timeout=10000
+        )
         # Category labels read human-friendly; raw snake values stay hidden.
         assert "Suspected automation" in page.content()
         assert "Automation tools" in page.content()
@@ -207,6 +211,58 @@ def test_crawlers_names_readable_no_midword_breaks(page, ux_base, observed):
         ):
             assert isinstance(region, bool)
         page.screenshot(path=str(SHOT_DIR / f"crawlers-stacked-{width}-{theme}.png"))
+    _assert_clean(observed, ux_base)
+
+
+def test_requests_sort_headers_and_details(page, ux_base, observed):
+    SHOT_DIR.mkdir(parents=True, exist_ok=True)
+    _login(page, ux_base)
+    for theme, width in (("light", 1440), ("dark", 390)):
+        page.set_viewport_size({"width": width, "height": 900})
+        page.select_option("#theme-select", theme)
+        page.goto(f"{ux_base}/requests?site=default&{W1}&tz=UTC")
+        page.get_by_role("heading", name="Sanitized request rows").wait_for(timeout=10000)
+        # Eight readable columns in front order with server-side sorts.
+        for name in ("Client", "Access", "Time (UTC)", "Method", "Path", "Status", "Bytes"):
+            page.get_by_role("columnheader", name=name).wait_for(timeout=10000)
+        page.get_by_role("columnheader", name="Details").wait_for(timeout=10000)
+        first_before = page.locator("td.req-path").first.inner_text(timeout=10000)
+        # Clicking a sort header changes the actual row order and URL state.
+        page.get_by_role("link", name="Bytes").click()
+        page.wait_for_function(
+            "() => window.location.href.includes('sort=bytes_desc')", timeout=10000
+        )
+        page.get_by_role("columnheader", name="Bytes").wait_for(timeout=10000)
+        assert "sorted descending" in page.content()
+        first_after = page.locator("td.req-path").first.inner_text(timeout=10000)
+        assert first_after == "/search", "bytes_desc puts the largest response first"
+        # Back returns to the previous sort without a reload failure.
+        page.go_back()
+        page.wait_for_function(
+            "() => !window.location.href.includes('sort=bytes_desc')", timeout=10000
+        )
+        assert page.locator("td.req-path").first.inner_text(timeout=10000) == first_before
+        # Details open and close on the real button, keyboard included.
+        toggle = page.get_by_role("button", name="Show row details").first
+        panel_id = toggle.get_attribute("aria-controls")
+        assert toggle.get_attribute("aria-expanded") == "false"
+        toggle.click()
+        page.wait_for_selector(f"tr#{panel_id}:not([hidden])", timeout=10000)
+        assert toggle.get_attribute("aria-expanded") == "true"
+        toggle.focus()
+        page.keyboard.press("Enter")
+        page.wait_for_selector(f"tr#{panel_id}[hidden]", timeout=10000)
+        assert toggle.get_attribute("aria-expanded") == "false"
+        # Reload keeps the retained filter/sort state.
+        page.get_by_role("link", name="Bytes").click()
+        page.wait_for_function(
+            "() => window.location.href.includes('sort=bytes_desc')", timeout=10000
+        )
+        page.reload()
+        page.get_by_role("heading", name="Sanitized request rows").wait_for(timeout=10000)
+        assert "sort=bytes_desc" in page.url
+        _assert_no_page_overflow(page)
+        page.screenshot(path=str(SHOT_DIR / f"requests-sorted-{width}-{theme}.png"))
     _assert_clean(observed, ux_base)
 
 

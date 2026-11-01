@@ -14,7 +14,7 @@ from dataclasses import dataclass, field
 from datetime import UTC, datetime, timedelta
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
-from app.analytics import queries
+from app.analytics import conflict, queries
 from app.analytics.classification import Classifier, build_classifier
 from app.analytics.contracts import (
     AnalyticsFilter,
@@ -366,11 +366,50 @@ def security_findings(
     *,
     observation_time: datetime | None = None,
 ) -> list[Finding]:
-    """Deterministic security investigation candidates with rule references."""
+    """Deterministic security investigation candidates with rule references.
+
+    Includes the conservative conflicting-bot-identity candidate when the
+    selected scope contains one: exact all-row totals (no UA sampling
+    cap) with a bounded, explicitly labelled agent sample. No DNS, HTTP,
+    GeoIP, unmasking or bot removal is ever performed; absence of this
+    candidate never proves the traffic genuine.
+    """
     observed = datetime.now(UTC) if observation_time is None else observation_time
     clf = _classifier_for(filt, rules)
     coverage = coverage_summary(conn, filt, rules)
     findings: list[Finding] = []
+    conflict_rule = next(
+        (rule for rule in rules if rule.id == conflict.CONFLICT_RULE_ID),
+        None,
+    )
+    if conflict_rule is not None:
+        totals = queries.conflict_counts(conn, filt, clf)
+        if totals["requests"] > 0:
+            sample, agents_total = queries.conflict_sample_agents(conn, filt, clf, limit=10)
+            findings.append(
+                Finding(
+                    rule_id=conflict_rule.id,
+                    rule_version=conflict_rule.version,
+                    category=conflict_rule.category,
+                    title=conflict_rule.title,
+                    severity=conflict_rule.severity,
+                    meaning=conflict_rule.meaning,
+                    window=_window_dict(filt),
+                    filters=_filter_dict(filt),
+                    observation_time=observed.isoformat(),
+                    counts={
+                        "requests": totals["requests"],
+                        "distinct_agents": totals["distinct_agents"],
+                    },
+                    evidence={
+                        "agents": sample,
+                        "agents_shown": len(sample),
+                        "agents_total": agents_total,
+                    },
+                    coverage_summary=coverage,
+                    limitations=[*LIMITATIONS_SECURITY, *LIMITATIONS_BOT, *LIMITATIONS_LOGS],
+                )
+            )
     path_rows, paths_truncated = queries.distinct_paths(conn, filt, clf)
     for rule in rules:
         if rule.path_contains:
@@ -683,7 +722,13 @@ def bot_detail(
 def request_explorer(
     conn: sqlite3.Connection, query: ExplorerQuery, rules: list[Rule]
 ) -> dict[str, object]:
-    """Sanitized paginated request rows for the dashboard/API explorer."""
+    """Sanitized paginated request rows for the dashboard/API explorer.
+
+    One allowlisted server sort (legacy ``newest``/``oldest`` kept);
+    rows carry the 200-char agent sample with a truncation flag and a
+    derived conflicting-identity boolean. No raw lines, original IPs,
+    query values or full agents are exposed.
+    """
     clf = _classifier_for(query.filt, rules)
     assert clf is not None
     items, total = queries.request_rows(conn, query, clf)

@@ -187,10 +187,14 @@ def test_explorer_search_and_sort(tapi):
             "bytes",
             "referer_host",
             "user_agent",
+            "ua_truncated",
             "client_pseudonym",
             "traffic",
             "rule_id",
+            "conflict",
         }
+        assert isinstance(row["ua_truncated"], bool)
+        assert isinstance(row["conflict"], bool)
 
 
 def test_timeseries_bots_panels_and_cross_site(tapi):
