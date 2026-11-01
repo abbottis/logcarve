@@ -70,7 +70,7 @@ test -f "$WORK/export/scripts/demo/probe_store.py"
 # Authoritative digests of the combined synthetic dataset (26-31 Oct 2026):
 # the candidate provenance check pins these values, never the mounts' bytes.
 T8_SHA=d765393fb016cc147cf2359f9612b4bb6b6582a9caf1966fb1fe380daeebeb65
-RICH_SHA=2c424fcf559e5d822db84102b15b9d0519b8a5b566977391fdfa9a1bf32e0d3f
+RICH_SHA=b9479a8e519b6c9bcdc95fd843ba3ba55066bf57db9f358bd57d9a46852ca45f
 sha_of() { python3 -c 'import hashlib,sys; print(hashlib.sha256(open(sys.argv[1],"rb").read()).hexdigest())' "$1"; }
 [ "$(sha_of "$WORK/export/tests/fixtures/combined/t8_smoke.txt")" = "$T8_SHA" ] || { echo "exported T8 digest drift" >&2; exit 1; }
 [ "$(sha_of "$WORK/export/tests/fixtures/combined/demo_rich_29_31oct.txt")" = "$RICH_SHA" ] || { echo "exported rich digest drift" >&2; exit 1; }

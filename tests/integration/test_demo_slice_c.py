@@ -413,6 +413,127 @@ def test_candidate_procedure_is_isolated_and_tracked(tmp_path):
         assert result.returncode == 0, result.stderr
 
 
+def test_rich_browser_rows_match_spec_per_day():
+    """Each rich day carries the specified 9 browser rows plus 1 Ahrefs row.
+
+    Static, hand-verifiable check on the fixture bytes (no product code):
+    per-day path order, brand/OS UA markers, byte/status preservation, and
+    the CCBot -> AhrefsBot SEO swap.
+    """
+    text = RICH.read_text()
+    days = {}
+    for line in text.splitlines():
+        day = line.split("[")[1].split("/")[0]
+        days.setdefault(day, []).append(line)
+    assert sorted(days) == ["29", "30", "31"]
+    expected_paths = [
+        "/",
+        "/assets/app.css",
+        "/assets/app.js",
+        "/api/search",
+        "/images/logo.svg",
+        "/fonts/site.woff2",
+        "/video/intro.mp4",
+        "/contact",
+        "/blog/old-slug",
+    ]
+    expected_bytes = ["1024", "2048", "512", "1536", "1536", "256", "256", "768", "256"]
+    expected_status = ["200", "200", "200", "200", "200", "404", "301", "200", "404"]
+    for day, lines in days.items():
+        assert len(lines) == 30, day
+        first_nine = lines[:9]
+        assert [line.split('"')[1].split(" ")[1] for line in first_nine] == expected_paths
+        assert [line.split(" ")[8] for line in first_nine] == expected_status
+        assert [line.split(" ")[9] for line in first_nine] == expected_bytes
+        uas = [line.rsplit('"', 3)[2] for line in first_nine]
+        assert sum("Chrome/120" in ua for ua in uas) == 3
+        assert sum("Firefox/119" in ua for ua in uas) == 2
+        assert sum("Safari/60" in ua for ua in uas) == 3
+        assert sum("Edg/120" in ua for ua in uas) == 1
+        assert sum("Windows NT" in ua for ua in uas) == 3
+        assert sum("X11; Linux" in ua for ua in uas) == 2
+        assert sum("Macintosh" in ua for ua in uas) == 2
+        assert sum("iPhone" in ua for ua in uas) == 1
+        assert sum("Android 14" in ua for ua in uas) == 1
+        assert sum("AhrefsBot" in line for line in lines) == 1
+    assert text.count("AhrefsBot") == 3
+    assert "CCBot" not in text
+    assert "synthetic/1.0" not in text
+
+
+def test_combined_browser_resource_seo_breadth_with_exact_totals(tmp_path):
+    """Product analytics agree with the independent breadth expectations.
+
+    Combined window: 120 rows / 127744 bytes, traffic 48/45/18/9, T8
+    fingerprint rows 30 (original window untouched); browser families
+    Chrome9/Firefox6/Safari9/Edge3 + 21 legacy Other, OS
+    Windows9/Linux27 (21 legacy X11/Linux + 6 rich)/macOS6/iOS3/Android3;
+    resource kinds style/script/font/media 3 each, image 6 (new SVG 3 +
+    pre-existing favicon 3); SEO AhrefsBot 3, CCBot gone.
+    """
+    root = _write_logs(tmp_path / "logs")
+    db = tmp_path / "breadth.sqlite3"
+    migrate(db)
+    _import(db, root, "t8.log")
+    _import(db, root, "rich.log")
+    rules = _rules()
+    conn = connect(db, read_only=True)
+    try:
+        summary = analytics_service.summarize(
+            conn, AnalyticsFilter(site_id="default", window=COMBINED_WINDOW), rules
+        )
+        breakdown = analytics_service.traffic_breakdown(
+            conn, AnalyticsFilter(site_id="default", window=COMBINED_WINDOW), rules
+        )
+        browsers = analytics_service.browser_breakdown(
+            conn, AnalyticsFilter(site_id="default", window=COMBINED_WINDOW), rules
+        )
+        resources = analytics_service.resource_breakdown(
+            conn, AnalyticsFilter(site_id="default", window=COMBINED_WINDOW), rules
+        )
+        crawlers = analytics_service.crawler_claims(
+            conn, AnalyticsFilter(site_id="default", window=COMBINED_WINDOW), rules
+        )
+        t8_rows = conn.execute(
+            "SELECT COUNT(*) FROM requests WHERE file_fingerprint = ?",
+            (EXPECTED["provenance"]["t8"]["sha256"],),
+        ).fetchone()[0]
+    finally:
+        conn.close()
+    assert summary["totals"]["requests"] == 120
+    assert summary["totals"]["bytes_total"] == 127744
+    assert {row["traffic"]: row["requests"] for row in breakdown["buckets"]} == {
+        "browser_like": 48,
+        "claimed_bot": 45,
+        "other_automation": 18,
+        "unknown": 9,
+    }
+    assert t8_rows == 30
+    assert {entry["family"]: entry["requests"] for entry in browsers["families"]} == {
+        "Chrome": 9,
+        "Firefox": 6,
+        "Safari": 9,
+        "Edge": 3,
+        "Other": 21,
+    }
+    assert {entry["os"]: entry["requests"] for entry in browsers["systems"]} == {
+        "Windows": 9,
+        "Linux": 27,
+        "macOS": 6,
+        "iOS": 3,
+        "Android": 3,
+    }
+    kinds = {entry["kind"]: entry["requests"] for entry in resources["items"]}
+    assert sum(kinds.values()) == 120
+    for kind in ("style", "script", "font", "media"):
+        assert kinds[kind] == 3, kind
+    # image covers the new SVG (3) plus the pre-existing favicon (3).
+    assert kinds["image"] == 6
+    named = {finding.rule_id: finding.counts["requests"] for finding in crawlers}
+    assert named.get("bot-seo-ahrefs") == 3
+    assert "bot-ai-ccbot" not in named
+
+
 def test_no_raw_ips_or_lines_leak_through_combined_analytics(tmp_path):
     root = _write_logs(tmp_path / "logs")
     db = tmp_path / "leak.sqlite3"

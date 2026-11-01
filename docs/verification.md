@@ -1,5 +1,55 @@
 # Verification record
 
+## 2026-11-01 — Slice C fixture-quality correction (browser/SEO breadth, undeployed)
+
+Owner-authorized bounded correction on clean `f740e6f`
+(`feature/traffic-analytics`). Sole writer, exact model
+`muse-spark-1.3-contributor`/medium/Contributor ON; sandbox + approval ON, no
+agents/calls/push/main/private-parent access. Synthetic fixtures only; T8
+fixture byte-identical (`d765393f…ebeb65`, 30 rows). No behavior, schema,
+dependency, runtime, credential or ledger changes.
+
+The 90-row rich fixture used one generic `Mozilla/5.0 (X11; Linux x86_64)
+synthetic/1.0` UA for all 27 browser-like rows (browser chart entirely
+Other with the 21 legacy rows) and lacked stylesheet/script/font/media
+samples plus an active SEO bot. Corrected 10 lines per day, in existing
+row order, with all statuses/methods/bytes/client addresses/times/referers
+unchanged: Chrome-Windows `/`, Firefox-Linux `/assets/app.css`, Safari-macOS
+`/assets/app.js`, Chrome-Windows `POST /api/search`, Edge-Windows
+`/images/logo.svg`, Safari-iOS `/fonts/site.woff2` (404 kept),
+Firefox-Linux `/video/intro.mp4` (301 kept), Safari-macOS `POST /contact`,
+Chrome-Android `/blog/old-slug`; one CCBot row per day now claims synthetic
+AhrefsBot (`bot-seo-ahrefs`, still claimed_bot). Per-day browser families
+Chrome3/Firefox2/Safari3/Edge1, OS Windows3/Linux2/macOS2/iOS1/Android1;
+combined families Chrome9/Firefox6/Safari9/Edge3 + 21 legacy Other, OS
+Windows9/Linux27 (21 legacy X11/Linux + 6 rich)/macOS6/iOS3/Android3;
+resource style/script/font/media 3 each, image 6 (new SVG 3 + favicon 3);
+totals exactly 120 rows / 127744 bytes, traffic 48/45/18/9, T8 rows 30.
+
+- New rich SHA `b9479a8e…52ca45f` pinned in `probe_store.py`,
+  `verify_candidate.sh`, `smoke_demo.sh`,
+  `tests/fixtures/expected/demo_slice_c.json` (named_bots
+  `bot-ai-ccbot`→`bot-seo-ahrefs` 3 combined / 1 per day, per-day and
+  combined path counts only); T8 pins untouched. First C rich hash never
+  deployed; original T8 never changed.
+- New tests in `test_demo_slice_c.py`: static per-day spec check (path
+  order, status/byte sequences, brand/OS markers, Ahrefs 1/day, no CCBot
+  or generic UA left) and product-agreement check (browser/resource/SEO
+  breadth with exact 120/127744, classes 48/45/18/9, T8 rows 30).
+
+| Check | Result | Evidence |
+| --- | --- | --- |
+| Focused `pytest tests/integration/test_demo_slice_c.py tests/integration/test_demo_probe.py` | PASS | 22 passed (14 Slice C + 8 probe), `.venv/bin/python -m pytest` |
+| `ruff check .` | PASS | All checks passed |
+| `ruff format --check .` | PASS | 151 files already formatted |
+| `uv lock --check` (`UV_CACHE_DIR=/tmp/uv-cache`) | PASS | 40 packages, lockfile current, no new dependency |
+| Full unit/integration suite | NOT RUN | Coordinator performs the final clean/conflicting full suites |
+| Browser/Docker/candidate/smoke | NOT RUN | Coordinator-owned (sandbox has no socket; never attempted) |
+
+Acceptance impact: demo dataset now exercises the accepted browser/OS,
+resource-kind and SEO analyses before deployment; probe/seeder/upgrade/
+replay/refusal logic and all state-safety guarantees unchanged.
+
 ## 2026-11-01 — Slice C delivery + B legacy-test update (independent runtime verification pending)
 
 Owner-authorized Slice C (`artifacts/task-inputs/slice-c-delivery.md`) on clean
@@ -23,9 +73,10 @@ outdated expectation/comment changed.
   followed link renders 200. PASS — server-side positive evidence for the
   updated browser expectation (browser re-run is coordinator-owned).
 - New `tests/fixtures/combined/demo_rich_29_31oct.txt` (90 rows, 30/30/30
-  over 29–31 Oct 2026, `2c424fcf…32e0d3f`): every UA verified per-rule
-  against the classifier before pinning (google/gpt/claude/bing/ccbot,
-  curl/python/uptimerobot/suspected, browser, `-` unknown).
+  over 29–31 Oct 2026, `b9479a8e…52ca45f`): every UA verified per-rule
+  against the classifier before pinning (google/gpt/claude/bing/ahrefs,
+  curl/python/uptimerobot/suspected, labeled Chrome/Firefox/Safari/Edge
+  browser families on brand/OS-marked synthetic UAs, `-` unknown).
 - New `tests/fixtures/expected/demo_slice_c.json`: hand-derived with
   awk/grep/sort (never the product parser) — combined 120 rows,
   200×86/301×3/404×28/500×3, GET×107/POST×9/HEAD×3/OPTIONS×1,

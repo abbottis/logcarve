@@ -31,7 +31,7 @@ What each step guarantees:
 - `start` builds the multistage image, waits for `/healthz`, then seeds the
   combined 120-row dataset: the untouched 30-row T8 fixture (fingerprint
   must equal the authoritative digest `d765393f…ebeb65`) plus the 90-row
-  rich fixture (`2c424fcf…32e0d3f`); foreign stores are refused untouched,
+  rich fixture (`b9479a8e…52ca45f`); foreign stores are refused untouched,
   and legacy T8-only stores upgrade additively (T8 rows never rewritten).
 - `health` asserts `ai_enabled=false`, unauthenticated `/readyz` → 401
   (gating proof), and private admin `/readyz` → ready. No secret is printed.

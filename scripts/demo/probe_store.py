@@ -36,7 +36,7 @@ EXPECTED_ROWS = 30
 # Authoritative digest of tests/fixtures/combined/demo_rich_29_31oct.txt
 # (90 rows, 30/30/30 across 29/31 Oct 2026, outside the T8 window).
 # Bump only with a reviewed fixture change.
-RICH_SHA256 = "2c424fcf559e5d822db84102b15b9d0519b8a5b566977391fdfa9a1bf32e0d3f"
+RICH_SHA256 = "b9479a8e519b6c9bcdc95fd843ba3ba55066bf57db9f358bd57d9a46852ca45f"
 RICH_ROWS = 90
 
 COMBINED_ROWS = EXPECTED_ROWS + RICH_ROWS
