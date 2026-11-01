@@ -80,6 +80,51 @@ def _split_hosts(values: list[str] | None) -> list[str]:
     return hosts
 
 
+def _resolve_explicit_hosts(
+    *,
+    site_hostname: str,
+    host_filter: list[str] | None,
+    host_alias: list[str] | None,
+    vhost_bearing: bool,
+) -> list[str]:
+    """Combine ``--host-filter`` and ``--host-alias`` into one host set.
+
+    ``--host-alias`` extends the configured primary (``site_hostname``);
+    ``--host-filter`` explicitly supplies a replacement set, so the
+    primary is NOT added then (aliases still append: every explicitly
+    named host is honored). With neither flag, host-bearing formats
+    (vhost/extended/auto, or a custom mapping with a ``vhost`` group)
+    fall back to the site hostname so foreign hosts can never be
+    silently counted as this site; plain formats stay unfiltered.
+    Matching is case-insensitive upstream (``HostFilter`` normalizes),
+    so duplicates fold here.
+    """
+    filters = _split_hosts(host_filter)
+    aliases = _split_hosts(host_alias)
+    if filters:
+        seen: set[str] = set()
+        explicit: list[str] = []
+        for host in [*filters, *aliases]:
+            key = host.lower()
+            if key not in seen:
+                seen.add(key)
+                explicit.append(host)
+        return explicit
+    if aliases:
+        combined = [site_hostname, *aliases]
+        seen = set()
+        deduped = []
+        for host in combined:
+            key = host.lower()
+            if key not in seen:
+                seen.add(key)
+                deduped.append(host)
+        return deduped
+    if vhost_bearing:
+        return [site_hostname]
+    return []
+
+
 def cmd_import(args: argparse.Namespace) -> int:
     custom_format = None
     if args.format == CUSTOM or args.format_config is not None:
@@ -91,15 +136,15 @@ def cmd_import(args: argparse.Namespace) -> int:
         except CustomFormatError as exc:
             print(f"error: invalid custom format ({exc.code})", file=sys.stderr)
             return 2
-    explicit_hosts = _split_hosts(args.host_filter) + _split_hosts(args.host_alias)
     has_custom_vhost = custom_format is not None and "vhost" in custom_format.pattern.groupindex
-    if not explicit_hosts and (
-        args.format in (APACHE_VHOST_COMBINED, NGINX_EXTENDED, AUTO) or has_custom_vhost
-    ):
-        # Vhost/extended sources always filter against the configured site
-        # host so foreign hosts can never be silently counted as this site.
-        # Custom vhost mappings default the same way when applicable.
-        explicit_hosts = [args.site_hostname]
+    explicit_hosts = _resolve_explicit_hosts(
+        site_hostname=args.site_hostname,
+        host_filter=args.host_filter,
+        host_alias=args.host_alias,
+        vhost_bearing=(
+            args.format in (APACHE_VHOST_COMBINED, NGINX_EXTENDED, AUTO) or has_custom_vhost
+        ),
+    )
     host_filter: HostFilter | None = None
     if explicit_hosts:
         try:
@@ -204,12 +249,15 @@ def cmd_reprocess(args: argparse.Namespace) -> int:
         except CustomFormatError as exc:
             print(f"error: invalid custom format ({exc.code})", file=sys.stderr)
             return 2
-    explicit_hosts = _split_hosts(args.host_filter) + _split_hosts(args.host_alias)
     has_custom_vhost = custom_format is not None and "vhost" in custom_format.pattern.groupindex
-    if not explicit_hosts and (
-        args.format in (APACHE_VHOST_COMBINED, NGINX_EXTENDED, AUTO) or has_custom_vhost
-    ):
-        explicit_hosts = [args.site_hostname]
+    explicit_hosts = _resolve_explicit_hosts(
+        site_hostname=args.site_hostname,
+        host_filter=args.host_filter,
+        host_alias=args.host_alias,
+        vhost_bearing=(
+            args.format in (APACHE_VHOST_COMBINED, NGINX_EXTENDED, AUTO) or has_custom_vhost
+        ),
+    )
     host_filter: HostFilter | None = None
     if explicit_hosts:
         try:
@@ -360,8 +408,18 @@ def build_parser() -> argparse.ArgumentParser:
         action="append",
         help="Relative path inside the approved root (repeatable file series)",
     )
-    importer.add_argument("--host-filter", action="append", default=None)
-    importer.add_argument("--host-alias", action="append", default=None)
+    importer.add_argument(
+        "--host-filter",
+        action="append",
+        default=None,
+        help="Explicit replacement host set (repeatable/comma-separated); --site-hostname is NOT added",
+    )
+    importer.add_argument(
+        "--host-alias",
+        action="append",
+        default=None,
+        help="Extra hosts extending --site-hostname (repeatable/comma-separated)",
+    )
     importer.add_argument("--site-id", default="default")
     importer.add_argument("--site-name", default="Example site")
     importer.add_argument("--site-hostname", default="example.org")
@@ -397,8 +455,18 @@ def build_parser() -> argparse.ArgumentParser:
         action="append",
         help="Relative path inside the approved root (repeatable file series)",
     )
-    reprocess.add_argument("--host-filter", action="append", default=None)
-    reprocess.add_argument("--host-alias", action="append", default=None)
+    reprocess.add_argument(
+        "--host-filter",
+        action="append",
+        default=None,
+        help="Explicit replacement host set (repeatable/comma-separated); --site-hostname is NOT added",
+    )
+    reprocess.add_argument(
+        "--host-alias",
+        action="append",
+        default=None,
+        help="Extra hosts extending --site-hostname (repeatable/comma-separated)",
+    )
     reprocess.add_argument("--site-id", default="default")
     reprocess.add_argument("--site-hostname", default="example.org")
     reprocess.add_argument("--server-type", default="nginx")

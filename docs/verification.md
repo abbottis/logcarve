@@ -1929,3 +1929,77 @@ service/query layer (deterministic, parameterized, bounded SQL; no
 original-IP joins; legacy Combined honestly unavailable). Actual HTTP
 wiring stays T3; request journeys stay T2b; no sessions/landings
 invented. Stopping for independent review.
+
+## 2026-11-01 — Parity T2a review corrections (7 findings, before T2b)
+
+Authorized LogWerk parity correction on `feature/logwerk-parity-2026-11-01`,
+exact model `muse-spark-1.3-contributor`/medium/Contributor ON; sandbox +
+approval ON, sole writer, no subagents. Public/synthetic checkout only:
+no parent private files/keys/real logs/product calls/Docker/push/main/deployment.
+All code/tests by the implementer. No web import/UI/translations/API wiring in
+this slice. Current branch stays unchanged; commits preserved.
+Metric definitions: `docs/logwerk-parity-metrics.md` (updated; the first
+T2a top-200 p95 approximation is retained there as corrected history).
+
+| Check | Result | Evidence |
+| --- | --- | --- |
+| Focused T2a corrections `tests/integration/test_parity_t2a.py` | PASS | 37 passed (16 hand-derived regressions for findings 1–7 plus updated stale assertions; project `.venv`) |
+| Full `tests/unit tests/integration` clean | PASS | 698 passed, 2 skipped (loopback sockets unavailable in sandbox; pre-existing env category) |
+| Full suites conflicting env (`AI_ENABLED=true LLM_WARN_AT_USD=999`) | PASS | 698 passed, 2 skipped |
+| `ruff check` + `ruff format --check` | PASS | Both clean over `app` + `tests` |
+| `uv lock --check --offline` | PASS | `UV_CACHE_DIR=/tmp/uvcache`: resolved 42 packages, no manifest/lock delta |
+| 120-row fixture / HMAC / ledger / 77-rule catalog | PASS | Untouched: new tests generate tmp fixtures only; catalog count asserted 77 in-test |
+| T1b preflight intact | PASS | asdict/race/alias regressions still green; no schema migration, no new indexes, no private-original joins |
+
+Corrections (shared query/service layer unless noted):
+
+1. `p95_desc` is now an exact global rank: one window-aggregate SQL
+   statement computes every path's exact P95 (integer order-statistic
+   arithmetic matching the documented interpolation) and pages
+   `p95 DESC, path ASC`. The 201-path probe (200×2×1ms plus one
+   1×10000ms) returns `/rarest-slowest` first with `total_paths 201`;
+   pages past 200, equal-P95 ties, active filters, zero/missing/large
+   finite values covered. The `SLOW_P95_CANDIDATES` bound and its meta
+   keys are removed; stale test/docs claims updated.
+2. `summarize().duration` and `performance_overview().latency_*` agree:
+   both follow measured `request_time_ms` (valid zero included, missing
+   never zero). Unavailable reason is now `no_measured_request_timing`;
+   explicitly stored legacy `duration_ms` rows are acknowledged via
+   `legacy_measured` + `legacy_duration_only:...` without rewriting
+   core rows; Combined-only scopes stay unavailable on both read paths.
+3. AI-only preserves the selected candidate set (bot/category/provider/
+   purpose/traffic selectors kept on the candidate side: a
+   `bot-ai-gpt` filter returns only `/gpt-only`, never `/claude-only`
+   or the shared browser path) while ONLY the comparison universe
+   widens. Both scopes carry distinct filters/coverage
+   (`candidate.*`/`comparison.*`). Incompatible selectors (traffic
+   outside `all`/`claimed_bot`, non-AI bot/category/provider/purpose)
+   raise `ValueError`. Vacuous universes still flagged, never hidden.
+4. Value/MIME distributions are bounded (default top-100 known groups,
+   explicit `limit`/`offset`, exact whole-scope `Other` remainder with
+   `shown`/`total_values`/`truncated` metadata; HIT numerator and cache
+   denominator stay whole-scope exact). `Unknown` renders as a separate
+   count-correct bucket ordered last at ties and past the bound; no
+   guessed MIME/versions or fabricated zeros.
+5. Referrer-404 totals come from an exact grouped subquery (no
+   delimiter-collision encoding, separator-byte regression covered);
+   every grouping key orders ties (`requests DESC, host ASC, scheme
+   NULLS LAST, path NULLS LAST, target ASC`) with agreement across
+   pages. `relation: all/internal/external` filters in SQL with
+   matching totals; the report no longer labels all rows external.
+6. CLI `--host-alias` extends the configured `--site-hostname` primary
+   (shared `_resolve_explicit_hosts` for import and reprocess);
+   `--host-filter` explicitly replaces it. Primary+alias+foreign
+   fixtures prove the alias path counts primary+alias, skips foreign,
+   binds one site, and persists aliases on already-bound sources.
+7. New bounded `path_exact` selector in the shared contract/filter
+   serialization: SEO/AI drilldowns reproduce exactly the reported
+   path group (prefix-similar `/old` vs `/old-extra` vs `/old/child`
+   covered; legacy prefix stays a widening exploration);
+   contradictions reject. API/UI wiring stays T3/T4; the selector is
+   documented for those consumers.
+
+Acceptance impact: PAR-03/PAR-04 corrected at the shared layer with the
+same privacy/parameterization boundaries (no original-IP joins, no
+schema migration, no new indexes). Stopping for independent reinspection
+before T2b journeys/security.

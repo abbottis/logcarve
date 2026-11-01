@@ -111,7 +111,7 @@ def test_summary_totals_and_missing_measurements(analytics_db):
     assert summary["duration"] == {
         "available": False,
         "measured": 0,
-        "reason": "combined_sources_have_no_timing",
+        "reason": "no_measured_request_timing",
     }
     assert "average" not in summary["duration"] and "p50" not in summary["duration"]
     assert summary["generated_at"] == NOW.isoformat()

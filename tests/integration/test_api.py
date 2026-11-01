@@ -205,7 +205,7 @@ def test_summary_matches_shared_service(api):
         == {
             "available": False,
             "measured": 0,
-            "reason": "combined_sources_have_no_timing",
+            "reason": "no_measured_request_timing",
         }
     )
     assert body["coverage"]["unique_events"] == 10

@@ -774,9 +774,10 @@ def test_t2a_c_mime_version_tls_host_distributions(tmp_path):
         overview = service.performance_overview(conn, _filt(), BOT_RULES)
     finally:
         conn.close()
-    mime = {
-        (m["mime_type"], m["resource_kind"]): m["requests"] for m in overview["mime_vs_resource"]
-    }
+    mime_block = overview["mime_vs_resource"]
+    assert mime_block["total"] == 24 and mime_block["other_requests"] == 0
+    assert mime_block["truncated"] is False
+    mime = {(m["mime_type"], m["resource_kind"]): m["requests"] for m in mime_block["items"]}
     assert mime[("text/html", "page")] == 11
     # Measured-vs-inferred divergence: /zero2 logs image/png for an
     # extensionless path, so it lands on the page kind, not image.
@@ -829,7 +830,9 @@ def test_t2a_c_slow_endpoints_counts_percentiles_ties(tmp_path):
         )
     finally:
         fresh.close()
-    assert p95["meta"]["p95_candidate_bound"] == queries.SLOW_P95_CANDIDATES
+    # Exact global ranking: no frequency-preselected candidate bound.
+    assert p95["meta"] == {"candidate_paths": 16, "ranking": "p95_desc"}
+    assert "p95_candidate_bound" not in p95["meta"]
     assert [i["path"] for i in p95["items"]] == ["/slow-report", "/api/data", "/ai-only-page"]
 
 
@@ -978,7 +981,7 @@ def test_t2a_d_seo_status_groups_by_path_and_rule(tmp_path):
     assert redirects["items"][0]["provider"] == "OpenAI"
     assert redirects["items"][0]["drilldown"] == {
         "bot": "bot-ai-gpt",
-        "path_prefix": "/old",
+        "path_exact": "/old",
         "status_class": "3xx",
     }
     assert clients["total_groups"] == 3
@@ -1023,10 +1026,15 @@ def test_t2a_d_ai_only_paths_with_scope_and_caveat(tmp_path):
     assert result["vacuous"] is False
     assert any("never proof of absence" in str(lim) for lim in result["limitations"])
     assert any("training" in str(lim) for lim in result["limitations"])
+    # Candidate scope is the unfiltered scope here, so both coverages agree.
+    assert result["candidate"]["filters"]["bot"] is None
+    assert result["candidate"]["coverage"]["unique_events"] == 24
+    assert result["comparison"]["filters"]["traffic"] == "all"
+    assert result["comparison"]["coverage"]["unique_events"] == 24
 
 
 def test_t2a_d_ai_only_selectors_removed_not_narrowed(tmp_path):
-    """A bot/category filter must not trivially prove absence."""
+    """Candidate selectors stay on the candidate side; only the universe widens."""
     db = _import_t2a_c(tmp_path)
     conn = connect(db, read_only=True)
     try:
@@ -1036,9 +1044,26 @@ def test_t2a_d_ai_only_selectors_removed_not_narrowed(tmp_path):
         plain = service.ai_only_paths(conn, _filt(), BOT_RULES)
     finally:
         conn.close()
+    # Same universe (selectors removed there), but the candidate set stays
+    # GPT-scoped: /ai-only-page counts only its GPT row here.
     assert narrowed["total_paths"] == plain["total_paths"] == 3
     assert sorted(narrowed["comparison"]["selectors_removed"]) == ["bot", "category"]
     assert narrowed["comparison"]["universe_requests"] == 24
+    by_path = {item["path"]: item for item in narrowed["items"]}
+    assert by_path["/ai-only-page"]["ai_requests"] == 1
+    assert by_path["/ai-only-page"]["rules"] == ["bot-ai-gpt"]
+    assert by_path["/ai-only-page"]["providers"] == ["OpenAI"]
+    assert by_path["/ai-only-page"]["drilldown"] == {
+        "path_exact": "/ai-only-page",
+        "category": "ai_crawler",
+    }
+    # Distinct correctly scoped candidate vs comparison filters/coverage.
+    assert narrowed["candidate"]["filters"]["bot"] == "bot-ai-gpt"
+    assert narrowed["candidate"]["coverage"]["unique_events"] == 6
+    assert narrowed["comparison"]["filters"]["bot"] is None
+    assert narrowed["comparison"]["filters"]["category"] is None
+    assert narrowed["comparison"]["coverage"]["unique_events"] == 24
+    assert narrowed["filters"]["bot"] == "bot-ai-gpt"
 
 
 def test_t2a_d_vacuous_universe_flagged(tmp_path):
@@ -1152,5 +1177,810 @@ def test_t2a_d_exact_totals_beyond_scan_cap(tmp_path):
         only = service.ai_only_paths(conn, _filt(limit=100, offset=0), BOT_RULES)
         assert only["total_paths"] == 5100
         assert only["vacuous"] is True
+    finally:
+        conn.close()
+
+
+CLAUDE_UA = "Mozilla/5.0 (compatible; Claude-SearchBot/1.0)"
+
+
+def _import_p95_probe(tmp_path) -> Path:
+    """201-path probe: 200 frequent 1ms paths plus one rare 10000ms path."""
+    root = tmp_path / "logs"
+    root.mkdir()
+    lines = []
+    for index in range(200):
+        for repeat in range(2):
+            lines.append(
+                _extended_line(
+                    path=f"/fast-{index:03d}",
+                    request_time="0.001",
+                    minute=(index * 2 + repeat) % 60,
+                )
+            )
+    lines.append(_extended_line(path="/rarest-slowest", request_time="10.0", minute=59))
+    (root / "probe.log").write_bytes(b"".join(lines))
+    db = tmp_path / "p95.sqlite3"
+    imported = run_import(
+        db,
+        source=SourceConfig(
+            source_id="p95",
+            format_id=NGINX_EXTENDED,
+            allowed_root=root,
+            relative_path="probe.log",
+            allowed_hosts=[SITE_HOST],
+        ),
+        site_id=SITE,
+        site_name="T2a",
+        site_hostname=SITE_HOST,
+        server_type="nginx",
+        path_alias="probe.log",
+        hmac_key=HMAC_KEY,
+    )
+    assert imported.records_inserted == 401
+    return db
+
+
+def test_t2a_fix1_p95_desc_is_exact_global_rank(tmp_path):
+    """A rare slow endpoint tops p95_desc; pages beyond 200 stay global."""
+    db = _import_p95_probe(tmp_path)
+    conn = connect(db, read_only=True)
+    try:
+        top = service.slow_endpoints(
+            conn, SlowEndpointsQuery(filt=_filt(limit=1), sort="p95_desc"), BOT_RULES
+        )
+        assert top["total_paths"] == 201
+        assert top["meta"] == {"candidate_paths": 201, "ranking": "p95_desc"}
+        assert [i["path"] for i in top["items"]] == ["/rarest-slowest"]
+        assert top["items"][0]["measured"] == 1
+        assert top["items"][0]["p95_ms"] == pytest.approx(10000.0)
+        assert top["items"][0]["p50_ms"] == pytest.approx(10000.0)
+        tail = service.slow_endpoints(
+            conn,
+            SlowEndpointsQuery(filt=_filt(limit=5, offset=200), sort="p95_desc"),
+            BOT_RULES,
+        )
+        assert tail["total_paths"] == 201
+        assert len(tail["items"]) == 1 and tail["items"][0]["path"] == "/fast-199"
+        assert tail["items"][0]["p95_ms"] == pytest.approx(1.0)
+        # An active filter narrows the global scope honestly.
+        scoped = service.slow_endpoints(
+            conn,
+            SlowEndpointsQuery(filt=_filt(timing_min_ms=5000.0), sort="p95_desc"),
+            BOT_RULES,
+        )
+        assert scoped["total_paths"] == 1
+        assert [i["path"] for i in scoped["items"]] == ["/rarest-slowest"]
+    finally:
+        conn.close()
+
+
+def test_t2a_fix1_p95_ties_zero_and_missing(tmp_path):
+    """Equal P95 values break ties by path; zero is valid, missing excluded."""
+    root = tmp_path / "logs"
+    root.mkdir()
+    (root / "ties.log").write_bytes(
+        _extended_line(path="/b-same", request_time="0.010", minute=1)
+        + _extended_line(path="/a-same", request_time="0.010", minute=2)
+        + _extended_line(path="/a-same", request_time="0.010", minute=3)
+        + _extended_line(path="/zero", request_time="0.000", minute=4)
+        + _extended_line(path="/absent", request_time="-", minute=5)
+    )
+    db = tmp_path / "ties.sqlite3"
+    run_import(
+        db,
+        source=SourceConfig(
+            source_id="ties",
+            format_id=NGINX_EXTENDED,
+            allowed_root=root,
+            relative_path="ties.log",
+            allowed_hosts=[SITE_HOST],
+        ),
+        site_id=SITE,
+        site_name="T2a",
+        site_hostname=SITE_HOST,
+        server_type="nginx",
+        path_alias="ties.log",
+        hmac_key=HMAC_KEY,
+    )
+    conn = connect(db, read_only=True)
+    try:
+        result = service.slow_endpoints(
+            conn, SlowEndpointsQuery(filt=_filt(limit=10), sort="p95_desc"), BOT_RULES
+        )
+    finally:
+        conn.close()
+    assert result["total_paths"] == 3
+    assert [i["path"] for i in result["items"]] == ["/a-same", "/b-same", "/zero"]
+    assert result["items"][0]["p95_ms"] == pytest.approx(10.0)
+    assert result["items"][0]["p50_ms"] == pytest.approx(10.0)
+    assert result["items"][2]["p95_ms"] == pytest.approx(0.0)
+    assert [i["path"] for i in result["items"] if i["measured"] == 2] == ["/a-same"]
+
+
+def test_t2a_fix2_summary_and_overview_agree_on_timing(tmp_path):
+    """Shared summary availability/counts match measured request timing."""
+    db = _import_t2a_c(tmp_path)
+    conn = connect(db)
+    try:
+        summary = service.summarize(conn, _filt(), BOT_RULES)
+        overview = service.performance_overview(conn, _filt(), BOT_RULES)
+        assert summary["duration"] == {"available": True, "measured": 21}
+        assert overview["latency_available"] is True
+        assert overview["latency_ms"]["measured"] == 21
+        assert summary["duration"]["measured"] == overview["latency_ms"]["measured"]
+        # Combined-only data stays unavailable on both read paths.
+        missing = service.summarize(conn, _filt(path_exact="/gone"), BOT_RULES)
+        assert missing["duration"] == {
+            "available": False,
+            "measured": 0,
+            "reason": "no_measured_request_timing",
+        }
+        # An explicitly stored legacy duration is acknowledged, never
+        # rewritten: request timing stays unavailable, legacy is counted.
+        conn.execute("UPDATE requests SET duration_ms = 5.0 WHERE path = '/plain-absent'")
+        conn.commit()
+        legacy = service.summarize(conn, _filt(path_exact="/plain-absent"), BOT_RULES)
+        assert legacy["duration"]["available"] is False
+        assert legacy["duration"]["measured"] == 0
+        assert legacy["duration"]["legacy_measured"] == 1
+        assert legacy["duration"]["reason"] == "legacy_duration_only:no_measured_request_timing"
+        legacy_overview = service.performance_overview(
+            conn, _filt(path_exact="/plain-absent"), BOT_RULES
+        )
+        assert legacy_overview["latency_available"] is False
+        assert legacy_overview["latency_ms"]["measured"] == 0
+    finally:
+        conn.close()
+
+
+def _import_ai_four(tmp_path) -> Path:
+    """Confirmed 4-row scope: GPT-only, Claude-only, shared GPT+browser."""
+    root = tmp_path / "logs"
+    root.mkdir()
+    (root / "ai4.log").write_bytes(
+        _extended_line(path="/gpt-only", ua=GPT_UA, request_time="0.010", minute=1)
+        + _extended_line(path="/claude-only", ua=CLAUDE_UA, request_time="0.011", minute=2)
+        + _extended_line(path="/shared", ua=GPT_UA, request_time="0.012", minute=3)
+        + _extended_line(path="/shared", ua=BROWSER_UA, request_time="0.013", minute=4)
+    )
+    db = tmp_path / "ai4.sqlite3"
+    imported = run_import(
+        db,
+        source=SourceConfig(
+            source_id="ai4",
+            format_id=NGINX_EXTENDED,
+            allowed_root=root,
+            relative_path="ai4.log",
+            allowed_hosts=[SITE_HOST],
+        ),
+        site_id=SITE,
+        site_name="T2a",
+        site_hostname=SITE_HOST,
+        server_type="nginx",
+        path_alias="ai4.log",
+        hmac_key=HMAC_KEY,
+    )
+    assert imported.records_inserted == 4
+    return db
+
+
+def test_t2a_fix3_gpt_filter_keeps_gpt_candidates_only(tmp_path):
+    """bot-ai-gpt returns /gpt-only: never /claude-only, never shared browser."""
+    db = _import_ai_four(tmp_path)
+    conn = connect(db, read_only=True)
+    try:
+        result = service.ai_only_paths(conn, _filt(bot="bot-ai-gpt"), BOT_RULES)
+    finally:
+        conn.close()
+    assert result["total_paths"] == 1
+    (item,) = result["items"]
+    assert item["path"] == "/gpt-only"
+    assert item["ai_requests"] == 1 and item["rules"] == ["bot-ai-gpt"]
+    assert item["providers"] == ["OpenAI"]
+    assert item["drilldown"] == {"path_exact": "/gpt-only", "category": "ai_crawler"}
+    # The comparison universe still sees all 4 rows / 3 paths.
+    assert result["comparison"]["universe_requests"] == 4
+    assert result["comparison"]["universe_paths"] == 3
+    assert result["comparison"]["other_observed_paths"] == 1
+    assert result["comparison"]["selectors_removed"] == ["bot"]
+    assert result["comparison"]["filters"]["bot"] is None
+    assert result["comparison"]["coverage"]["unique_events"] == 4
+    # Candidate coverage is GPT-scoped (2 rows), not the universe.
+    assert result["candidate"]["filters"]["bot"] == "bot-ai-gpt"
+    assert result["candidate"]["coverage"]["unique_events"] == 2
+    assert result["coverage"]["unique_events"] == 2
+    assert result["vacuous"] is False
+
+
+def test_t2a_fix3_provider_category_traffic_scopes(tmp_path):
+    """Provider/category/traffic candidates widen only the universe."""
+    db = _import_ai_four(tmp_path)
+    conn = connect(db, read_only=True)
+    try:
+        openai = service.ai_only_paths(conn, _filt(provider="OpenAI"), BOT_RULES)
+        anthropic = service.ai_only_paths(conn, _filt(provider="Anthropic"), BOT_RULES)
+        category = service.ai_only_paths(conn, _filt(category="ai_crawler"), BOT_RULES)
+        claimed = service.ai_only_paths(conn, _filt(traffic="claimed_bot"), BOT_RULES)
+    finally:
+        conn.close()
+    assert [i["path"] for i in openai["items"]] == ["/gpt-only"]
+    assert openai["comparison"]["universe_requests"] == 4
+    assert [i["path"] for i in anthropic["items"]] == ["/claude-only"]
+    assert anthropic["items"][0]["providers"] == ["Anthropic"]
+    assert sorted(i["path"] for i in category["items"]) == ["/claude-only", "/gpt-only"]
+    assert sorted(i["path"] for i in claimed["items"]) == ["/claude-only", "/gpt-only"]
+    assert claimed["comparison"]["selectors_removed"] == ["traffic"]
+
+
+def test_t2a_fix3_incompatible_selectors_rejected(tmp_path):
+    """Selectors that cannot hold AI candidates raise instead of widening."""
+    db = _import_ai_four(tmp_path)
+    conn = connect(db, read_only=True)
+    try:
+        for bad in (
+            _filt(traffic="browser_like"),
+            _filt(traffic="unknown"),
+            _filt(traffic="other_automation"),
+            _filt(bot="bot-search-google"),
+            _filt(category="search_crawler"),
+            _filt(provider="Google"),
+            _filt(purpose="Search Indexer"),
+        ):
+            with pytest.raises(ValueError):
+                service.ai_only_paths(conn, bad, BOT_RULES)
+    finally:
+        conn.close()
+
+
+def test_t2a_fix3_no_other_traffic_scope_stays_vacuous(tmp_path):
+    """An AI-only universe is flagged vacuous, never silent proof."""
+    db = _import_ai_four(tmp_path)
+    conn = connect(db, read_only=True)
+    try:
+        result = service.ai_only_paths(conn, _filt(path_exact="/gpt-only"), BOT_RULES)
+    finally:
+        conn.close()
+    assert result["total_paths"] == 1
+    assert result["comparison"]["other_observed_paths"] == 0
+    assert result["vacuous"] is True
+    assert any("trivially AI-only" in str(w) for w in result["warnings"])
+
+
+_MANY_MIMES = ["text/html", "image/png", "application/json", "-"]
+
+
+def _import_many_hosts(tmp_path, count: int, sources: int = 4) -> Path:
+    """``count`` distinct logged hosts across several allowed sources.
+
+    One source allows at most 64 hosts, so high cardinality spans
+    several sources of the same site (plus shared HIT/Unknown rows in
+    the first file). Every generated host is allowlisted in its own
+    source: nothing here is a foreign skip.
+    """
+    root = tmp_path / "logs"
+    root.mkdir()
+    db = tmp_path / "hosts.sqlite3"
+    made = 0
+    per = (count + sources - 1) // sources
+    for slot in range(sources):
+        batch = min(per, count - made)
+        hosts = [f"host-{slot:02d}-{index:04d}.example" for index in range(batch)]
+        lines = []
+        for index, host in enumerate(hosts):
+            lines.append(
+                _extended_line(
+                    path=f"/h-{slot:02d}-{index:04d}",
+                    host=host,
+                    mime=_MANY_MIMES[made % len(_MANY_MIMES)],
+                    request_time="0.013",
+                    minute=made % 60,
+                )
+            )
+            made += 1
+        if slot == 0:
+            lines.append(
+                _extended_line(
+                    path="/hit",
+                    host="example.org",
+                    cache="HIT",
+                    request_time="0.010",
+                    minute=59,
+                )
+            )
+            lines.append(
+                _extended_line(
+                    path="/hit",
+                    host="example.org",
+                    cache="HIT",
+                    request_time="0.011",
+                    minute=58,
+                )
+            )
+            lines.append(
+                _extended_line(path="/unknown-host", host="-", request_time="0.012", minute=57)
+            )
+        name = f"hosts-{slot}.log"
+        (root / name).write_bytes(b"".join(lines))
+        imported = run_import(
+            db,
+            source=SourceConfig(
+                source_id=f"hosts-{slot}",
+                format_id=NGINX_EXTENDED,
+                allowed_root=root,
+                relative_path=name,
+                allowed_hosts=[SITE_HOST, *hosts],
+            ),
+            site_id=SITE,
+            site_name="T2a",
+            site_hostname=SITE_HOST,
+            server_type="nginx",
+            path_alias=name,
+            hmac_key=HMAC_KEY,
+        )
+        assert imported.records_inserted == len(lines)
+        assert imported.records_skipped_foreign == 0
+    assert made == count
+    return db
+
+
+def test_t2a_fix4_host_distribution_bounded_with_exact_totals(tmp_path):
+    """High-cardinality hosts page with exact totals; Unknown stays separate."""
+    db = _import_many_hosts(tmp_path, 250)
+    conn = connect(db, read_only=True)
+    try:
+        items, total, page = queries.host_distribution(conn, _filt(), None)
+        full = service.performance_overview(conn, _filt(), BOT_RULES)
+    finally:
+        conn.close()
+    # 250 distinct hosts + example.org + Unknown = 252 values, 253 rows.
+    assert total == 253
+    assert page["total_values"] == 252
+    assert page["truncated"] is True
+    assert page["other_requests"] > 0
+    assert sum(i["requests"] for i in items) + page["other_requests"] == total
+    assert len(items) == page["shown"] == 100 + 1
+    # Unknown is always the last bucket and count-correct.
+    assert items[-1] == {"value": "Unknown", "requests": 1}
+    assert page["unknown_requests"] == 1
+    assert [i["value"] for i in items[:-1]] == sorted(i["value"] for i in items[:-1])
+    hosts = full["logged_hosts"]
+    assert hosts["total"] == 253 and hosts["truncated"] is True
+    assert hosts["unknown_requests"] == 1
+    # A later page still carries exact totals and the Unknown bucket.
+    conn = connect(db, read_only=True)
+    try:
+        tail_items, tail_total, tail_page = queries.host_distribution(
+            conn, _filt(), None, limit=100, offset=200
+        )
+    finally:
+        conn.close()
+    assert tail_total == 253 and tail_page["total_values"] == 252
+    assert tail_items[-1] == {"value": "Unknown", "requests": 1}
+    assert sum(i["requests"] for i in tail_items) + tail_page["other_requests"] == 253
+
+
+def test_t2a_fix4_unknown_last_at_ties_and_hit_numerator_kept(tmp_path):
+    """Unknown sorts last at count ties; HIT numerator survives a top page."""
+    root = tmp_path / "logs"
+    root.mkdir()
+    (root / "ties.log").write_bytes(
+        _extended_line(path="/a", cache="MISS", request_time="0.010", minute=1)
+        + _extended_line(path="/b", cache="MISS", request_time="0.011", minute=2)
+        + _extended_line(path="/c", cache="HIT", request_time="0.012", minute=3)
+        + _extended_line(path="/d", cache="-", request_time="0.013", minute=4)
+    )
+    db = tmp_path / "hit.sqlite3"
+    run_import(
+        db,
+        source=SourceConfig(
+            source_id="hit",
+            format_id=NGINX_EXTENDED,
+            allowed_root=root,
+            relative_path="ties.log",
+            allowed_hosts=[SITE_HOST],
+        ),
+        site_id=SITE,
+        site_name="T2a",
+        site_hostname=SITE_HOST,
+        server_type="nginx",
+        path_alias="ties.log",
+        hmac_key=HMAC_KEY,
+    )
+    conn = connect(db, read_only=True)
+    try:
+        cache = queries.cache_distribution(conn, _filt(), None, limit=1)
+        by_value = {item["value"]: item for item in cache["items"]}
+    finally:
+        conn.close()
+    # Top-1 page shows only MISS plus the separate Unknown bucket; the
+    # HIT numerator/denominator are still whole-scope exact even though
+    # HIT sits outside the displayed top group.
+    assert [i["value"] for i in cache["items"]] == ["MISS", "Unknown"]
+    assert cache["shown"] == 2 and cache["truncated"] is True
+    assert cache["other_requests"] == 1
+    assert cache["hit_requests"] == 1
+    assert cache["hit_ratio"] == pytest.approx(1 / 3)
+    assert cache["cache_measured"] == 3 and cache["cache_missing"] == 1
+    assert by_value["Unknown"]["requests"] == 1
+
+
+def test_t2a_fix4_mime_bounded_with_other_remainder(tmp_path):
+    """MIME cross-tab pages with an exact Other remainder and Unknown last."""
+    db = _import_many_hosts(tmp_path, 150)
+    conn = connect(db, read_only=True)
+    try:
+        mime = queries.mime_resource_breakdown(conn, _filt(), None, limit=2)
+        mime_unknown_free = queries.mime_resource_breakdown(
+            conn, _filt(mime_type="text/html"), None
+        )
+    finally:
+        conn.close()
+    # Four pairs total: NULL-mime/page is the largest (40) yet sorts last,
+    # so the top-2 known page heads the response and Unknown follows separately.
+    assert mime["total"] == 153
+    assert mime["total_values"] == 4
+    assert mime["truncated"] is True
+    assert [(i["mime_type"], i["requests"]) for i in mime["items"]] == [
+        ("image/png", 38),
+        ("text/html", 38),
+        ("Unknown", 40),
+    ]
+    assert mime["unknown_requests"] == 40 and mime["unknown_pairs"] == 1
+    assert sum(i["requests"] for i in mime["items"]) + mime["other_requests"] == 153
+    assert mime["other_requests"] == 153 - 116
+    assert mime_unknown_free["total_values"] == 1
+    assert mime_unknown_free["truncated"] is False
+
+
+def _import_referrer_ties(tmp_path) -> Path:
+    """Tied 404 groups across pages, internal/external sources, edge fields."""
+    root = tmp_path / "logs"
+    root.mkdir()
+    lines = b""
+    # Tied groups: same (host, target) count, differing scheme/path must
+    # order deterministically across pages instead of only by host/target.
+    lines += _extended_line(
+        path="/tie", status=404, referer="http://tied.example/a", ua="-", minute=1
+    )
+    lines += _extended_line(
+        path="/tie", status=404, referer="https://tied.example/a", ua="-", minute=2
+    )
+    lines += _extended_line(
+        path="/tie", status=404, referer="http://tied.example/b", ua="-", minute=3
+    )
+    # Missing referrer path (bare host) and internal alias source.
+    lines += _extended_line(
+        path="/bare", status=404, referer="https://shop.example", ua="-", minute=4
+    )
+    lines += _extended_line(
+        path="/gone", status=404, referer="https://external.example/p", ua="-", minute=5
+    )
+    lines += _extended_line(
+        path="/gone", status=404, referer="https://external.example/q", ua="-", minute=6
+    )
+    (root / "ref.log").write_bytes(lines)
+    db = tmp_path / "ref.sqlite3"
+    imported = run_import(
+        db,
+        source=SourceConfig(
+            source_id="ref",
+            format_id=NGINX_EXTENDED,
+            allowed_root=root,
+            relative_path="ref.log",
+            allowed_hosts=[SITE_HOST, "shop.example"],
+        ),
+        site_id=SITE,
+        site_name="T2a",
+        site_hostname=SITE_HOST,
+        server_type="nginx",
+        path_alias="ref.log",
+        hmac_key=HMAC_KEY,
+    )
+    assert imported.records_inserted == 6
+    # Adversarial separator bytes in a stored field (simulating legacy
+    # bytes the ingestion-time control-char rejection would now drop):
+    # a delimiter-collision tuple encoding would merge groups here.
+    writer = connect(db)
+    try:
+        writer.execute(
+            "UPDATE requests SET referer_path = '/q' || CHAR(31) || 'extra'"
+            " WHERE path = '/gone' AND referer_path = '/q'"
+        )
+        writer.commit()
+        assert writer.execute("SELECT COUNT(*) FROM requests").fetchone()[0] == 6
+    finally:
+        writer.close()
+    return db
+
+
+def test_t2a_fix5_referrer_tuples_exact_and_stable(tmp_path):
+    """Tuple totals are exact; every grouping key orders ties; pages agree."""
+    db = _import_referrer_ties(tmp_path)
+    conn = connect(db, read_only=True)
+    try:
+        items, total = queries.referrer_404_targets(conn, _filt(limit=10), None)
+        page1, total1 = queries.referrer_404_targets(conn, _filt(limit=2, offset=0), None)
+        page2, total2 = queries.referrer_404_targets(conn, _filt(limit=2, offset=2), None)
+        page3, total3 = queries.referrer_404_targets(conn, _filt(limit=2, offset=4), None)
+    finally:
+        conn.close()
+    # Six rows, six distinct (host, scheme, path, target) tuples: no
+    # delimiter-collision merge of the \x1f-bearing fields.
+    assert total == total1 == total2 == total3 == 6
+    assert len(items) == 6
+    keys = [
+        (i["referer_host"], i["referer_scheme"], i["referer_path"], i["target_path"]) for i in items
+    ]
+    assert len(set(keys)) == 6
+    # Full stable order across pages: count, host, scheme, path, target.
+    assert [items.index(i) for page in (page1, page2, page3) for i in page] == list(range(6))
+    order = [(i["requests"], i["referer_host"]) for i in items]
+    assert order == sorted(order, key=lambda t: (-t[0], t[1]))
+    # The tied (tied.example, /tie) groups separate by scheme before path.
+    tied = [i for i in items if i["referer_host"] == "tied.example"]
+    assert [(i["referer_scheme"], i["referer_path"]) for i in tied] == [
+        ("http", "/a"),
+        ("http", "/b"),
+        ("https", "/a"),
+    ]
+
+
+def test_t2a_fix5_referrer_relation_filters_in_sql(tmp_path):
+    """internal/external selectors filter in SQL with matching totals."""
+    db = _import_referrer_ties(tmp_path)
+    conn = connect(db, read_only=True)
+    try:
+        report = service.referrer_404s(conn, _filt(), None)
+        internal = service.referrer_404s(conn, _filt(), None, relation="internal")
+        external = service.referrer_404s(conn, _filt(), None, relation="external")
+    finally:
+        conn.close()
+    assert report["relation"] == "all" and report["total_groups"] == 6
+    assert all("internal" in i for i in report["items"])
+    assert internal["total_groups"] == 1
+    assert [i["referer_host"] for i in internal["items"]] == ["shop.example"]
+    assert all(i["internal"] for i in internal["items"])
+    assert external["total_groups"] == 5
+    assert all(not i["internal"] for i in external["items"])
+    assert internal["total_groups"] + external["total_groups"] == report["total_groups"]
+    check = connect(db, read_only=True)
+    try:
+        with pytest.raises(ValueError):
+            service.referrer_404s(check, _filt(), None, relation="sometimes")
+    finally:
+        check.close()
+
+
+def test_t2a_fix6_resolve_explicit_hosts_extends_primary():
+    """--host-alias extends the primary; --host-filter replaces it."""
+    from app.db.cli import _resolve_explicit_hosts
+
+    assert _resolve_explicit_hosts(
+        site_hostname="example.org", host_filter=None, host_alias=None, vhost_bearing=True
+    ) == ["example.org"]
+    assert (
+        _resolve_explicit_hosts(
+            site_hostname="example.org", host_filter=None, host_alias=None, vhost_bearing=False
+        )
+        == []
+    )
+    assert _resolve_explicit_hosts(
+        site_hostname="example.org",
+        host_filter=None,
+        host_alias=["shop.example"],
+        vhost_bearing=True,
+    ) == ["example.org", "shop.example"]
+    assert _resolve_explicit_hosts(
+        site_hostname="example.org",
+        host_filter=["other.example"],
+        host_alias=None,
+        vhost_bearing=True,
+    ) == ["other.example"]
+    assert _resolve_explicit_hosts(
+        site_hostname="example.org",
+        host_filter=["other.example"],
+        host_alias=["shop.example"],
+        vhost_bearing=True,
+    ) == ["other.example", "shop.example"]
+    assert _resolve_explicit_hosts(
+        site_hostname="example.org",
+        host_filter=None,
+        host_alias=["Example.ORG", "shop.example", "shop.example"],
+        vhost_bearing=True,
+    ) == ["example.org", "shop.example"]
+
+
+def _host_fixture_lines() -> bytes:
+    return (
+        _extended_line(path="/primary", host="example.org", minute=1)
+        + _extended_line(path="/alias", host="shop.example", minute=2)
+        + _extended_line(path="/foreign", host="foreign.example", minute=3)
+    )
+
+
+def test_t2a_fix6_alias_alone_keeps_primary_on_import_and_reprocess(tmp_path, monkeypatch, capsys):
+    """--host-alias alone counts primary+alias, skips foreign, binds one site."""
+    import json
+
+    from app.db import cli as cli_mod
+
+    root = tmp_path / "logs"
+    root.mkdir()
+    (root / "hosts.log").write_bytes(_host_fixture_lines())
+    db = tmp_path / "cli.sqlite3"
+    monkeypatch.setenv("HMAC_KEY", "parity-cli-test-key")
+    base = [
+        "--source-id",
+        "cli-source",
+        "--format",
+        "nginx_extended",
+        "--root",
+        str(root),
+        "--path",
+        "hosts.log",
+        "--site-hostname",
+        "example.org",
+        "--host-alias",
+        "shop.example",
+    ]
+    capsys.readouterr()
+    assert cli_mod.main(["--db", str(db), "import", *base]) == 0
+    payload = json.loads(capsys.readouterr().out)
+    assert payload["status"] == "completed"
+    assert payload["records_inserted"] == 2 and payload["records_skipped_foreign"] == 1
+    check = connect(db, read_only=True)
+    try:
+        assert check.execute("SELECT COUNT(*) FROM requests").fetchone()[0] == 2
+        assert {row[0] for row in check.execute("SELECT path FROM requests")} == {
+            "/primary",
+            "/alias",
+        }
+        assert check.execute("SELECT COUNT(DISTINCT site_id) FROM log_sources").fetchone()[0] == 1
+        assert json.loads(check.execute("SELECT allowed_hosts FROM log_sources").fetchone()[0]) == [
+            "example.org",
+            "shop.example",
+        ]
+    finally:
+        check.close()
+    # A repeated import inserts nothing new and binds no second site.
+    capsys.readouterr()
+    assert cli_mod.main(["--db", str(db), "import", *base]) == 0
+    payload = json.loads(capsys.readouterr().out)
+    assert payload["records_inserted"] == 0
+    # Reprocess with the same alias keeps the persisted primary+alias set.
+    repro = [
+        "--source-id",
+        "cli-source",
+        "--format",
+        "nginx_extended",
+        "--root",
+        str(root),
+        "--path",
+        "hosts.log",
+        "--site-hostname",
+        "example.org",
+        "--host-alias",
+        "shop.example",
+    ]
+    capsys.readouterr()
+    assert cli_mod.main(["--db", str(db), "reprocess", *repro]) == 0
+    reprocessed = json.loads(capsys.readouterr().out)
+    # The never-stored foreign line matches no stored row, so reprocess
+    # verifies the two stored rows and persists the alias set unchanged.
+    assert reprocessed["status"] == "completed" and reprocessed["rows_verified"] == 2
+    assert reprocessed["rows_skipped_foreign"] == 0
+    verify = connect(db, read_only=True)
+    try:
+        assert json.loads(
+            verify.execute("SELECT allowed_hosts FROM log_sources").fetchone()[0]
+        ) == ["example.org", "shop.example"]
+        assert verify.execute("SELECT COUNT(DISTINCT site_id) FROM log_sources").fetchone()[0] == 1
+    finally:
+        verify.close()
+
+
+def test_t2a_fix6_host_filter_replaces_primary(tmp_path, monkeypatch, capsys):
+    """An explicit --host-filter is the whole set: primary is not added."""
+    import json
+
+    from app.db import cli as cli_mod
+
+    root = tmp_path / "logs"
+    root.mkdir()
+    (root / "hosts.log").write_bytes(_host_fixture_lines())
+    db = tmp_path / "filter.sqlite3"
+    monkeypatch.setenv("HMAC_KEY", "parity-cli-test-key")
+    argv = [
+        "--db",
+        str(db),
+        "import",
+        "--source-id",
+        "filter-source",
+        "--format",
+        "nginx_extended",
+        "--root",
+        str(root),
+        "--path",
+        "hosts.log",
+        "--site-hostname",
+        "example.org",
+        "--host-filter",
+        "shop.example",
+    ]
+    capsys.readouterr()
+    assert cli_mod.main(argv) == 0, capsys.readouterr().err
+    payload = json.loads(capsys.readouterr().out)
+    assert payload["records_inserted"] == 1 and payload["records_skipped_foreign"] == 2
+    check = connect(db, read_only=True)
+    try:
+        assert {row[0] for row in check.execute("SELECT path FROM requests")} == {"/alias"}
+    finally:
+        check.close()
+
+
+def test_t2a_fix7_exact_path_selector_reproduces_single_group(tmp_path):
+    """path_exact matches one stored path; prefix stays a widening exploration."""
+    root = tmp_path / "logs"
+    root.mkdir()
+    (root / "prefix.log").write_bytes(
+        _extended_line(path="/old", status=301, ua=GPT_UA, minute=1)
+        + _extended_line(path="/old-extra", status=301, ua=GPT_UA, minute=2)
+        + _extended_line(path="/old/child", status=301, ua=GPT_UA, minute=3)
+    )
+    db = tmp_path / "prefix.sqlite3"
+    run_import(
+        db,
+        source=SourceConfig(
+            source_id="prefix",
+            format_id=NGINX_EXTENDED,
+            allowed_root=root,
+            relative_path="prefix.log",
+            allowed_hosts=[SITE_HOST],
+        ),
+        site_id=SITE,
+        site_name="T2a",
+        site_hostname=SITE_HOST,
+        server_type="nginx",
+        path_alias="prefix.log",
+        hmac_key=HMAC_KEY,
+    )
+    conn = connect(db, read_only=True)
+    try:
+        exact = service.seo_status_groups(
+            conn, _filt(path_exact="/old"), BOT_RULES, status_class="3xx"
+        )
+        prefixed = service.seo_status_groups(
+            conn, _filt(path_prefix="/old"), BOT_RULES, status_class="3xx"
+        )
+        assert exact["total_groups"] == 1
+        assert [i["path"] for i in exact["items"]] == ["/old"]
+        assert prefixed["total_groups"] == 3
+        drilldown = exact["items"][0]["drilldown"]
+        assert drilldown == {"bot": "bot-ai-gpt", "path_exact": "/old", "status_class": "3xx"}
+        # The drilldown evidence filter reproduces exactly the reported group.
+        evidence = service.seo_status_groups(
+            conn,
+            _filt(bot=drilldown["bot"], path_exact=drilldown["path_exact"]),
+            BOT_RULES,
+            status_class="3xx",
+        )
+        assert evidence["total_groups"] == 1 and evidence["items"][0]["requests"] == 1
+        # A prefix drilldown is explicitly wider than the reported row.
+        wide = service.seo_status_groups(
+            conn,
+            _filt(bot=drilldown["bot"], path_prefix=drilldown["path_exact"]),
+            BOT_RULES,
+            status_class="3xx",
+        )
+        assert wide["total_groups"] == 3
+        # The shared contract carries the selector everywhere (round-trip).
+        clone = AnalyticsFilter.model_validate(_filt(path_exact="/old").model_dump())
+        assert clone == _filt(path_exact="/old")
+        assert service._filter_dict(clone)["path_exact"] == "/old"
+        with pytest.raises(ValueError):
+            _filt(path_exact="/other", path_prefix="/old")
+        with pytest.raises(ValueError):
+            _filt(path_exact="   ")
     finally:
         conn.close()

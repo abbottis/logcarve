@@ -82,6 +82,14 @@ class AnalyticsFilter(BaseModel):
     status: int | None = Field(default=None, ge=100, le=599)
     status_class: StatusClass | None = Field(default=None)
     path_prefix: str | None = Field(default=None, min_length=1, max_length=1024)
+    #: Exact-path selector for drilldowns that reproduce ONE stored path
+    #: group (SEO/AI evidence). Unlike ``path_prefix`` (a widening
+    #: ``LIKE`` exploration that also matches ``/path-extra`` and
+    #: ``/path/child``), this is an equality match carried through every
+    #: shared consumer so evidence filters agree with the reported row.
+    #: Legacy prefix exploration remains available; prefer this selector
+    #: for subsequent consumers.
+    path_exact: str | None = Field(default=None, min_length=1, max_length=1024)
     referer_host: str | None = Field(default=None, min_length=1, max_length=253)
     search: str | None = Field(default=None, min_length=1, max_length=MAX_SEARCH_LEN)
     traffic: TrafficFilter = "all"
@@ -162,6 +170,11 @@ class AnalyticsFilter(BaseModel):
             and f"{self.status // 100}xx" != self.status_class
         ):
             raise ValueError("status and status_class contradict each other")
+        if self.path_exact is not None:
+            if "\x00" in self.path_exact or not self.path_exact.strip():
+                raise ValueError("path_exact must be a non-blank path")
+            if self.path_prefix is not None and not self.path_exact.startswith(self.path_prefix):
+                raise ValueError("path_exact contradicts path_prefix")
         return self
 
 

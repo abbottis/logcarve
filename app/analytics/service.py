@@ -73,6 +73,7 @@ def _filter_dict(filt: AnalyticsFilter) -> dict[str, object]:
         "status": filt.status,
         "status_class": filt.status_class,
         "path_prefix": filt.path_prefix,
+        "path_exact": filt.path_exact,
         "referer_host": filt.referer_host,
         "search": filt.search,
         "traffic": filt.traffic,
@@ -173,12 +174,25 @@ def summarize(
     """Totals, error shares, duration availability, coverage and quality."""
     clf = _classifier_for(filt, rules)
     counts = queries.summary_counts(conn, filt, clf)
-    measured = _has_durations(conn, filt, clf)
-    duration: dict[str, object] = (
-        {"available": True, "measured": measured}
-        if measured
-        else {"available": False, "measured": 0, "reason": "combined_sources_have_no_timing"}
-    )
+    measured = queries.count_measured_request_timing(conn, filt, clf)
+    legacy = queries.count_measured_durations(conn, filt, clf)
+    if measured:
+        duration: dict[str, object] = {"available": True, "measured": measured}
+        if legacy:
+            duration["legacy_measured"] = legacy
+    elif legacy:
+        duration = {
+            "available": False,
+            "measured": 0,
+            "reason": "legacy_duration_only:no_measured_request_timing",
+            "legacy_measured": legacy,
+        }
+    else:
+        duration = {
+            "available": False,
+            "measured": 0,
+            "reason": "no_measured_request_timing",
+        }
     cov = queries.coverage(conn, filt, clf)
     observed = datetime.now(UTC) if observation_time is None else observation_time
     return {
@@ -209,10 +223,6 @@ def summarize(
         "warnings": _warnings(conn, filt, clf),
         "limitations": LIMITATIONS_LOGS,
     }
-
-
-def _has_durations(conn: sqlite3.Connection, filt: AnalyticsFilter, clf: Classifier | None) -> int:
-    return queries.count_measured_durations(conn, filt, clf)
 
 
 def timeseries(
@@ -897,9 +907,10 @@ def performance_overview(
     latency = queries.timing_stats(conn, filt, clf, "request_time_ms")
     upstream = queries.timing_stats(conn, filt, clf, "upstream_time_ms")
     cache = queries.cache_distribution(conn, filt, clf)
-    versions, versions_total = queries.version_distribution(conn, filt, clf)
-    tls, tls_total = queries.tls_distribution(conn, filt, clf)
-    hosts, hosts_total = queries.host_distribution(conn, filt, clf)
+    versions, versions_total, versions_page = queries.version_distribution(conn, filt, clf)
+    tls, tls_total, tls_page = queries.tls_distribution(conn, filt, clf)
+    hosts, hosts_total, hosts_page = queries.host_distribution(conn, filt, clf)
+    mime = queries.mime_resource_breakdown(conn, filt, clf)
     warnings: list[str] = [
         *(str(w) for w in latency["warnings"]),  # type: ignore[union-attr]
         *(str(w) for w in upstream["warnings"]),  # type: ignore[union-attr]
@@ -920,10 +931,10 @@ def performance_overview(
             "v[floor(r)] + (v[ceil(r)] - v[floor(r)]) * (r - floor(r))"
         ),
         "cache": cache,
-        "mime_vs_resource": queries.mime_resource_breakdown(conn, filt, clf),
-        "http_versions": {"items": versions, "total": versions_total},
-        "tls_protocols": {"items": tls, "total": tls_total},
-        "logged_hosts": {"items": hosts, "total": hosts_total},
+        "mime_vs_resource": mime,
+        "http_versions": {"items": versions, "total": versions_total, **versions_page},
+        "tls_protocols": {"items": tls, "total": tls_total, **tls_page},
+        "logged_hosts": {"items": hosts, "total": hosts_total, **hosts_page},
         "coverage": coverage_summary(conn, filt, rules),
         "warnings": warnings,
         "limitations": [*LIMITATIONS_PERFORMANCE, *LIMITATIONS_LOGS],
@@ -993,50 +1004,73 @@ def ai_only_paths(
     *,
     observation_time: datetime | None = None,
 ) -> dict[str, object]:
-    """Paths observed only for configured AI-bot categories (with caveat).
+    """Paths observed only for the selected AI candidates (with caveat).
 
-    Always reports the comparison scope, universe coverage and the
-    absence caveat; a filter that would trivially prove absence (no
-    non-AI traffic in the universe) is flagged ``vacuous``, never
-    hidden. Bot/category/traffic selectors are removed when building
-    the comparison universe (reported under
-    ``comparison.selectors_removed``). No indexing, training-use or
-    SEO-rank claim is ever made.
+    The candidate side preserves the caller's bot/category/provider/
+    purpose/traffic selectors; only the comparison universe widens by
+    dropping them (removed names reported under
+    ``comparison.selectors_removed``). Both scopes carry their own
+    filters and coverage: ``candidate`` for the selected AI-candidate
+    scope, ``comparison`` for the widened universe. A universe with no
+    non-AI traffic is flagged ``vacuous``, never hidden. Selectors that
+    cannot hold AI-candidate rows raise ``ValueError`` instead of being
+    silently ignored. No indexing, training-use or SEO-rank claim is
+    ever made.
     """
     clf = _classifier_for(filt, rules)
     assert clf is not None
     observed = datetime.now(UTC) if observation_time is None else observation_time
     result = queries.ai_only_paths(conn, filt, clf)
+    comparison_filter = result.pop("comparison_filter")
+    assert isinstance(comparison_filter, AnalyticsFilter)
+    comparison = dict(result["comparison"])  # type: ignore[union-attr]
+    comparison["filters"] = _filter_dict(comparison_filter)
+    comparison["coverage"] = coverage_summary(conn, comparison_filter, rules)
     return {
         "site_id": filt.site_id,
         "time_range": _window_dict(filt),
         "generated_at": observed.isoformat(),
         "filters": _filter_dict(filt),
         **result,
+        "candidate": {
+            "filters": _filter_dict(filt),
+            "coverage": coverage_summary(conn, filt, rules),
+        },
+        "comparison": comparison,
         "coverage": coverage_summary(conn, filt, rules),
         "limitations": [*LIMITATIONS_SEO, *LIMITATIONS_LOGS],
     }
 
 
 def referrer_404s(
-    conn: sqlite3.Connection, filt: AnalyticsFilter, rules: list[Rule] | None = None
+    conn: sqlite3.Connection,
+    filt: AnalyticsFilter,
+    rules: list[Rule] | None = None,
+    *,
+    relation: queries.ReferrerRelation = "all",
 ) -> dict[str, object]:
-    """External referrer-path -> target-404 report over sanitized fields.
+    """Referrer-path -> target-404 report over sanitized fields.
 
-    The configured own domain/aliases (site hostname plus stored source
-    aliases) separate internal from external referrers; only the
-    sanitized scheme+host+path travels (no query values, userinfo,
-    secrets or clickable dangerous schemes). Ordinary host-level
-    referrer reports stay unchanged.
+    Covers internal AND external referrers together (every row carries
+    an ``internal`` label); pass ``relation="internal"``/``"external"``
+    to narrow in SQL with matching totals instead of filtering a fetched
+    page in Python. The configured own domain/aliases (site hostname
+    plus stored source aliases) separate internal from external
+    referrers; only the sanitized scheme+host+path travels (no query
+    values, userinfo, secrets or clickable dangerous schemes).
+    Ordinary host-level referrer reports stay unchanged.
     """
     clf = _classifier_for(filt, rules)
     own_hosts = queries.own_hosts_for_scope(conn, filt)
-    items, total = queries.referrer_404_targets(conn, filt, clf, own_hosts=own_hosts)
+    items, total = queries.referrer_404_targets(
+        conn, filt, clf, own_hosts=own_hosts, relation=relation
+    )
     return {
         "site_id": filt.site_id,
         "time_range": _window_dict(filt),
         "filters": _filter_dict(filt),
         "own_hosts": sorted(own_hosts),
+        "relation": relation,
         "host_matching": (
             "lowercase hostname equality; ports, userinfo and query values are never stored; "
             "IDN compares in stored encoded form; only http/https schemes are stored"

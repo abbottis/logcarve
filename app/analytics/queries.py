@@ -9,6 +9,7 @@ truncation flags so reads never load the whole database into memory.
 import math
 import sqlite3
 from datetime import datetime, timedelta
+from typing import Literal
 
 from app.analytics.classification import (
     Classifier,
@@ -117,6 +118,9 @@ def _where(filt: AnalyticsFilter, classifier: Classifier | None = None) -> tuple
     if filt.path_prefix is not None:
         clauses.append("path LIKE ? ESCAPE '\\'")
         params.append(_like_escape(filt.path_prefix) + "%")
+    if filt.path_exact is not None:
+        clauses.append("path = ?")
+        params.append(filt.path_exact)
     if filt.referer_host is not None:
         clauses.append("referer_host = ?")
         params.append(filt.referer_host)
@@ -362,9 +366,26 @@ def time_buckets(
 def count_measured_durations(
     conn: sqlite3.Connection, filt: AnalyticsFilter, classifier: Classifier | None = None
 ) -> int:
-    """Rows with a measured duration; Combined-only data yields zero."""
+    """Rows with an explicitly stored legacy duration (legacy core column).
+
+    Current parsers leave ``duration_ms`` NULL (measured timing lives in
+    ``request_time_ms``); only pre-existing rows carrying an explicit
+    legacy value count here. Shared availability always follows
+    :func:`count_measured_request_timing`.
+    """
     where, params = _where(filt, classifier)
     row = conn.execute(f"SELECT COUNT(duration_ms) FROM requests WHERE {where}", params).fetchone()
+    return int(row[0])
+
+
+def count_measured_request_timing(
+    conn: sqlite3.Connection, filt: AnalyticsFilter, classifier: Classifier | None = None
+) -> int:
+    """Rows with a measured request latency; zero stays valid, missing excluded."""
+    where, params = _where(filt, classifier)
+    row = conn.execute(
+        f"SELECT COUNT(request_time_ms) FROM requests WHERE {where}", params
+    ).fetchone()
     return int(row[0])
 
 
@@ -1179,53 +1200,102 @@ def timing_stats(
     }
 
 
+#: Default page size for single-column value distributions. Displayed
+#: groups are bounded (no million-element in-memory lists); exact totals
+#: and an ``Other`` remainder keep every row counted. Callers needing
+#: the complete distribution page through ``limit``/``offset`` via the
+#: per-function keyword arguments -- never via an unrelated widget's
+#: paging fields.
+DISTRIBUTION_TOP_N = 100
+
+
 def _distribution(
     conn: sqlite3.Connection,
     filt: AnalyticsFilter,
     classifier: Classifier | None,
     column: str,
-) -> tuple[list[dict[str, object]], int]:
-    """Exact all-row value distribution with ``Unknown`` for missing.
+    *,
+    limit: int = DISTRIBUTION_TOP_N,
+    offset: int = 0,
+) -> tuple[list[dict[str, object]], int, dict[str, object]]:
+    """Bounded value distribution with exact totals and a separate Unknown.
 
     ``column`` is an internal allowlist literal. Totals are exact
     ``GROUP BY`` results over the entire filtered scope (never a capped
-    distinct scan); stable order is requests DESC, value ASC with NULLs
-    rendered as ``"Unknown"`` and sorted last.
+    distinct scan). Only known values are ranked (requests DESC, value
+    ASC) and paged with explicit ``limit``/``offset``; rows with a
+    missing value form their own ``"Unknown"`` bucket that is always
+    reported separately and ordered last, count-correct even when the
+    known-value page is truncated. ``other_requests`` aggregates every
+    ranked-but-unshown row so ``sum(shown) + other == total``; ``shown``,
+    ``total_values``, ``truncated`` and ``unknown_requests`` describe
+    the page honestly.
     """
+    if limit < 1 or offset < 0:
+        raise ValueError("distribution paging needs limit >= 1 and offset >= 0")
     where, params = _where(filt, classifier)
     total = int(conn.execute(f"SELECT COUNT(*) FROM requests WHERE {where}", params).fetchone()[0])
-    rows = conn.execute(
-        f"SELECT {column}, COUNT(*) FROM requests WHERE {where}"
-        f" GROUP BY {column} ORDER BY COUNT(*) DESC, {column} ASC",
-        params,
-    ).fetchall()
-    items = [
-        {"value": ("Unknown" if value is None else str(value)), "requests": int(count)}
-        for value, count in rows
-    ]
-    items.sort(
-        key=lambda item: (
-            -int(item["requests"]),
-            str(item["value"]) != "Unknown",
-            str(item["value"]),
-        )
+    known_values = int(
+        conn.execute(
+            f"SELECT COUNT(*) FROM (SELECT 1 FROM requests WHERE {where}"
+            f" AND {column} IS NOT NULL GROUP BY {column})",
+            params,
+        ).fetchone()[0]
     )
-    return items, total
+    unknown_requests = int(
+        conn.execute(
+            f"SELECT COUNT(*) FROM requests WHERE {where} AND {column} IS NULL", params
+        ).fetchone()[0]
+    )
+    rows = conn.execute(
+        f"SELECT {column}, COUNT(*) FROM requests WHERE {where} AND {column} IS NOT NULL"
+        f" GROUP BY {column} ORDER BY COUNT(*) DESC, {column} ASC LIMIT ? OFFSET ?",
+        [*params, limit, offset],
+    ).fetchall()
+    items = [{"value": str(value), "requests": int(count)} for value, count in rows]
+    shown_known = sum(int(item["requests"]) for item in items)
+    if unknown_requests:
+        items.append({"value": "Unknown", "requests": unknown_requests})
+    other_requests = total - shown_known - unknown_requests
+    total_values = known_values + (1 if unknown_requests else 0)
+    return (
+        items,
+        total,
+        {
+            "shown": len(items),
+            "total_values": total_values,
+            "known_values": known_values,
+            "unknown_requests": unknown_requests,
+            "other_requests": other_requests,
+            "truncated": other_requests > 0 or offset + len(rows) < known_values,
+            "limit": limit,
+            "offset": offset,
+        },
+    )
 
 
 def cache_distribution(
-    conn: sqlite3.Connection, filt: AnalyticsFilter, classifier: Classifier | None = None
+    conn: sqlite3.Connection,
+    filt: AnalyticsFilter,
+    classifier: Classifier | None = None,
+    *,
+    limit: int = DISTRIBUTION_TOP_N,
+    offset: int = 0,
 ) -> dict[str, object]:
-    """Cache-status distribution with a documented HIT ratio denominator.
+    """Bounded cache-status distribution with a documented HIT denominator.
 
     ``hit_ratio = HIT / cache_measured`` where ``cache_measured`` counts
     rows with a logged cache status (``Unknown``/absent rows are shown
     separately and never enter the denominator). ``HIT`` matches the
-    stored uppercase token exactly. ``not_modified_304`` counts normal
-    HTTP cache validation (status 304) separately: 304s are protocol
-    behavior, never automatically crawl waste.
+    stored uppercase token exactly, counted over the whole scope so the
+    numerator stays correct even when ``HIT`` falls outside the displayed
+    top page. ``not_modified_304`` counts normal HTTP cache validation
+    (status 304) separately: 304s are protocol behavior, never
+    automatically crawl waste.
     """
-    items, total = _distribution(conn, filt, classifier, "cache_status")
+    items, total, page = _distribution(
+        conn, filt, classifier, "cache_status", limit=limit, offset=offset
+    )
     where, params = _where(filt, classifier)
     measured = int(
         conn.execute(
@@ -1233,7 +1303,12 @@ def cache_distribution(
             params,
         ).fetchone()[0]
     )
-    hits = next((i["requests"] for i in items if i["value"] == "HIT"), 0)
+    hits = int(
+        conn.execute(
+            f"SELECT COUNT(*) FROM requests WHERE {where} AND cache_status = 'HIT'",
+            params,
+        ).fetchone()[0]
+    )
     validations = int(
         conn.execute(
             f"SELECT COUNT(*) FROM requests WHERE {where} AND status = 304", params
@@ -1242,9 +1317,16 @@ def cache_distribution(
     return {
         "items": items,
         "total": total,
+        "shown": page["shown"],
+        "total_values": page["total_values"],
+        "truncated": page["truncated"],
+        "other_requests": page["other_requests"],
+        "unknown_requests": page["unknown_requests"],
+        "distribution_limit": limit,
+        "distribution_offset": offset,
         "cache_measured": measured,
         "cache_missing": total - measured,
-        "hit_requests": int(hits),
+        "hit_requests": hits,
         "hit_ratio": (float(hits) / measured) if measured else None,
         "hit_ratio_denominator": "requests with a logged cache_status (absent excluded)",
         "not_modified_304": validations,
@@ -1253,49 +1335,113 @@ def cache_distribution(
 
 
 def mime_resource_breakdown(
-    conn: sqlite3.Connection, filt: AnalyticsFilter, classifier: Classifier | None = None
-) -> list[dict[str, object]]:
-    """Measured MIME type crossed with the extension-inferred resource kind.
+    conn: sqlite3.Connection,
+    filt: AnalyticsFilter,
+    classifier: Classifier | None = None,
+    *,
+    limit: int = DISTRIBUTION_TOP_N,
+    offset: int = 0,
+) -> dict[str, object]:
+    """Bounded measured-MIME by extension-inferred resource kind cross-tab.
 
     The measured ``mime_type`` is what the origin logged; the resource
     kind is the documented path-extension heuristic
-    (:data:`_RESOURCE_KIND_CASE`). ``Unknown`` marks absent MIME data.
-    Exact all-row ``GROUP BY`` with stable (requests DESC, mime ASC,
-    kind ASC) order.
+    (:data:`_RESOURCE_KIND_CASE`). ``Unknown`` marks absent MIME data
+    and sorts last (NULL-aware ordering, never a guessed MIME or a
+    fabricated zero). Only the top ``limit`` pairs are returned with an
+    exact whole-scope ``Other`` remainder, so high-cardinality MIME data
+    never materializes million-element lists; page through
+    ``limit``/``offset`` for the complete cross-tab.
     """
+    if limit < 1 or offset < 0:
+        raise ValueError("distribution paging needs limit >= 1 and offset >= 0")
     where, params = _where(filt, classifier)
+    total = int(conn.execute(f"SELECT COUNT(*) FROM requests WHERE {where}", params).fetchone()[0])
+    total_pairs = int(
+        conn.execute(
+            "SELECT COUNT(*) FROM (SELECT 1 FROM requests"
+            f" WHERE {where} GROUP BY mime_type, {_RESOURCE_KIND_CASE})",
+            params,
+        ).fetchone()[0]
+    )
+    unknown_requests = int(
+        conn.execute(
+            f"SELECT COUNT(*) FROM requests WHERE {where} AND mime_type IS NULL", params
+        ).fetchone()[0]
+    )
     rows = conn.execute(
-        "SELECT COALESCE(mime_type, 'Unknown'),"
+        "SELECT mime_type,"
         f" {_RESOURCE_KIND_CASE} AS kind, COUNT(*)"
-        f" FROM requests WHERE {where} GROUP BY mime_type, kind"
-        " ORDER BY COUNT(*) DESC, mime_type ASC, kind ASC",
-        params,
+        f" FROM requests WHERE {where} AND mime_type IS NOT NULL"
+        " GROUP BY mime_type, kind"
+        " ORDER BY COUNT(*) DESC, mime_type ASC, kind ASC"
+        " LIMIT ? OFFSET ?",
+        [*params, limit, offset],
     ).fetchall()
-    return [
+    items = [
         {"mime_type": mime, "resource_kind": kind, "requests": int(count)}
         for mime, kind, count in rows
     ]
+    unknown_rows = conn.execute(
+        "SELECT 'Unknown' AS mime,"
+        f" {_RESOURCE_KIND_CASE} AS kind, COUNT(*)"
+        f" FROM requests WHERE {where} AND mime_type IS NULL"
+        " GROUP BY kind ORDER BY COUNT(*) DESC, kind ASC",
+        params,
+    ).fetchall()
+    items.extend(
+        {"mime_type": mime, "resource_kind": kind, "requests": int(count)}
+        for mime, kind, count in unknown_rows
+    )
+    shown = sum(int(item["requests"]) for item in items)
+    return {
+        "items": items,
+        "total": total,
+        "shown": len(items),
+        "total_values": total_pairs,
+        "unknown_requests": unknown_requests,
+        "unknown_pairs": len(unknown_rows),
+        "other_requests": total - shown,
+        "truncated": offset + len(rows) < total_pairs - len(unknown_rows),
+        "limit": limit,
+        "offset": offset,
+    }
 
 
 def version_distribution(
-    conn: sqlite3.Connection, filt: AnalyticsFilter, classifier: Classifier | None = None
-) -> tuple[list[dict[str, object]], int]:
+    conn: sqlite3.Connection,
+    filt: AnalyticsFilter,
+    classifier: Classifier | None = None,
+    *,
+    limit: int = DISTRIBUTION_TOP_N,
+    offset: int = 0,
+) -> tuple[list[dict[str, object]], int, dict[str, object]]:
     """HTTP version distribution with ``Unknown`` for missing versions."""
-    return _distribution(conn, filt, classifier, "http_version")
+    return _distribution(conn, filt, classifier, "http_version", limit=limit, offset=offset)
 
 
 def tls_distribution(
-    conn: sqlite3.Connection, filt: AnalyticsFilter, classifier: Classifier | None = None
-) -> tuple[list[dict[str, object]], int]:
+    conn: sqlite3.Connection,
+    filt: AnalyticsFilter,
+    classifier: Classifier | None = None,
+    *,
+    limit: int = DISTRIBUTION_TOP_N,
+    offset: int = 0,
+) -> tuple[list[dict[str, object]], int, dict[str, object]]:
     """TLS protocol distribution with ``Unknown`` for missing protocols."""
-    return _distribution(conn, filt, classifier, "tls_protocol")
+    return _distribution(conn, filt, classifier, "tls_protocol", limit=limit, offset=offset)
 
 
 def host_distribution(
-    conn: sqlite3.Connection, filt: AnalyticsFilter, classifier: Classifier | None = None
-) -> tuple[list[dict[str, object]], int]:
+    conn: sqlite3.Connection,
+    filt: AnalyticsFilter,
+    classifier: Classifier | None = None,
+    *,
+    limit: int = DISTRIBUTION_TOP_N,
+    offset: int = 0,
+) -> tuple[list[dict[str, object]], int, dict[str, object]]:
     """Logged-host distribution with ``Unknown`` for hostless rows."""
-    return _distribution(conn, filt, classifier, "server_host")
+    return _distribution(conn, filt, classifier, "server_host", limit=limit, offset=offset)
 
 
 _SLOW_ENDPOINT_ORDER: dict[str, str] = {
@@ -1304,11 +1450,60 @@ _SLOW_ENDPOINT_ORDER: dict[str, str] = {
     "max_desc": "max_ms DESC, measured DESC, path ASC",
 }
 
-#: Candidate bound for the ``p95_desc`` slow-endpoint ranking: per-path
-#: p95 needs order statistics per path, so the ranking covers the top
-#: N paths by measured count (reported explicitly), while every shown
-#: p95 itself is exact over that path's full rows -- never sampled.
-SLOW_P95_CANDIDATES = 200
+
+def _p95_rank_rows(
+    conn: sqlite3.Connection,
+    filt: AnalyticsFilter,
+    classifier: Classifier | None,
+) -> tuple[list[tuple[object, ...]], int]:
+    """Exact global per-path P95 ranking over the whole filtered scope.
+
+    One SQL statement computes every candidate path's exact P95 (integer
+    order-statistic arithmetic, no sampling) and returns the requested
+    page already ranked ``p95 DESC, path ASC``. SQLite evaluates the
+    window aggregation internally, so Python receives only the page
+    rows -- no ``fetchall`` of every duration or every path. The
+    interpolation matches :func:`timing_quantile`: for ``q = 95/100``
+    and per-path count ``n``, ``num = 95 * (n - 1)``, ``lo0 = num //
+    100``, ``rem = num % 100``; ``p95 = v[lo0] + (v[lo0 + 1] - v[lo0])
+    * rem / 100`` with 0-based ascending ``v`` (``ROW_NUMBER`` is
+    1-based, hence ``+1``). P50 for the same rows uses ``50/100`` the
+    same way, so page items carry exact P50 too.
+    """
+    where, params = _where(filt, classifier)
+    measured_scope = f"{where} AND request_time_ms IS NOT NULL"
+    total = int(
+        conn.execute(
+            f"SELECT COUNT(DISTINCT path) FROM requests WHERE {measured_scope}", params
+        ).fetchone()[0]
+    )
+    rows = conn.execute(
+        "WITH ranked AS ("
+        " SELECT path, request_time_ms,"
+        " COUNT(*) OVER (PARTITION BY path) AS n,"
+        " ROW_NUMBER() OVER (PARTITION BY path ORDER BY request_time_ms ASC) AS rn"
+        f" FROM requests WHERE {measured_scope}"
+        "), per_path AS ("
+        " SELECT path, n AS measured,"
+        " MIN(request_time_ms) AS min_ms, MAX(request_time_ms) AS max_ms,"
+        " AVG(request_time_ms) AS avg_ms,"
+        " MAX(CASE WHEN rn = (95 * (n - 1)) / 100 + 1 THEN request_time_ms END) AS lo95,"
+        " MAX(CASE WHEN rn = (95 * (n - 1)) / 100 + CASE WHEN (95 * (n - 1)) % 100 = 0"
+        " THEN 1 ELSE 2 END THEN request_time_ms END) AS hi95,"
+        " CAST((95 * (n - 1)) % 100 AS REAL) / 100.0 AS frac95,"
+        " MAX(CASE WHEN rn = (50 * (n - 1)) / 100 + 1 THEN request_time_ms END) AS lo50,"
+        " MAX(CASE WHEN rn = (50 * (n - 1)) / 100 + CASE WHEN (50 * (n - 1)) % 100 = 0"
+        " THEN 1 ELSE 2 END THEN request_time_ms END) AS hi50,"
+        " CAST((50 * (n - 1)) % 100 AS REAL) / 100.0 AS frac50"
+        " FROM ranked GROUP BY path, n"
+        ")"
+        " SELECT path, measured, min_ms, max_ms, avg_ms,"
+        " lo95 + (hi95 - lo95) * frac95 AS p95_ms,"
+        " lo50 + (hi50 - lo50) * frac50 AS p50_ms"
+        " FROM per_path ORDER BY p95_ms DESC, path ASC LIMIT ? OFFSET ?",
+        [*params, filt.limit, filt.offset],
+    ).fetchall()
+    return rows, total
 
 
 def slow_endpoints(
@@ -1318,13 +1513,14 @@ def slow_endpoints(
 
     Candidates are paths with at least one measured ``request_time_ms``
     in the filtered scope. ``avg_desc``/``requests_desc``/``max_desc``
-    rank every candidate exactly in SQL (stable tie-breaks, NULL
-    averages last); ``p95_desc`` ranks the top-200 candidates by
-    measured count with exact per-path p95 values and reports the
-    candidate bound explicitly. Reported p50/p95 values are exact order
-    statistics over each path's full measured rows. Non-finite averages
-    (overflowed ``AVG``) show ``None`` with a warning instead of
-    ``Inf``/``NaN``.
+    rank every candidate exactly in SQL (stable tie-breaks; NULL
+    averages sort last): ``p95_desc`` computes each path's exact P95
+    with integer order-statistic arithmetic inside one window-aggregate
+    statement and pages the ranked result, so a rare slow path is never
+    hidden by a frequency preselection. Reported p50/p95 values are
+    exact order statistics over each path's full measured rows.
+    Non-finite averages (overflowed ``AVG``) show ``None`` with a
+    warning instead of ``Inf``/``NaN``.
     """
     filt = query.filt
     where, params = _where(filt, classifier)
@@ -1336,26 +1532,34 @@ def slow_endpoints(
     )
     meta: dict[str, object] = {"candidate_paths": total, "ranking": query.sort}
     if query.sort == "p95_desc":
-        candidates = conn.execute(
-            "SELECT path, COUNT(*) AS measured FROM requests"
-            f" WHERE {measured_scope} GROUP BY path"
-            " ORDER BY measured DESC, path ASC LIMIT ?",
-            [*params, SLOW_P95_CANDIDATES],
-        ).fetchall()
-        meta["p95_candidate_bound"] = SLOW_P95_CANDIDATES
-        meta["p95_candidates_shown"] = len(candidates)
-        enriched: list[dict[str, object]] = []
-        for path, measured in candidates:
-            stats = _path_timing(conn, filt, classifier, str(path), int(measured))
-            enriched.append(stats)
-        enriched.sort(
-            key=lambda e: (
-                -(e["p95_ms"] if e["p95_ms"] is not None else -1.0),
-                str(e["path"]) if e["p95_ms"] is not None else "~",
+        rows, total = _p95_rank_rows(conn, filt, classifier)
+        ranked_items: list[dict[str, object]] = []
+        warnings: list[str] = []
+        for path, measured, minimum, maximum, average, p95, p50 in rows:
+            average_ms: float | None = None
+            if average is not None:
+                candidate_avg = float(average)
+                average_ms = candidate_avg if math.isfinite(candidate_avg) else None
+                if average_ms is None:
+                    warnings.append(f"path {path}: average unavailable (overflow)")
+            ranked_items.append(
+                {
+                    "path": path,
+                    "measured": int(measured),
+                    "min_ms": float(minimum) if minimum is not None else None,
+                    "max_ms": float(maximum) if maximum is not None else None,
+                    "average_ms": average_ms,
+                    "p50_ms": (
+                        float(p50) if p50 is not None and math.isfinite(float(p50)) else None
+                    ),
+                    "p95_ms": (
+                        float(p95) if p95 is not None and math.isfinite(float(p95)) else None
+                    ),
+                }
             )
-        )
-        page = enriched[filt.offset : filt.offset + filt.limit]
-        return page, total, meta
+        if warnings:
+            meta["warnings"] = warnings
+        return ranked_items, total, meta
     try:
         order = _SLOW_ENDPOINT_ORDER[query.sort]
     except KeyError as exc:
@@ -1409,7 +1613,9 @@ def _path_timing(
     if average is not None:
         candidate = float(average)
         average_ms = candidate if math.isfinite(candidate) else None
-    scoped = filt.model_copy(update={"path_prefix": None, "limit": 1, "offset": 0})
+    scoped = filt.model_copy(
+        update={"path_prefix": None, "path_exact": None, "limit": 1, "offset": 0}
+    )
     where, params = _where(scoped, classifier)
     path_where = f"{where} AND path = ?"
     path_params: list[object] = [*params, path]
@@ -1493,19 +1699,80 @@ def _base_scope(filt: AnalyticsFilter) -> tuple[AnalyticsFilter, list[str]]:
     return filt.model_copy(update=updates), removed
 
 
+def _check_ai_candidate_compatible(
+    filt: AnalyticsFilter, classifier: Classifier, ai_indexes: set[int]
+) -> None:
+    """Reject selectors that cannot hold AI-candidate rows.
+
+    AI-crawler rules live in the ``claimed_bot`` traffic bucket, so a
+    ``browser_like``/``unknown``/``other_automation`` traffic selector --
+    or a bot/category/provider/purpose selector matching no AI rule --
+    would yield an empty candidate set. Raising here (instead of
+    silently ignoring the selector) keeps evidence, counts and
+    drilldowns honest about the selected scope.
+    """
+    if filt.traffic not in ("all", "claimed_bot"):
+        raise ValueError(
+            "ai-only analysis needs traffic 'all' or 'claimed_bot': "
+            f"{filt.traffic!r} can hold no AI-crawler rows"
+        )
+    for name in ("bot", "category", "provider", "purpose"):
+        value = getattr(filt, name)
+        if value is None:
+            continue
+        allowed = resolve_selector_indexes(classifier, **{name: value})
+        assert allowed is not None
+        if not (allowed & ai_indexes):
+            raise ValueError(
+                f"ai-only analysis: {name} selector {value!r} matches no AI-crawler rule"
+            )
+
+
+def _ai_candidate_condition(
+    filt: AnalyticsFilter, classifier: Classifier, ai_indexes: set[int]
+) -> tuple[str, list[object]]:
+    """SQL predicate (plus bound params) for the SELECTED AI-candidate rows.
+
+    Conjunction of the AI-category match with the caller's own
+    bot/category/provider/purpose/traffic predicates -- every selector
+    is preserved on the candidate side. The comparison universe widens
+    by dropping those predicates (see :func:`_base_scope`); both sides
+    share the site/source/time/content scope. Incompatible selectors
+    raise ``ValueError`` via :func:`_check_ai_candidate_compatible`.
+    """
+    ordered = sorted(ai_indexes)
+    placeholders = ", ".join("?" for _ in ordered)
+    _check_ai_candidate_compatible(filt, classifier, ai_indexes)
+    ai_match = f"{_MATCH} IN ({placeholders})"
+    ai_params: list[object] = [classifier.spec, *ordered]
+    extra_clauses, extra_params = _classification_clauses(filt, classifier)
+    if not extra_clauses:
+        return ai_match, ai_params
+    return (
+        ai_match + " AND " + " AND ".join(f"({clause})" for clause in extra_clauses),
+        [*ai_params, *extra_params],
+    )
+
+
 def ai_only_paths(
     conn: sqlite3.Connection, filt: AnalyticsFilter, classifier: Classifier
 ) -> dict[str, object]:
-    """Paths observed ONLY by configured AI-bot rules in the base scope.
+    """Paths observed ONLY by the SELECTED AI candidates, not other traffic.
 
-    A path is AI-only when the base scope (site/source/time plus
-    content matchers, with bot/category/traffic selectors removed)
-    holds AI-category observations for it and NO other-traffic
-    observations. Exact single-``GROUP BY`` SQL over the whole scope:
-    totals never pass a capped distinct scan. The result always carries
-    the comparison scope, universe coverage and the absence caveat;
+    A path is AI-only when it holds rows matching the caller's own
+    AI-candidate scope (bot/category/provider/purpose/traffic selectors
+    preserved) and NO other-traffic rows in the widened comparison
+    universe (those same selectors removed, everything else -- site,
+    source, time, content matchers -- shared). Exact single-``GROUP
+    BY`` SQL over the whole scope: totals never pass a capped distinct
+    scan. The result carries both the candidate scope and the comparison
+    universe with their own filters/coverage, plus the absence caveat;
     vacuously AI-only universes (no other traffic at all) are flagged,
-    never hidden. No indexing, training-use or ranking claim is made.
+    never hidden. A shared browser path always contributes other-traffic
+    rows, so it can never be AI-only. Incompatible selectors (traffic
+    outside ``all``/``claimed_bot``, or a bot/category/provider/purpose
+    matching no AI rule) raise ``ValueError`` instead of being silently
+    ignored. No indexing, training-use or ranking claim is made.
     """
     ai_indexes = ai_rule_indexes(classifier)
     base, removed = _base_scope(filt)
@@ -1529,6 +1796,7 @@ def ai_only_paths(
                 "other_observed_paths": 0,
                 "selectors_removed": removed,
             },
+            "comparison_filter": base,
             "vacuous": universe_requests == 0,
             "warnings": ["no configured AI-bot categories: nothing can be AI-only"],
             "limit": base.limit,
@@ -1536,58 +1804,54 @@ def ai_only_paths(
         }
     ordered = sorted(ai_indexes)
     placeholders = ", ".join("?" for _ in ordered)
-    ai_match = f"{_MATCH} IN ({placeholders})"
-    ai_params: list[object] = [classifier.spec, *ordered]
+    # NOTE: the WHERE clause stays on the whole base scope (no AI
+    # pre-filter): the HAVING below must still see each path's
+    # non-AI universe rows, otherwise every AI-observed path would
+    # wrongly qualify. The candidate predicate (selected AI scope)
+    # and the universe other-traffic predicate enter as conditional
+    # aggregates over the full per-path groups instead.
+    cand_sql, cand_params = _ai_candidate_condition(filt, classifier, ai_indexes)
+    other_sql = f"({_MATCH} IS NULL OR {_MATCH} NOT IN ({placeholders}))"
+    other_params: list[object] = [classifier.spec, classifier.spec, *ordered]
     ai_paths = int(
         conn.execute(
-            f"SELECT COUNT(DISTINCT path) FROM requests WHERE {where} AND {ai_match}",
-            [*params, *ai_params],
+            f"SELECT COUNT(DISTINCT path) FROM requests WHERE {where} AND {cand_sql}",
+            [*params, *cand_params],
         ).fetchone()[0]
     )
     other_paths = int(
         conn.execute(
-            f"SELECT COUNT(DISTINCT path) FROM requests WHERE {where} AND ({_MATCH} IS NULL OR {_MATCH} NOT IN ({placeholders}))",
-            [*params, classifier.spec, classifier.spec, *ordered],
+            f"SELECT COUNT(DISTINCT path) FROM requests WHERE {where} AND {other_sql}",
+            [*params, *other_params],
         ).fetchone()[0]
     )
     total = int(
         conn.execute(
             "SELECT COUNT(*) FROM (SELECT path FROM requests WHERE "
             + where
-            + f" GROUP BY path HAVING SUM(CASE WHEN {ai_match} THEN 1 ELSE 0 END) > 0"
-            + f" AND SUM(CASE WHEN {_MATCH} IS NULL OR {_MATCH} NOT IN ({placeholders}) THEN 1 ELSE 0 END) = 0)",
-            [*params, *ai_params, classifier.spec, classifier.spec, *ordered],
+            + f" GROUP BY path HAVING SUM(CASE WHEN {cand_sql} THEN 1 ELSE 0 END) > 0"
+            + f" AND SUM(CASE WHEN {other_sql} THEN 1 ELSE 0 END) = 0)",
+            [*params, *cand_params, *other_params],
         ).fetchone()[0]
     )
-    # NOTE: the WHERE clause stays on the whole base scope (no AI
-    # pre-filter): the HAVING below must still see each path's
-    # non-AI rows, otherwise every AI-observed path would wrongly
-    # qualify. AI counts use conditional aggregates over the full
-    # per-path groups instead.
     rows = conn.execute(
         "SELECT path,"
-        f" SUM(CASE WHEN {ai_match} THEN 1 ELSE 0 END) AS ai_requests,"
-        f" COALESCE(SUM(CASE WHEN {ai_match} THEN bytes ELSE 0 END), 0),"
-        f" GROUP_CONCAT(DISTINCT CASE WHEN {ai_match} THEN {_MATCH} END)"
+        f" SUM(CASE WHEN {cand_sql} THEN 1 ELSE 0 END) AS ai_requests,"
+        f" COALESCE(SUM(CASE WHEN {cand_sql} THEN bytes ELSE 0 END), 0),"
+        f" GROUP_CONCAT(DISTINCT CASE WHEN {cand_sql} THEN {_MATCH} END)"
         f" FROM requests WHERE {where}"
         " GROUP BY path"
-        f" HAVING SUM(CASE WHEN {ai_match} THEN 1 ELSE 0 END) > 0"
-        " AND SUM(CASE WHEN "
-        + _MATCH
-        + " IS NULL OR "
-        + _MATCH
-        + f" NOT IN ({placeholders}) THEN 1 ELSE 0 END) = 0"
+        f" HAVING SUM(CASE WHEN {cand_sql} THEN 1 ELSE 0 END) > 0"
+        f" AND SUM(CASE WHEN {other_sql} THEN 1 ELSE 0 END) = 0"
         " ORDER BY ai_requests DESC, path ASC LIMIT ? OFFSET ?",
         [
-            *ai_params,
-            *ai_params,
-            *ai_params,
+            *cand_params,
+            *cand_params,
+            *cand_params,
             classifier.spec,
             *params,
-            *ai_params,
-            classifier.spec,
-            classifier.spec,
-            *ordered,
+            *cand_params,
+            *other_params,
             base.limit,
             base.offset,
         ],
@@ -1606,7 +1870,7 @@ def ai_only_paths(
                 "ai_bytes": int(nbytes),
                 "rules": rules,
                 "providers": providers,
-                "drilldown": {"path_prefix": path, "category": "ai_crawler"},
+                "drilldown": {"path_exact": path, "category": "ai_crawler"},
             }
         )
     vacuous = other_paths == 0 and universe_requests > 0
@@ -1627,6 +1891,7 @@ def ai_only_paths(
             "other_observed_paths": other_paths,
             "selectors_removed": removed,
         },
+        "comparison_filter": base,
         "vacuous": vacuous,
         "warnings": warnings,
         "limit": base.limit,
@@ -1646,9 +1911,12 @@ def seo_status_by_bot_path(
     One exact all-row ``GROUP BY`` over the filtered scope: rows match
     the ordered versioned classifier (first match wins), so every row
     attributes to exactly one configured rule/provider. Groups carry
-    exact counts/bytes plus drilldown selectors (``bot`` + ``path`` +
-    status class) for the future UI/API. Sort is stable: requests DESC,
-    path ASC, rule ASC. ``status_class`` is an internal literal.
+    exact counts/bytes plus drilldown selectors (``bot`` + exact
+    ``path_exact`` + status class) for the future UI/API: the exact
+    selector reproduces the reported path group, while the legacy
+    ``path_prefix`` remains available as a widening prefix exploration.
+    Sort is stable: requests DESC, path ASC, rule ASC. ``status_class``
+    is an internal literal.
     """
     try:
         low, high = _STATUS_CLASS_RANGE[status_class]
@@ -1688,7 +1956,7 @@ def seo_status_by_bot_path(
                 "purpose": rule.purpose if rule else None,
                 "requests": int(count),
                 "bytes_total": int(nbytes),
-                "drilldown": {"bot": rule_id, "path_prefix": path, "status_class": status_class},
+                "drilldown": {"bot": rule_id, "path_exact": path, "status_class": status_class},
             }
         )
     return items, total
@@ -1731,43 +1999,73 @@ def own_hosts_for_scope(conn: sqlite3.Connection, filt: AnalyticsFilter) -> set[
     return hosts
 
 
+#: Validated referrer-relation selector for :func:`referrer_404_targets`.
+#: ``"all"`` returns internal and external referrers together (labelled
+#: per row); ``"internal"``/``"external"`` filter in SQL against the
+#: configured own hosts/aliases with matching totals.
+ReferrerRelation = Literal["all", "internal", "external"]
+
+
 def referrer_404_targets(
     conn: sqlite3.Connection,
     filt: AnalyticsFilter,
     classifier: Classifier | None,
     own_hosts: set[str] | None = None,
+    *,
+    relation: ReferrerRelation = "all",
 ) -> tuple[list[dict[str, object]], int]:
-    """External referrer-path -> target-404 report over sanitized fields.
+    """Referrer-path -> target-404 report over sanitized fields.
 
-    Keys use ONLY the minimized stored referrer (lowercase host without
-    port/userinfo, ``http``/``https`` scheme or ``None``, secret-masked
-    path without query values) plus the normalized target path. Rows
-    whose referrer host is a configured own host/alias are labelled
-    internal; everything else is external. Dangerous schemes can never
-    appear (only ``http``/``https``/``None`` are stored), and no query
-    values, userinfo or secrets are emitted. Exact all-row ``GROUP BY``
-    with stable (requests DESC, host ASC, target ASC) order; ordinary
-    host-level reports are untouched.
+    Covers internal AND external referrers together (each row is
+    labelled; see ``relation`` to narrow). Keys use ONLY the minimized
+    stored referrer (lowercase host without port/userinfo,
+    ``http``/``https`` scheme or ``None``, secret-masked path without
+    query values) plus the normalized target path. Rows whose referrer
+    host is a configured own host/alias are labelled internal;
+    everything else is external. Dangerous schemes can never appear
+    (only ``http``/``https``/``None`` are stored), and no query values,
+    userinfo or secrets are emitted. Totals come from an exact grouped
+    subquery (no delimiter-collision tuple encoding); every grouping
+    key participates in the stable order (requests DESC, host ASC,
+    scheme NULLS LAST, referrer-path NULLS LAST, target ASC), so tied
+    groups page deterministically. Ordinary host-level reports are
+    untouched.
     """
+    if relation not in ("all", "internal", "external"):
+        raise ValueError(f"unknown referrer relation: {relation!r}")
     hosts = own_hosts if own_hosts is not None else own_hosts_for_scope(conn, filt)
-    lowered = {h.lower() for h in hosts}
+    lowered = sorted({h.lower() for h in hosts if h})
     where, params = _where(filt, classifier)
     scoped = f"{where} AND status = 404 AND referer_host IS NOT NULL"
+    relation_params: list[object] = []
+    if relation != "all":
+        if lowered:
+            in_list = ", ".join("?" for _ in lowered)
+            if relation == "internal":
+                scoped += f" AND lower(referer_host) IN ({in_list})"
+            else:
+                scoped += f" AND lower(referer_host) NOT IN ({in_list})"
+            relation_params = [*lowered]
+        elif relation == "internal":
+            return [], 0
     total = int(
         conn.execute(
-            "SELECT COUNT(DISTINCT referer_host || CHAR(31) || COALESCE(referer_scheme, '')"
-            " || CHAR(31) || COALESCE(referer_path, '') || CHAR(31) || path)"
-            f" FROM requests WHERE {scoped}",
-            params,
+            "SELECT COUNT(*) FROM (SELECT 1"
+            f" FROM requests WHERE {scoped}"
+            " GROUP BY referer_host, referer_scheme, referer_path, path)",
+            [*params, *relation_params],
         ).fetchone()[0]
     )
     rows = conn.execute(
         "SELECT referer_host, referer_scheme, referer_path, path, COUNT(*) AS requests"
         f" FROM requests WHERE {scoped}"
         " GROUP BY referer_host, referer_scheme, referer_path, path"
-        " ORDER BY requests DESC, referer_host ASC, path ASC LIMIT ? OFFSET ?",
-        [*params, filt.limit, filt.offset],
+        " ORDER BY requests DESC, referer_host ASC,"
+        " referer_scheme ASC NULLS LAST, referer_path ASC NULLS LAST, path ASC"
+        " LIMIT ? OFFSET ?",
+        [*params, *relation_params, filt.limit, filt.offset],
     ).fetchall()
+    lowered_set = set(lowered)
     return (
         [
             {
@@ -1776,7 +2074,7 @@ def referrer_404_targets(
                 "referer_path": ref_path,
                 "target_path": target,
                 "requests": int(count),
-                "internal": str(host).lower() in lowered,
+                "internal": str(host).lower() in lowered_set,
             }
             for host, scheme, ref_path, target, count in rows
         ],
