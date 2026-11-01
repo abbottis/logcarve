@@ -1754,3 +1754,56 @@ Checks here: `pytest --collect-only` 7 tests collected
 (tests/e2e/test_slice_b.py); `ruff check` PASS; `ruff format --check` PASS.
 Full protected browser run stays coordinator-owned: browser PASS is NOT
 claimed here.
+
+## 2026-11-01 — Owner-UX closeout (independent final evidence, reported append-only)
+
+Independent coordinator final evidence for the owner-UX slice on public
+`feature/owner-ux-review-2026-11-01` at HEAD `f0182fb`. Application anchor
+is `ffaf737`; commits after it are tests/docs ONLY, so the tested runtime
+image was built from `a087c3e1497b1ca3e9144a8fb0e072d8a8bed6b0` — no fresh
+build is claimed for the later docs/test-only commits, and those commits
+need no broad test repeat. No writer edits to app/tests after this point.
+No push, merge, deployment, provider/product calls, purchases, or
+allowance reset/restore. Sole-writer Muse coding with exact
+`muse-spark-1.3-contributor`/medium, protections ON, no agents; public
+source + synthetic fixtures only. Historical PASS/FAIL/BLOCKED/NOT RUN
+records above are preserved unchanged.
+
+| Check | Result | Evidence |
+| --- | --- | --- |
+| Locked `pytest tests/unit tests/integration` clean + `AI_ENABLED=true LLM_WARN_AT_USD=999` | PASS | 536 passed, 0 skipped each (32.15s / 31.25s); Python 3.12.16 macOS arm64; no dep/lock/schema change |
+| Protected Chromium `pytest tests/e2e` | PASS | 29 passed, 0 skipped (27.08s); window DST label Apply + failed-Apply state, 8 typed columns, UA escaping, Time UTC title, asc/desc, keyboard details, 9 starters with disabled send, scope/nav, charts/tables/API/themes/mobile |
+| Earlier E2E 19/9, 27/2, 28/1 | FAIL (historical, preserved) | Stale/unstable maintained-test expectations corrected by test-only commits; app detail behavior was working, `wait [hidden]` default-visible test bug closed |
+| Network-blocked 10-row full API probe + existing 28-row regression | PASS | 78 + 53 checks: 12 sort directions + legacy newest/oldest, paging, filters, unknown-sort 400, cross-source 403, NULL-bytes-last, 4 identity conflicts incl. >200-char UA sample, truncation flag, no IP/query leak, source hash/integrity, affixed-product negative |
+| Native-wire fake-provider regression | PASS | 121 checks across A/B/C/full-120 windows: evidence IDs, named counts, rule versions, scope/coverage/quality, cached+reasoning microUSD ledger, caps, exhausted SYNTHETIC allowance |
+| Real Meta smoke | INCOMPLETE (historical, preserved) | 2 of 3 completed, third stopped at its context bound; no fresh paid authorization; real allowance never reset/restored/recreated; no actual Meta calls here |
+| Changed-path review (analytics/API/web/classifier) | PASS (slice only) | Fixed SQL sort allowlist + bound values, stable ties, scope-before-order, paging bound, 200-char UA + truncation flag, full-stored-UA identity decision, bounded cached 12-product/9-provider detector, no DNS/GeoIP/exclusion, exact all-row counts beyond 5100 agents, escaped output, session-gated Help, unchanged scoped API/CSRF/egress/tools/ledger; no unresolved high/medium defect in this slice — NOT whole-project QA-01/release approval |
+| Ruff / lock / diff | PASS | `ruff check` + format on 167 files, `uv lock` 40 packages, `git diff --check` |
+| Docker tracked-export build | PASS | npm asset build + external-refs check, locked deps, local resources only |
+| Fresh isolated Compose candidate | PASS | 8/0 (120 seed, replay, digests, restart); Linux ARM64 image; owned resources removed |
+| Internal-network offline Compose | PASS | 24/0 (no external network/model key/chat; API/client, backup/isolated restore, retention, cleanup); owned resources removed |
+| Built candidate + upgraded live 8080 | PASS | 36 route/theme/width cases each (9 routes incl. Help, 1440+390, light+dark); 8 timezone checks each (all 599 zones, default/order/labels, Kathmandu/Auckland/New York/Adelaide exact times, summer/winter OOB refresh, invalid Apply, narrow themes); 12 UI interaction checks each (header clicks vs external API, keyboard details, details after htmx Apply, both themes); no console errors/external requests/overflow/failed responses |
+| 100k synthetic profile (macOS 27.0.1 arm64, M5 Pro 18 cores/48GiB, Python 3.12.16) | Observed | 98969 accepted / 1031 by-design rejected, 2.0801s import, 45916160 DB bytes, peak RSS 169.53 MiB; byte-sorted Requests 0.1841/0.8048s, Security 0.2931/0.9566s, Overview 1.4416/3.1017s, Crawlers 1.1949/1.4437s; single observations, not percentiles/guarantees |
+| Redacted Gitleaks history + tracked export | PASS with reviewed finding | Only the known `technical-spec.md:787` cost-heading false positive (`generic-api-key`, exit 1 retained); no allowlist, no new finding; no work-origin naming trace; functional ChatGPT-User catalog data retained unchanged |
+| Live update 127.0.0.1:8080 | PASS | EXACT tested image `logcarve-candidate:a087c3e…`, UID 10001, loopback only, RO source mounts, AI off, empty key, default Europe/Berlin; online 0600 backup + rollback image taken BEFORE activation; all-table/row hashes identical across activation; credential hashes unchanged; 120 rows, schema 4, admin/token/sessions/usage retained; later logins create only their own sessions; pins `d765393f…ebeb65` / `b9479a8e…52ca45f` unchanged |
+| Linux x86-64 / standalone host install | NOT RUN | ARM64 only; no x86/amd64 claim |
+| Persistent demo network posture | Noted | Ordinary bridge loopback demo is NOT air-gapped; offline proof is the separate internal-network run |
+
+Acceptance impact: owner-UX Stage A+B (ANA-01/03/04/05, UI-01/02/03/05,
+API-01/05, AI-01/03) complete for this changed slice at the above
+evidence; owner manual acceptance pending; no full release or QA-01
+certification. Changed requirements recorded 2026-11-01: plain named-bot
+labels with one identity legend (ANA-03/UI-01); 599 signed period-start
+offset labels with DST caveat (UI-01/02); human category labels,
+full-width bot groups, "Bots and automation" 63 vs 45-member wording
+(ANA-03/UI-01); method/status native dropdowns (ANA-05/API-05/UI-02/05);
+8-column Requests explorer with 14 sorts incl. legacy + sanitized
+details (ANA-05/API-05/UI-02/05); conflicting-bot candidate as
+investigation lead only, absence proves nothing (ANA-03/AI-03);
+authenticated Help + input-only firewall starter (UI-01/02/AI-01);
+quick views incl. Largest responses (UI-02/05/ANA-05). Honest limits
+kept: no fifth "user generated" class (Browser-like is an explanatory
+same-bucket quick view, not a metric); identity conflicts are neither
+verified fake/real nor auto-exclusion; no IPs/countries/humans/
+sessions/conversions/indexing/ranking/training claims. Product demo
+stays AI-off; AI-02 stays INCOMPLETE; no new paid calls authorized.

@@ -1,4 +1,4 @@
-# Owner UX review plan — 2026-11-01
+# Owner UX review plan — 2026-11-01 (closed: independently verified, owner acceptance pending)
 
 Date: 2026-11-01. Reason: owner reviewed screenshots/layout of the
 acceptance-readiness checkout on the public source branch and supplied
@@ -267,6 +267,30 @@ no schema migration, 120-row fixtures/digests/seeds untouched.
   changes, or product/provider calls. No Stage B analytics (explorer
   sorting/details, bot-identity signal). No upload/import UX, no
   firewall execution, no GeoIP, no fifth traffic bucket.
+
+## 2026-11-01 closeout — independently verified, owner acceptance pending (docs-only)
+
+Stage A+B complete on public `feature/owner-ux-review-2026-11-01` at
+HEAD `f0182fb` (application anchor `ffaf737`; later commits tests/docs
+only). Runtime image built from `a087c3e`; no fresh build claimed for
+later commits. Independent evidence in `docs/verification.md`: 536
+unit/integration, 29 E2E, 78+53 API checks, 121 offline mock checks,
+Ruff/lock/diff, 8/0 candidate + 24/0 offline Compose, 36+8+12 browser
+checks on built candidate AND updated live 8080, redacted Gitleaks
+(only known `technical-spec.md:787` false positive). Earlier E2E
+19/9, 27/2, 28/1 FAILs preserved as stale-test history. Changed-path
+review found no unresolved high/medium defect in this slice; NOT
+whole-project QA-01/release approval. Real AI stays 2-of-3 INCOMPLETE,
+x86-64 NOT RUN, demo AI-off, no new paid calls, no allowance reset.
+Live 8080 updated with the exact tested image (backup + rollback kept;
+120 rows, schema 4, credentials unchanged); loopback bridge demo is not
+air-gapped — offline proof is the separate internal-network run.
+Owner can review today: Requests/Crawlers/Help, filter state, timezone
+labels, Security candidate and the Ask starter. Honest semantics kept:
+no fifth "user generated" class (Browser-like quick view is explanatory,
+same bucket); conflicts are investigation leads only. Changed
+requirements recorded 2026-11-01 against ANA-01/03/04/05, UI-01/02/03/05,
+API-01/05, AI-01/03 (see verification entry).
 
 ## 2026-11-01 addendum — Stage B3bcb915 browser-test maintenance (test-only)
 

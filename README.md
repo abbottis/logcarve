@@ -7,14 +7,22 @@ deterministic analytics, authenticated REST API, bounded Meta assistant,
 browser dashboard and local synthetic demo are implemented. Fundamental
 traffic graphs, traffic selection with a 77-rule bot catalog, bot sorting
 and drilldowns, and a sanitized request explorer are available from the
-current local acceptance candidate at clean application source
-`bb272a9` (reviewed public source branch
+clean application source `bb272a9` (reviewed public source branch
 `feature/acceptance-polish-2026-11-01`; canonical equivalent `ad6d74f`
-on `local/acceptance-readiness-2026-11-01`); independent runtime
-verification is recorded in the [verification history](docs/verification.md).
-Owner manual acceptance is pending. No `main` merge, release claim or
-production deployment is included; the local persistent demo was updated
-in place. Inspect `git status` for the active checkout rather than
+on `local/acceptance-readiness-2026-11-01`).
+
+The owner-UX review slice (Stage A labels/offsets/dropdowns/Crawlers/
+Help/starter/quick views + Stage B 8-column Requests explorer,
+conflicting-bot candidate, Largest-responses retarget) is complete and
+independently verified at public HEAD `f0182fb` on
+`feature/owner-ux-review-2026-11-01` (application anchor `ffaf737`;
+later commits tests/docs only; runtime image built from `a087c3e`).
+Independent runtime verification is recorded in the
+[verification history](docs/verification.md). Owner manual acceptance
+is pending; no full release or QA-01 certification is claimed. No
+`main` merge, release claim or production deployment is included; the
+local persistent demo was updated in place with the exact tested
+image. Inspect `git status` for the active checkout rather than
 assuming a branch name.
 
 ## Run the local synthetic demo
@@ -79,11 +87,17 @@ complete and independently verified: 480 unit/integration tests, 24
 protected browser E2E tests, a 121-check offline mock probe, semantic
 evidence checks, the 599-zone catalogue, an 8/0 candidate Compose run,
 a 24/0 offline smoke run and a 32-case browser matrix on candidate and
-persistent demo plus 7/7 timezone acceptance on both. These are observed
-results reported by the independent local runner on macOS ARM64 / Linux
-ARM64 containers; native Linux x86-64 installation and standalone Linux
-host install are **NOT RUN**, and no full release, hackathon or
-all-project QA approval is claimed.
+persistent demo plus 7/7 timezone acceptance on both. The owner-UX slice
+at `f0182fb` (app anchor `ffaf737`, image from `a087c3e`) is likewise
+complete and independently verified: 536 unit/integration tests, 29
+protected browser E2E tests, 78+53 API checks, a 121-check offline mock
+probe, Ruff/lock/diff checks, 8/0 candidate and 24/0 offline Compose
+runs, and 36+8+12 browser checks on both the built candidate and the
+updated persistent demo. These are observed results reported by the
+independent local runner on macOS ARM64 / Linux ARM64 containers;
+native Linux x86-64 installation and standalone Linux host install are
+**NOT RUN**, and no full release, hackathon or all-project QA approval
+is claimed.
 
 Deferred scope stays deferred: gzip, custom formats, live ingestion,
 GeoIP, sessions, export/import UX, webhooks and the MCP product server.

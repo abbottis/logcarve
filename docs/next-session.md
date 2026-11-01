@@ -1,29 +1,32 @@
-# Next session checkpoint (1 Nov 2026, acceptance-readiness closeout)
+# Next session checkpoint (1 Nov 2026, owner-UX closeout)
 
 ## Where things stand
 
-- Acceptance-readiness closeout at clean application source
-  `bb272a9` on the reviewed public source branch
-  `feature/acceptance-polish-2026-11-01` (canonical equivalent
-  `ad6d74f` on `local/acceptance-readiness-2026-11-01`); inspect
-  `git status` rather than assuming a branch name. The
-  display-timezone catalogue (A), three offline AI corrections (B)
-  and the technical local gates (C) are complete and independently
-  verified (see `docs/verification.md`). Earlier analytics slices
-  A/B/C were independently verified at `e81d2d0` on
-  `feature/traffic-analytics`. Later doc-only commits do not repeat
-  application tests. Muse implementation with separate AI-assisted
-  planning, review and testing; no exclusive authorship claim.
+- Owner-UX slice closed at public HEAD `f0182fb` on
+  `feature/owner-ux-review-2026-11-01` (application anchor `ffaf737`;
+  later commits tests/docs only; runtime image from `a087c3e`).
+  Stage A+B (labels, 599-zone offsets, dropdowns, Crawlers layout,
+  Help, firewall starter, quick views; 8-column Requests explorer,
+  conflicting-bot candidate, Largest-responses retarget) complete and
+  independently verified (see `docs/verification.md`): 536
+  unit/integration, 29 E2E, 78+53 API, 121 offline mock, Ruff/lock/
+  diff, 8/0 candidate + 24/0 offline Compose, 36+8+12 browser checks
+  on built candidate AND live 8080. Earlier acceptance-readiness
+  anchor `bb272a9` (`feature/acceptance-polish-2026-11-01`,
+  canonical `ad6d74f`) and analytics slices at `e81d2d0`
+  (`feature/traffic-analytics`) remain the historical record.
+  Later doc-only commits do not repeat application tests. Muse
+  implementation with separate AI-assisted planning, review and
+  testing; no exclusive authorship claim.
 - Local demo dataset is 120 synthetic rows (30 legacy 26–28 Oct
   byte-identical plus 90 rich 29–31 Oct) under unchanged
-  `example-combined`. Reported final gates at this anchor: 480
-  unit/integration, 24 protected E2E, 121-check offline mock probe,
-  semantic evidence checks (named counts, 72-bin timeseries, sample
-  semantics, import quality), 599-zone catalogue, Ruff/lock/diff
-  checks, redacted Gitleaks (only the known `technical-spec.md:787`
-  false positive), 8/0 candidate Compose, 24/0 offline smoke, 32-case
-  browser matrix on candidate and persistent demo, 7/7 timezone
-  acceptance on both, exact-image demo update (8080 left running).
+  `example-combined`. Reported final gates for the owner-UX slice:
+  536 unit/integration, 29 protected E2E, 78+53 API checks, 121
+  offline mock checks, Ruff/lock/diff, redacted Gitleaks (only the
+  known `technical-spec.md:787` false positive), 8/0 candidate
+  Compose, 24/0 offline smoke, 36+8+12 browser checks on candidate
+  AND persistent demo; exact-image demo update already done (8080
+  left running, backup + rollback kept).
   Native Linux x86-64 and standalone Linux host install are **NOT
   RUN**; no release, hackathon or all-project QA approval is
   claimed. Historical real Meta smoke: 2 of 3 investigations
@@ -44,9 +47,12 @@
 ## Precise next work (owner-led, no paid replay)
 
 1. Owner manual acceptance TODAY 1 Nov 2026 with
-   [acceptance checklist](acceptance-checklist.md); record
-   expected/actual/issues today; planned recording by Tue 3 Nov.
-   Nothing auto-accepts on the owner's behalf.
+   [acceptance checklist](acceptance-checklist.md): review
+   Requests/Crawlers/Help, filter state + timezone labels,
+   Security candidate (investigation lead only) and the Ask
+   firewall starter (input only); record expected/actual/issues
+   today; planned recording by Tue 3 Nov. Nothing auto-accepts
+   on the owner's behalf.
 2. Three-minute video rehearsal after acceptance, then
    recording/publication only after owner feedback and audit. No
    merge to `main`, production deployment or GitHub push without

@@ -3,6 +3,14 @@
 Loopback-only persistent demo for the 3 November recording. No real logs,
 no model key, no provider contact, no public exposure.
 
+Owner-UX status 1 Nov 2026: the running demo at `127.0.0.1:8080` already
+serves the exact tested owner-UX image (from `a087c3e`; HEAD `f0182fb`
+is tests/docs only). Verified with an online 0600 backup + rollback
+image before activation, identical all-table/row hashes across
+activation, unchanged credentials, 120 rows / schema 4 retained. The
+loopback bridge demo is not air-gapped; offline behavior is proven by
+the separate internal-network run (see `docs/verification.md`).
+
 ## Entry URL (use this on recording day)
 
 The default 7-day window ages the fixed October fixtures out by 3 Nov, so
