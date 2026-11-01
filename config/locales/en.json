@@ -244,5 +244,18 @@
   "table.started": "Started",
   "table.finished": "Finished",
   "table.hostname": "Hostname",
-  "table.timezone": "Timezone"
+  "table.timezone": "Timezone",
+  "filter.method": "Method",
+  "filter.status_exact": "Exact status",
+  "filter.referrer": "Referring domain",
+  "requests.time_in": "Time ({tz})",
+  "table.bytes": "Bytes",
+  "table.rules": "Rules",
+  "overview.timeline_errors": "Errors",
+  "overview.timeline_bytes": "Known bytes",
+  "overview.heatmap_legend": "Cell shading scales from no requests to the busiest cell ({max} requests).",
+  "overview.paths_sort": "Sort paths",
+  "crawlers.groups_title": "Claimed bots by category, provider and purpose",
+  "crawlers.groups_chart": "Claimed bot requests by provider",
+  "crawlers.groups_note": "Provider and purpose are configured catalog claims, never proof of training use or verified identity."
 }

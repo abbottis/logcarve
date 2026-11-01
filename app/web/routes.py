@@ -284,8 +284,41 @@ def _canonical(path: str, params, site: str) -> str:
     return path + "?" + urlencode(_canonical_query(params, site))
 
 
+#: Global event matchers that travel with every dashboard navigation
+#: link, so a selected traffic/bot/method/status/search scope is never
+#: silently dropped when switching pages. Only paging offsets, table
+#: sorts and the timeline bucket stay page-local.
+MATCHER_KEYS = (
+    "method",
+    "status",
+    "status_class",
+    "path_prefix",
+    "referer_host",
+    "traffic",
+    "bot",
+    "category",
+    "provider",
+    "purpose",
+    "search",
+)
+
+
+def _matcher_query(params) -> dict[str, object]:
+    """Non-empty global matchers, shared by navigation and page URLs."""
+    return {
+        key: params["matchers"][key]
+        for key in MATCHER_KEYS
+        if params["matchers"].get(key) is not None
+    }
+
+
 def _nav_query(params, site: str) -> str:
-    """Window-level navigation state (paging and matchers stay page-local)."""
+    """Shared navigation state: window plus every global matcher.
+
+    Paging offsets, table sorts and the timeline bucket stay page-local:
+    a new page always starts at its first page with default presentation,
+    but never with a widened event scope.
+    """
     query: dict[str, object] = {
         "site": site,
         "range": params["range"],
@@ -295,6 +328,7 @@ def _nav_query(params, site: str) -> str:
     }
     if params["source"] is not None:
         query["source"] = params["source"]
+    query.update(_matcher_query(params))
     return "?" + urlencode(query)
 
 
@@ -405,13 +439,19 @@ def _overview_context(request, conn, rules, params) -> tuple[dict | None, str | 
     except _InvalidFilter:
         return None, "error.bad_params"
     filt = context["filt"]
+    # Overview-local path sorting: query-specific sorts stay scoped to
+    # their own page, so this key never collides with the crawler-table
+    # or explorer `sort` on other views. Unknown values reject (400).
+    paths_sort = (request.query_params.get("paths_sort") or "").strip() or "requests_desc"
+    if paths_sort not in ("requests_desc", "errors_desc", "bytes_desc"):
+        return None, "error.bad_params"
     summary = service.summarize(conn, filt, rules)
     span = params["window"].time_to - params["window"].time_from
     bucket = params["bucket"] or ("day" if span > timedelta(hours=48) else "hour")
     series = service.timeseries(conn, filt, bucket, rules)
     table_filt = filt.model_copy(update={"limit": params["limit"], "offset": params["offset"]})
     clients_filt = filt.model_copy(update={"limit": 10, "offset": 0})
-    top_paths = service.top_paths(conn, TopPathsQuery(filt=table_filt), rules)
+    top_paths = service.top_paths(conn, TopPathsQuery(filt=table_filt, sort=paths_sort), rules)
     top_referrers = service.top_referrers(conn, TopReferrersQuery(filt=table_filt), rules)
     traffic = service.traffic_breakdown(conn, filt, rules)
     resources = service.resource_breakdown(conn, filt, rules)
@@ -439,9 +479,25 @@ def _overview_context(request, conn, rules, params) -> tuple[dict | None, str | 
         {
             "label": _format_bucket(b["bucket"], params["tz"], bucket),
             "requests": b["requests"],
+            "errors": b["errors"],
+            "bytes_total": b["bytes_total"],
         }
         for b in series["buckets"]
     ]
+    # Heatmap intensity levels 0-4, scaled to the busiest cell so the
+    # quantitative shading stays comparable within one view. Levels
+    # render through external CSS classes (never inline styles) to
+    # keep the style-src 'self' CSP without unsafe-inline.
+    heatmap_max = 0
+    heatmap_levels: list[list[int]] | None = None
+    if heatmap is not None:
+        heatmap_max = max((max(row) for row in heatmap["matrix"]), default=0)
+        if heatmap_max > 0:
+            heatmap_levels = [
+                [min(4, (value * 4) // heatmap_max) for value in row] for row in heatmap["matrix"]
+            ]
+        else:
+            heatmap_levels = [[0] * 24 for _ in range(7)]
     context.update(
         {
             "fragment_url": "/partials/overview",
@@ -451,6 +507,7 @@ def _overview_context(request, conn, rules, params) -> tuple[dict | None, str | 
             "top_claim": top_claim,
             "timeline": timeline,
             "bucket": bucket,
+            "paths_sort": paths_sort,
             "status_rows": summary["status_distribution"],
             "paths": top_paths,
             "referrers": top_referrers,
@@ -461,6 +518,8 @@ def _overview_context(request, conn, rules, params) -> tuple[dict | None, str | 
             "heatmap_error": heatmap_error,
             "heatmap_hours": list(range(24)),
             "heatmap_days": list(range(7)),
+            "heatmap_levels": heatmap_levels,
+            "heatmap_max": heatmap_max,
             "clients": clients,
             "claims": claims,
             "findings": findings,
@@ -723,11 +782,13 @@ def _crawlers_context(request: Request, conn, params):
     clf = service.classifier_for_filter(filt, request.app.state.rules)
     robots_requests = queries.scoped_path_count(conn, filt, clf, path="/robots.txt")
     sitemap_requests = queries.scoped_path_count(conn, filt, clf, path_prefix="/sitemap.xml")
+    groups = service.bot_groups(conn, filt, request.app.state.rules)
     context.update(
         {
             "summary": summary,
             "totals": summary["totals"],
             "table": table,
+            "groups": groups,
             "bots_sort": sort,
             "details": details,
             "robots_requests": robots_requests,
@@ -786,11 +847,25 @@ def _requests_context(request: Request, conn, params):
         conn, ExplorerQuery(filt=page_filt, sort=sort), request.app.state.rules
     )
     summary = service.summarize(conn, filt, request.app.state.rules)
+    # Display timestamps in the selected timezone; the UTC instant stays
+    # in the title attribute so both instants are inspectable. Stored
+    # values are UTC ISO strings; unparsable ones fall back to verbatim.
+    rows = []
+    for row in explorer["items"]:
+        display = row["ts_utc"]
+        try:
+            moment = datetime.fromisoformat(str(row["ts_utc"]))
+            if moment.tzinfo is None:
+                moment = moment.replace(tzinfo=UTC)
+            display = moment.astimezone(params["tz"]).strftime("%Y-%m-%d %H:%M %Z")
+        except (ValueError, TypeError):
+            pass
+        rows.append({**row, "ts_display": display})
     context.update(
         {
             "summary": summary,
             "totals": summary["totals"],
-            "rows": explorer["items"],
+            "rows": rows,
             "explorer_sort": sort,
             "paging": _paging_nav(
                 "/requests", params, site, explorer["total_rows"], {"sort": sort}
@@ -859,6 +934,7 @@ def _optional_nav_query(request: Request) -> str:
         query["site"] = params["site"]
     if params["source"] is not None:
         query["source"] = params["source"]
+    query.update(_matcher_query(params))
     return "?" + urlencode(query)
 
 

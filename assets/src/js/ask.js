@@ -33,13 +33,36 @@
   });
 
   const scope = () => {
+    // The selected dashboard matchers narrow every question exactly
+    // like the data views: Ask never silently broadens beyond the
+    // visible filter bar. Values come from server-rendered attributes
+    // (already validated), never from model text.
     const body = {
       site_id: root.getAttribute("data-site"),
       time_from: root.getAttribute("data-from"),
       time_to: root.getAttribute("data-to"),
     };
+    const text = (name, key) => {
+      const value = root.getAttribute(`data-${name}`);
+      if (value !== null && value !== "") body[key || name] = value;
+    };
+    text("method");
+    text("path-prefix", "path_prefix");
+    text("referer-host", "referer_host");
+    text("status-class", "status_class");
+    text("traffic");
+    text("bot");
+    text("category");
+    text("provider");
+    text("purpose");
+    text("search");
     const source = root.getAttribute("data-source");
     if (source) body.source_id = source;
+    const status = root.getAttribute("data-status");
+    if (status !== null && status !== "") {
+      const parsed = Number.parseInt(status, 10);
+      if (Number.isInteger(parsed)) body.status = parsed;
+    }
     return body;
   };
 

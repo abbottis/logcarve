@@ -1,5 +1,40 @@
 # Verification record
 
+## 2026-11-01 — Slice B correction (independent-review gaps closed, reinspection pending)
+
+Coding delivery closing every accepted gap from `artifacts/task-inputs/slice-b-independent-review.md`
+and `slice-b-scope-check.md`. Directly observed in this session unless noted.
+
+- Full suite: 393 PASS + 2 sandbox loopback skips
+  (`.venv/bin/python -m pytest tests/unit tests/integration -q`).
+- New `tests/integration/test_web_slice_b2.py` (9 tests): timeline
+  errors/bytes datasets; paths visible sort + bytes column with bogus-sort
+  400; heatmap 168 leveled cells + legend; explorer bytes/referrer/rule
+  columns, Berlin/UTC time duality, attack-UA escaping; bot groups exact
+  vs table totals and pagination-independent; visible method/status/
+  referrer controls, search maxlength 128, no duplicate hidden names; Ask
+  scope attributes; settings back-roundtrip with matchers.
+- Updated contract-change tests: `test_active_nav_keeps_full_filters`,
+  `test_filter_apply_preserves_scope` (visible status control),
+  `test_matchers_travel_with_shared_window_state` (renamed; matchers are
+  shared nav state now, the explicitly accepted correction).
+- New `tests/e2e/test_slice_b.py` (7 tests, 14-row hand-counted fixture):
+  Chart.js values vs JSON vs tables, nav/settings/Ask preservation via
+  real interaction + captured Ask payload, grouping vs paging, sorts,
+  heatmap colors both themes, explorer columns/sanitization, 390px both
+  themes, no off-origin requests. Authored, collection-verified (22 e2e
+  collected), execution BLOCKED in this sandbox (see below).
+- Gates: `ruff check` clean; `ruff format` clean after formatting touched
+  files; `npm run build` + `check:external` clean (heat CSS in built
+  bundle, JS in sync); `uv lock --check` BLOCKED (sandbox denies uv cache
+  writes; `pyproject.toml`/`uv.lock` untouched, no new dependency).
+- Browser execution BLOCKED: Chromium headless-shell fails to launch
+  inside this macOS shell sandbox (`MachPortRendezvousServer ... Permission
+  denied`); protections left ON per authorization. Coordinator runs
+  `uv run --locked pytest tests/e2e -q` outside the sandbox.
+- Privacy/egress/cost gates unchanged: no new model calls, no provider
+  traffic, shared analytics layer only, synthetic fixtures only.
+
 ## 2026-10-28 — scaffold
 
 Product status: **NOT IMPLEMENTED**. pytest, API integration, Playwright, Docker, benchmarks and real Meta calls are **NOT RUN** because no product/runtime implementation exists. No account credit, effective service tier or provider credential has been verified.

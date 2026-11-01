@@ -10,6 +10,12 @@
   <p class="tech text-sm text-base-content/70">{{ window_from }} → {{ window_to }} · {{ site }}</p>
 </div>
 <div class="grid gap-6 lg:grid-cols-2" data-ask data-site="{{ site }}" data-source="{{ params_source or "" }}" data-from="{{ window_from }}" data-to="{{ window_to }}" data-tz="{{ tz_name }}"
+  data-method="{{ filt.method or "" }}" data-status="{{ filt.status if filt.status is not none else "" }}"
+  data-status-class="{{ filt.status_class or "" }}" data-path-prefix="{{ filt.path_prefix or "" }}"
+  data-referer-host="{{ filt.referer_host or "" }}" data-traffic="{{ filt.traffic }}"
+  data-bot="{{ filt.bot or "" }}" data-category="{{ filt.category or "" }}"
+  data-provider="{{ filt.provider or "" }}" data-purpose="{{ filt.purpose or "" }}"
+  data-search="{{ filt.search or "" }}"
     data-msg-evidence="{{ t("ask.evidence") }}"
     data-msg-disabled="{{ t("ai.disabled") }}"
     data-msg-unavailable="{{ t("ai.unavailable") }}"

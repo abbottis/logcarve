@@ -522,6 +522,33 @@ def bot_table(
 ) -> dict[str, object]:
     """Named-bot table: exact per-rule aggregates, allowlisted sort, paging."""
     filt = query.filt
+    entries = _bot_entries(conn, filt, rules)
+    entries.sort(key=_BOT_TABLE_ORDER[query.sort])
+    total = len(entries)
+    page = entries[filt.offset : filt.offset + filt.limit]
+    return {
+        "site_id": filt.site_id,
+        "time_range": _window_dict(filt),
+        "filters": _filter_dict(filt),
+        "sort": query.sort,
+        "items": page,
+        "total_rules": total,
+        "limit": filt.limit,
+        "offset": filt.offset,
+        "coverage": coverage_summary(conn, filt, rules),
+        "limitations": [*LIMITATIONS_BOT, *LIMITATIONS_LOGS],
+    }
+
+
+def _bot_entries(
+    conn: sqlite3.Connection, filt: AnalyticsFilter, rules: list[Rule]
+) -> list[dict[str, object]]:
+    """Exact per-rule aggregates over the FULL filtered scope, no paging.
+
+    Shared by :func:`bot_table` (which sorts/pages the same list) and
+    :func:`bot_groups` (which aggregates it), so grouped shares always
+    agree with the table totals regardless of page limit/offset.
+    """
     clf = _classifier_for(filt, rules)
     assert clf is not None
     rows = {row["index"]: row for row in queries.bot_index_rows(conn, filt, clf)}
@@ -548,18 +575,59 @@ def bot_table(
                 "distinct_paths": int(stats["distinct_paths"]),
             }
         )
-    entries.sort(key=_BOT_TABLE_ORDER[query.sort])
-    total = len(entries)
-    page = entries[filt.offset : filt.offset + filt.limit]
+    return entries
+
+
+def bot_groups(
+    conn: sqlite3.Connection, filt: AnalyticsFilter, rules: list[Rule]
+) -> dict[str, object]:
+    """Claimed-bot aggregates grouped by category/provider/purpose.
+
+    Grouped from the same exact full-scope per-rule entries as the bot
+    table, so shares stay correct beyond any table page limit/offset.
+    Provider/purpose remain configured claims from the versioned rule
+    catalog, never proof of training use or verified identity.
+    """
+    entries = _bot_entries(conn, filt, rules)
+    groups: dict[str, dict[str, dict[str, object]]] = {
+        "categories": {},
+        "providers": {},
+        "purposes": {},
+    }
+    for entry in entries:
+        keyed = (
+            ("categories", entry["category"]),
+            ("providers", entry["provider"] or "unclaimed"),
+            ("purposes", entry["purpose"] or "unclaimed"),
+        )
+        for dimension, name in keyed:
+            bucket = groups[dimension].setdefault(
+                name,
+                {
+                    "name": name,
+                    "requests": 0,
+                    "errors_4xx": 0,
+                    "errors_5xx": 0,
+                    "bytes_total": 0,
+                    "rules": 0,
+                },
+            )
+            bucket["requests"] = int(bucket["requests"]) + entry["requests"]
+            bucket["errors_4xx"] = int(bucket["errors_4xx"]) + entry["errors_4xx"]
+            bucket["errors_5xx"] = int(bucket["errors_5xx"]) + entry["errors_5xx"]
+            bucket["bytes_total"] = int(bucket["bytes_total"]) + entry["bytes_total"]
+            bucket["rules"] = int(bucket["rules"]) + 1
+    ranked = {
+        dimension: sorted(buckets.values(), key=lambda b: (-int(b["requests"]), str(b["name"])))
+        for dimension, buckets in groups.items()
+    }
     return {
         "site_id": filt.site_id,
         "time_range": _window_dict(filt),
         "filters": _filter_dict(filt),
-        "sort": query.sort,
-        "items": page,
-        "total_rules": total,
-        "limit": filt.limit,
-        "offset": filt.offset,
+        "categories": ranked["categories"],
+        "providers": ranked["providers"],
+        "purposes": ranked["purposes"],
         "coverage": coverage_summary(conn, filt, rules),
         "limitations": [*LIMITATIONS_BOT, *LIMITATIONS_LOGS],
     }

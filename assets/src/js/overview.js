@@ -23,6 +23,8 @@
       tick: dark ? "#e2e8f0" : "#475569",
       grid: dark ? "rgba(148, 163, 184, 0.2)" : "rgba(100, 116, 139, 0.2)",
       line: dark ? "#38bdf8" : "#0284c7",
+      error: dark ? "#f87171" : "#dc2626",
+      bytes: dark ? "#34d399" : "#059669",
     };
   }
 
@@ -77,9 +79,37 @@
               tension: 0.15,
               pointRadius: 0,
             },
+            {
+              label: timeline.errorsLabel || "Errors",
+              data: points.map(function (b) { return b.errors || 0; }),
+              borderColor: colors.error,
+              backgroundColor: colors.error,
+              fill: false,
+              tension: 0.15,
+              pointRadius: 0,
+            },
+            {
+              label: timeline.bytesLabel || "Bytes",
+              data: points.map(function (b) { return b.bytes_total || 0; }),
+              borderColor: colors.bytes,
+              backgroundColor: colors.bytes,
+              fill: false,
+              tension: 0.15,
+              pointRadius: 0,
+              yAxisID: "y1",
+            },
           ],
         },
-        options: baseOptions(true),
+        options: (function () {
+          var opts = baseOptions(true);
+          opts.scales.y1 = {
+            beginAtZero: true,
+            position: "right",
+            ticks: { precision: 0, color: colors.tick },
+            grid: { drawOnChartArea: false },
+          };
+          return opts;
+        })(),
       }));
     }
     var statusCanvas = document.getElementById("status-distribution");
@@ -121,6 +151,25 @@
           maintainAspectRatio: false,
           plugins: { legend: { display: true, labels: { color: colors.tick } } },
         },
+      }));
+    }
+    var groupsCanvas = document.getElementById("bot-provider-groups");
+    var groupsData = readData("bot-provider-groups-data");
+    if (groupsCanvas && groupsData) {
+      var providers = groupsData.rows || [];
+      charts.push(new window.Chart(groupsCanvas, {
+        type: "bar",
+        data: {
+          labels: providers.map(function (r) { return String(r.name); }),
+          datasets: [
+            {
+              label: groupsData.requestsLabel || "Requests",
+              data: providers.map(function (r) { return r.requests; }),
+              backgroundColor: colors.line,
+            },
+          ],
+        },
+        options: baseOptions(false),
       }));
     }
     var browserCanvas = document.getElementById("browser-families");

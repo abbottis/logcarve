@@ -140,6 +140,28 @@
   }
 }
 
+/* Weekday/hour heatmap intensity. Levels are server-computed 0-4
+   relative to the busiest cell and render through these external
+   classes (never inline styles), keeping style-src 'self' without
+   unsafe-inline in both themes. */
+.heat-swatch {
+  display: inline-block;
+  width: 1rem;
+  height: 1rem;
+  border-radius: 0.25rem;
+  border: 1px solid var(--color-base-300);
+}
+[data-theme="light"] .heat-0 { background-color: transparent; }
+[data-theme="light"] .heat-1 { background-color: var(--color-sky-100); }
+[data-theme="light"] .heat-2 { background-color: var(--color-sky-300); }
+[data-theme="light"] .heat-3 { background-color: var(--color-sky-600); color: var(--color-white); }
+[data-theme="light"] .heat-4 { background-color: var(--color-sky-900); color: var(--color-white); }
+[data-theme="dark"] .heat-0 { background-color: transparent; }
+[data-theme="dark"] .heat-1 { background-color: var(--color-sky-950); }
+[data-theme="dark"] .heat-2 { background-color: var(--color-sky-800); }
+[data-theme="dark"] .heat-3 { background-color: var(--color-sky-500); color: var(--color-slate-950); }
+[data-theme="dark"] .heat-4 { background-color: var(--color-sky-300); color: var(--color-slate-950); }
+
 /* Untrusted plain model answers: the browser inserts them via
    textContent (no markup execution), and this guard keeps readable
    line breaks plus bounded wrapping even for a long single token or

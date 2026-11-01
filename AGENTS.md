@@ -3,7 +3,8 @@
 ## Scope and status
 
 - LogCarve is a self-hosted, AI-assisted web access-log analysis tool.
-- This checkout starts as a planning and directory scaffold, not a working application.
+- LogCarve itself is Apache-2.0 (see `LICENSE`); upstream LogWerk rule adaptations retain MIT (see `THIRD_PARTY_NOTICES.md`).
+- This checkout holds an in-progress implementation on `feature/traffic-analytics` (slices A/B per `docs/analytics-completion-plan.md`); measure the current state from the code and `docs/verification.md`, never from scaffold-era statements.
 - Read `docs/mvp.md`, `docs/architecture.md` and the relevant acceptance criteria before implementation.
 - `docs/technical-spec.md` is the supplied v0.4 requirements snapshot, written in German.
 - Treat statements about future functionality as requirements, never as evidence of implementation.
@@ -129,6 +130,6 @@
 - Chrome DevTools screenshots complement repeatable tests. A completed Muse task is not a passing product test.
 - Separate PASS, FAIL, BLOCKED and NOT RUN; never imply unavailable checks passed.
 - Keep changes small; do not revert others' work. Record provenance before importing LogWerk code.
-- Maintain `docs/hackathon-contributions.md` and third-party notices; project licensing is still an open decision.
+- Maintain `docs/hackathon-contributions.md` and third-party notices; LogCarve is Apache-2.0 (decided 2026-10-29, see `LICENSE`) while remaining licensing questions stay owner decisions (GOV-02).
 - Prepare reviewable diffs/PRs. No merge to `main`, production deployment or major dependency expansion without explicit user approval.
 - A feature is done only when criteria, actual checks, evidence and required review are complete.

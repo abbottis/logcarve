@@ -25,7 +25,9 @@
         {% for item in [("overview", "/", "nav.overview", "layout-dashboard"), ("security", "/security", "nav.security", "shield-alert"), ("crawlers", "/crawlers", "nav.crawlers", "bot"), ("errors", "/errors", "nav.errors", "circle-alert"), ("requests", "/requests", "nav.requests", "globe"), ("ask", "/ask", "nav.ask_ai", "sparkles"), ("settings", "/settings", "nav.settings", "settings"), ("sources", "/data-sources", "nav.data_sources", "database")] %}
         <li>
           {# The active view keeps its full current canonical filters;
-             other views take the shared site/source/window/tz state. #}
+             other views take the shared window plus every global event
+             matcher (traffic/bot/method/status/search, ...). Paging
+             offsets and table sorts stay page-local. #}
           <a href="{% if active == item[0] and canonical_url is defined %}{{ canonical_url }}{% else %}{{ item[1] }}{{ nav_query | default('') }}{% endif %}" class="{% if active == item[0] %}active{% endif %}" {% if active == item[0] %}aria-current="page"{% endif %}>
             {% include "icons/" ~ item[3] ~ ".svg" %}
             {{ t(item[2]) }}

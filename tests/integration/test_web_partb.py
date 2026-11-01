@@ -420,7 +420,11 @@ def test_filter_apply_preserves_scope(web):
         f"/errors?site=default&{WINDOW_QS}&tz=UTC&status=404&source=example-combined&limit=25"
     ).text
     # Matchers, source and page size resubmit with the window on Apply.
-    assert 'name="status" value="404"' in html
+    # The exact-status matcher now has a visible control (no duplicate
+    # hidden field), so the applied value must round-trip there.
+    assert 'id="f-status"' in html and 'name="status"' in html
+    assert 'value="404"' in html
+    assert html.count('name="status"') == 1, "no duplicate hidden status field"
     assert 'name="source" value="example-combined"' in html
     assert 'name="limit" value="25"' in html
     # Paging offset resets deliberately: a new window starts at page one.
@@ -673,8 +677,10 @@ def test_paging_links_carry_exact_parsed_filters(web):
 
 
 def test_active_nav_keeps_full_filters(web):
-    """The active view link preserves the complete current state while
-    other views take only the shared window state."""
+    """The active view link preserves the complete current state, and
+    other views keep the shared window plus every global matcher (the
+    accepted Slice B correction: selected traffic is never lost on
+    sidebar navigation). Only paging offsets stay page-local."""
     client, _ = web
     _login(client)
     html = client.get(
@@ -686,7 +692,8 @@ def test_active_nav_keeps_full_filters(web):
     assert active.group(1).startswith("/errors?"), active.group(1)
     security = re.search(r'href="(/security\?[^"]+)"', html)
     assert security and "site=default" in security.group(1)
-    assert "status=404" not in security.group(1)
+    assert "status=404" in security.group(1), "matchers must survive sidebar navigation"
+    assert "source=example-combined" in security.group(1)
 
 
 def test_canonical_urls_match_their_routes(web):

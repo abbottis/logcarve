@@ -46,12 +46,14 @@
   });
   // After an htmx filter Apply requests the canonical window, every
   // data-page side-nav link must reuse the NEW shared state (site, source,
-  // range, window, timezone) instead of the original shell hrefs. htmx
-  // partial swaps leave the address bar unchanged, so mirror the request
-  // onto the links directly. Page-local state (matchers, page size,
-  // bucket) is preserved; the paging offset is dropped because a new
-  // window always starts at the first page.
-  var SHARED_KEYS = ["site", "source", "range", "from", "to", "tz"];
+  // range, window, timezone plus every global event matcher) instead of
+  // the original shell hrefs. htmx partial swaps leave the address bar
+  // unchanged, so mirror the request onto the links directly. Page-local
+  // presentation (page size, bucket) is preserved; the paging offset is
+  // dropped because a new window always starts at the first page.
+  var SHARED_KEYS = ["site", "source", "range", "from", "to", "tz",
+    "method", "status", "status_class", "path_prefix", "referer_host",
+    "traffic", "bot", "category", "provider", "purpose", "search"];
   document.addEventListener("htmx:afterRequest", function (event) {
     if (!event.detail || !event.detail.successful || !event.detail.pathInfo) return;
     var requestPath = event.detail.pathInfo.finalRequestPath || "";

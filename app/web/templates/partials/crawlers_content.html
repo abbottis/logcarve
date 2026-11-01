@@ -18,6 +18,33 @@
   </div>
 </section>
 
+<section class="card mt-6 bg-base-100 shadow" aria-labelledby="groups-h">
+  <div class="card-body">
+    <h2 id="groups-h" class="card-title text-base">{{ t("crawlers.groups_title") }}</h2>
+    <p class="text-sm text-base-content/70">{{ t("crawlers.groups_note") }}</p>
+    {% if groups["providers"] %}
+    <div class="chart-frame"><canvas id="bot-provider-groups" aria-label="{{ t("crawlers.groups_chart") }}" role="img"></canvas></div>
+    <script id="bot-provider-groups-data" type="application/json">{{ {"rows": groups["providers"], "requestsLabel": t("table.requests")} | tojson }}</script>
+    {% endif %}
+    <div class="grid gap-6 lg:grid-cols-3">
+      {% for dimension, title in [("categories", "filter.category"), ("providers", "filter.provider"), ("purposes", "filter.purpose")] %}
+      <div class="table-scroll overflow-x-auto">
+        <h3 class="mb-2 text-sm font-medium">{{ t(title) }}</h3>
+        <table class="table table-sm">
+          <caption class="sr-only">{{ t(title) }}</caption>
+          <thead><tr><th scope="col">{{ t("table.value") }}</th><th scope="col" class="text-right">{{ t("table.requests") }}</th><th scope="col" class="text-right">{{ t("table.errors") }}</th><th scope="col" class="text-right">{{ t("table.bytes") }}</th><th scope="col" class="text-right">{{ t("table.rules") }}</th></tr></thead>
+          <tbody>
+            {% for group in groups[dimension] %}
+            <tr><td class="tech break-all">{{ group.name }}</td><td class="text-right tech">{{ group.requests }}</td><td class="text-right tech">{{ group.errors_4xx + group.errors_5xx }}</td><td class="text-right tech">{{ group.bytes_total }}</td><td class="text-right tech">{{ group.rules }}</td></tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+      {% endfor %}
+    </div>
+  </div>
+</section>
+
 <section class="card mt-6 bg-base-100 shadow" aria-labelledby="bots-h">
   <div class="card-body">
     <h2 id="bots-h" class="card-title text-base">{{ t("crawlers.table") }}</h2>

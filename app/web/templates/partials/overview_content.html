@@ -41,16 +41,16 @@
     <div class="card-body">
       <h2 id="traffic-h" class="card-title text-base">{{ t("overview.traffic") }}</h2>
       <div class="chart-frame"><canvas id="traffic-timeline" aria-label="{{ t("overview.traffic") }}" role="img"></canvas></div>
-      <script id="traffic-timeline-data" type="application/json">{{ {"buckets": timeline, "requestsLabel": t("table.requests")} | tojson }}</script>
+      <script id="traffic-timeline-data" type="application/json">{{ {"buckets": timeline, "requestsLabel": t("table.requests"), "errorsLabel": t("overview.timeline_errors"), "bytesLabel": t("overview.timeline_bytes")} | tojson }}</script>
       <details class="collapse collapse-arrow border border-base-300">
         <summary class="collapse-title text-sm font-medium">{{ t("overview.traffic_table") }}</summary>
         <div class="collapse-content table-scroll overflow-x-auto">
           <table class="table table-sm">
             <caption class="sr-only">{{ t("overview.traffic_table") }}</caption>
-            <thead><tr><th scope="col">{{ t("table.bucket") }}</th><th scope="col" class="text-right">{{ t("table.requests") }}</th></tr></thead>
+            <thead><tr><th scope="col">{{ t("table.bucket") }}</th><th scope="col" class="text-right">{{ t("table.requests") }}</th><th scope="col" class="text-right">{{ t("overview.timeline_errors") }}</th><th scope="col" class="text-right">{{ t("overview.timeline_bytes") }}</th></tr></thead>
             <tbody>
               {% for row in timeline %}
-              <tr><td class="tech">{{ row.label }}</td><td class="text-right tech">{{ row.requests }}</td></tr>
+              <tr><td class="tech">{{ row.label }}</td><td class="text-right tech">{{ row.requests }}</td><td class="text-right tech">{{ row.errors }}</td><td class="text-right tech">{{ row.bytes_total }}</td></tr>
               {% endfor %}
             </tbody>
           </table>
@@ -85,13 +85,20 @@
   <section class="card bg-base-100 shadow" aria-labelledby="paths-h">
     <div class="card-body">
       <h2 id="paths-h" class="card-title text-base">{{ t("overview.top_paths") }}</h2>
+      <div class="mb-3 flex gap-2 text-sm" role="group" aria-label="{{ t("overview.paths_sort") }}">
+        <a class="link" href="{{ page_url("/", paths_sort="requests_desc", offset=0) }}" {% if paths_sort == "requests_desc" %}aria-current="true"{% endif %}>{{ t("crawlers.sort_requests") }}</a>
+        <span aria-hidden="true">·</span>
+        <a class="link" href="{{ page_url("/", paths_sort="errors_desc", offset=0) }}" {% if paths_sort == "errors_desc" %}aria-current="true"{% endif %}>{{ t("crawlers.sort_errors") }}</a>
+        <span aria-hidden="true">·</span>
+        <a class="link" href="{{ page_url("/", paths_sort="bytes_desc", offset=0) }}" {% if paths_sort == "bytes_desc" %}aria-current="true"{% endif %}>{{ t("crawlers.sort_bytes") }}</a>
+      </div>
       <div class="table-scroll overflow-x-auto">
         <table class="table table-sm">
           <caption class="sr-only">{{ t("overview.top_paths") }}</caption>
-          <thead><tr><th scope="col">{{ t("table.path") }}</th><th scope="col">{{ t("table.method") }}</th><th scope="col" class="text-right">{{ t("table.requests") }}</th><th scope="col" class="text-right">{{ t("table.errors") }}</th></tr></thead>
+          <thead><tr><th scope="col">{{ t("table.path") }}</th><th scope="col">{{ t("table.method") }}</th><th scope="col" class="text-right" {% if paths_sort == "requests_desc" %}aria-sort="descending"{% endif %}>{{ t("table.requests") }}</th><th scope="col" class="text-right" {% if paths_sort == "errors_desc" %}aria-sort="descending"{% endif %}>{{ t("table.errors") }}</th><th scope="col" class="text-right" {% if paths_sort == "bytes_desc" %}aria-sort="descending"{% endif %}>{{ t("table.bytes") }}</th></tr></thead>
           <tbody>
             {% for item in paths["items"] %}
-            <tr><td class="tech break-all">{{ item.path }}</td><td class="tech">{{ item.method }}</td><td class="text-right tech">{{ item.requests }}</td><td class="text-right tech">{{ item.errors }}</td></tr>
+            <tr><td class="tech break-all">{{ item.path }}</td><td class="tech">{{ item.method }}</td><td class="text-right tech">{{ item.requests }}</td><td class="text-right tech">{{ item.errors }}</td><td class="text-right tech">{{ item.bytes_total }}</td></tr>
             {% endfor %}
           </tbody>
         </table>
@@ -131,10 +138,10 @@
       <div class="table-scroll overflow-x-auto">
         <table class="table table-sm">
           <caption class="sr-only">{{ t("overview.traffic_breakdown") }}</caption>
-          <thead><tr><th scope="col">{{ t("filter.traffic") }}</th><th scope="col" class="text-right">{{ t("table.requests") }}</th><th scope="col" class="text-right">{{ t("table.errors") }}</th></tr></thead>
+          <thead><tr><th scope="col">{{ t("filter.traffic") }}</th><th scope="col" class="text-right">{{ t("table.requests") }}</th><th scope="col" class="text-right">{{ t("table.errors") }}</th><th scope="col" class="text-right">{{ t("table.bytes") }}</th></tr></thead>
           <tbody>
             {% for bucket in traffic["buckets"] %}
-            <tr><td>{{ t("traffic." + bucket.traffic) }}</td><td class="text-right tech">{{ bucket.requests }}</td><td class="text-right tech">{{ bucket.errors_4xx + bucket.errors_5xx }}</td></tr>
+            <tr><td>{{ t("traffic." + bucket.traffic) }}</td><td class="text-right tech">{{ bucket.requests }}</td><td class="text-right tech">{{ bucket.errors_4xx + bucket.errors_5xx }}</td><td class="text-right tech">{{ bucket.bytes_total }}</td></tr>
             {% endfor %}
           </tbody>
         </table>
@@ -147,10 +154,10 @@
       <div class="table-scroll overflow-x-auto">
         <table class="table table-sm">
           <caption class="sr-only">{{ t("overview.resources") }}</caption>
-          <thead><tr><th scope="col">{{ t("table.detail") }}</th><th scope="col" class="text-right">{{ t("table.requests") }}</th><th scope="col" class="text-right">{{ t("table.errors") }}</th></tr></thead>
+          <thead><tr><th scope="col">{{ t("table.detail") }}</th><th scope="col" class="text-right">{{ t("table.requests") }}</th><th scope="col" class="text-right">{{ t("table.errors") }}</th><th scope="col" class="text-right">{{ t("table.bytes") }}</th></tr></thead>
           <tbody>
             {% for item in resources["items"] %}
-            <tr><td class="tech">{{ item.kind }}</td><td class="text-right tech">{{ item.requests }}</td><td class="text-right tech">{{ item.errors }}</td></tr>
+            <tr><td class="tech">{{ item.kind }}</td><td class="text-right tech">{{ item.requests }}</td><td class="text-right tech">{{ item.errors }}</td><td class="text-right tech">{{ item.bytes_total }}</td></tr>
             {% endfor %}
           </tbody>
         </table>
@@ -212,13 +219,19 @@
   <div class="card-body">
     <h2 id="heat-h" class="card-title text-base">{{ t("overview.heatmap") }} ({{ heatmap.timezone if heatmap else tz_name }})</h2>
     {% if heatmap %}
+    <p class="mb-2 flex flex-wrap items-center gap-2 text-sm text-base-content/70" role="note">
+      <span>{{ t("overview.heatmap_legend", max=heatmap_max) }}</span>
+      <span class="inline-flex items-center gap-1" aria-hidden="true">
+        {% for level in [0, 1, 2, 3, 4] %}<span class="heat-swatch heat-{{ level }}"></span>{% endfor %}
+      </span>
+    </p>
     <div class="table-scroll overflow-x-auto">
       <table class="table table-sm">
         <caption class="sr-only">{{ t("overview.heatmap") }}</caption>
         <thead><tr><th scope="col"></th>{% for hour in heatmap_hours %}<th scope="col" class="text-right tech">{{ hour }}</th>{% endfor %}</tr></thead>
         <tbody>
           {% for day in heatmap_days %}
-          <tr><th scope="row">{{ t("overview.weekday_" + (day + 1) | string) }}</th>{% for hour in heatmap_hours %}<td class="text-right tech">{{ heatmap.matrix[day][hour] }}</td>{% endfor %}</tr>
+          <tr><th scope="row">{{ t("overview.weekday_" + (day + 1) | string) }}</th>{% for hour in heatmap_hours %}<td class="heat heat-{{ heatmap_levels[day][hour] }} text-right tech" data-heat-level="{{ heatmap_levels[day][hour] }}">{{ heatmap.matrix[day][hour] }}</td>{% endfor %}</tr>
           {% endfor %}
         </tbody>
       </table>

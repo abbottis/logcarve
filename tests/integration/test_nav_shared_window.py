@@ -108,13 +108,22 @@ def test_settings_malformed_params_never_400(web):
         assert response.status_code == 200
 
 
-def test_matchers_stay_page_local_while_source_is_shared(web):
+def test_matchers_travel_with_shared_window_state(web):
+    """Accepted Slice B correction: global matchers are shared nav
+    state, so a selected status/traffic scope survives sidebar
+    navigation instead of silently widening. Only paging offsets stay
+    page-local."""
     client, _ = web
     _login(client)
-    errors = client.get(f"/errors?{WINDOW}&status=404")
+    errors = client.get(f"/errors?{WINDOW}&status=404&traffic=claimed_bot")
     assert errors.status_code == 200
     overview_hrefs = [h for h in _hrefs(errors.text, "/") if h == "/" or h.startswith("/?")]
     assert overview_hrefs, "side nav must link to Overview"
     shared = _params(overview_hrefs[0])
     assert shared["source"] == ["example-combined"]
-    assert "status" not in shared, "page-local matchers must not leak into shared nav state"
+    assert shared["status"] == ["404"], "exact-status matcher must survive navigation"
+    assert shared["traffic"] == ["claimed_bot"], "traffic selection must survive navigation"
+    # The narrowed scope replays honestly on the target page.
+    overview = _get(client, overview_hrefs[0])
+    assert overview.status_code == 200
+    assert 'value="404"' in overview.text

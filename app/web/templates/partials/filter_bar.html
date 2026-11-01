@@ -8,7 +8,7 @@
      deliberately: a new window always starts at the first page, while
      prev/next links carry explicit offsets. #}
   {% for key, value in matchers.items() %}
-  {% if key not in ["traffic", "bot", "category", "provider", "purpose", "status_class", "search", "path_prefix"] %}
+  {% if key not in ["traffic", "bot", "category", "provider", "purpose", "status", "status_class", "search", "path_prefix", "method", "referer_host"] %}
   <input type="hidden" name="{{ key }}" value="{{ value }}">
   {% endif %}
   {% endfor %}
@@ -100,12 +100,24 @@
     </select>
   </div>
   <div class="form-control">
+    <label class="label py-1" for="f-method"><span class="label-text">{{ t("filter.method") }}</span></label>
+    <input id="f-method" name="method" type="text" value="{{ filt.method or "" }}" maxlength="32" class="input input-bordered input-sm tech" placeholder="GET">
+  </div>
+  <div class="form-control">
+    <label class="label py-1" for="f-status"><span class="label-text">{{ t("filter.status_exact") }}</span></label>
+    <input id="f-status" name="status" type="number" min="100" max="599" value="{{ filt.status if filt.status is not none else "" }}" class="input input-bordered input-sm tech" placeholder="404">
+  </div>
+  <div class="form-control">
+    <label class="label py-1" for="f-referer-host"><span class="label-text">{{ t("filter.referrer") }}</span></label>
+    <input id="f-referer-host" name="referer_host" type="text" value="{{ filt.referer_host or "" }}" maxlength="253" class="input input-bordered input-sm tech" placeholder="example.org">
+  </div>
+  <div class="form-control">
     <label class="label py-1" for="f-path-prefix"><span class="label-text">{{ t("filter.path_prefix") }}</span></label>
     <input id="f-path-prefix" name="path_prefix" type="text" value="{{ filt.path_prefix or "" }}" maxlength="1024" class="input input-bordered input-sm tech" placeholder="/docs/">
   </div>
   <div class="form-control">
     <label class="label py-1" for="f-search"><span class="label-text">{{ t("filter.search") }}</span></label>
-    <input id="f-search" name="search" type="search" value="{{ filt.search or "" }}" maxlength="200" class="input input-bordered input-sm" placeholder="{{ t("filter.search_placeholder") }}">
+    <input id="f-search" name="search" type="search" value="{{ filt.search or "" }}" maxlength="128" class="input input-bordered input-sm" placeholder="{{ t("filter.search_placeholder") }}">
   </div>
   <button type="submit" class="btn btn-primary btn-sm">{{ t("filter.apply") }}</button>
   <p class="w-full text-sm text-base-content/70">{{ t("filter.times_in", tz=tz_name) }}</p>

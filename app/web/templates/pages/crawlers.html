@@ -1,5 +1,9 @@
 {% extends "base.html" %}
 {% set active = "crawlers" %}
+{% block head %}
+<script src="/static/vendor/js/chart.umd.min.js" defer></script>
+<script src="/static/js/overview.js" defer></script>
+{% endblock %}
 {% block content %}
 <div class="mb-4 flex flex-wrap items-baseline gap-x-3 gap-y-1">
   <h1 class="text-2xl font-semibold">{{ t("crawlers.title") }}</h1>

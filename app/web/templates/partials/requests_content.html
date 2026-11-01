@@ -21,22 +21,28 @@
       <table class="table table-sm">
         <caption class="sr-only">{{ t("requests.rows") }}</caption>
         <thead><tr>
-          <th scope="col">{{ t("requests.time") }}</th>
+          <th scope="col">{{ t("requests.time_in", tz=tz_name) }}</th>
           <th scope="col">{{ t("table.method") }}</th>
           <th scope="col">{{ t("table.path") }}</th>
           <th scope="col" class="text-right">{{ t("table.status") }}</th>
+          <th scope="col" class="text-right">{{ t("table.bytes") }}</th>
+          <th scope="col">{{ t("table.referrer") }}</th>
           <th scope="col">{{ t("filter.traffic") }}</th>
+          <th scope="col">{{ t("table.rule") }}</th>
           <th scope="col">{{ t("requests.agent") }}</th>
           <th scope="col">{{ t("requests.client") }}</th>
         </tr></thead>
         <tbody>
           {% for row in rows %}
           <tr>
-            <td class="tech">{{ row.ts_utc }}</td>
+            <td class="tech" title="{{ row.ts_utc }}">{{ row.ts_display }}</td>
             <td class="tech">{{ row.method }}</td>
             <td class="tech break-all">{{ row.path }}</td>
             <td class="text-right tech">{{ row.status }}</td>
+            <td class="text-right tech">{{ row.bytes if row.bytes is not none else "—" }}</td>
+            <td class="tech break-all">{{ row.referer_host or "—" }}</td>
             <td class="tech">{{ t("traffic." + row.traffic) if row.traffic else "—" }}</td>
+            <td class="tech break-all">{{ row.rule_id or "—" }}</td>
             <td class="tech break-all">{{ row.user_agent or "—" }}</td>
             <td class="tech break-all">{{ row.client_pseudonym }}</td>
           </tr>
