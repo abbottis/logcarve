@@ -64,6 +64,17 @@ class ChatBody(BaseModel):
     source_id: str | None = Field(default=None, min_length=1, max_length=128)
     time_from: datetime
     time_to: datetime
+    method: str | None = Field(default=None, min_length=1, max_length=32)
+    status: int | None = Field(default=None, ge=100, le=599)
+    path_prefix: str | None = Field(default=None, min_length=1, max_length=1024)
+    referer_host: str | None = Field(default=None, min_length=1, max_length=253)
+    traffic: str = Field(default="all", max_length=32)
+    bot: str | None = Field(default=None, min_length=1, max_length=64)
+    category: str | None = Field(default=None, min_length=1, max_length=64)
+    provider: str | None = Field(default=None, min_length=1, max_length=120)
+    purpose: str | None = Field(default=None, min_length=1, max_length=120)
+    status_class: str | None = Field(default=None, min_length=1, max_length=8)
+    search: str | None = Field(default=None, min_length=1, max_length=128)
 
 
 def _chat_allowed(session_id: str) -> bool:
@@ -153,6 +164,17 @@ def post_chat(request: Request, body: ChatBody):
                 source_id=body.source_id,
                 time_from=body.time_from,
                 time_to=body.time_to,
+                method=body.method,
+                status=body.status,
+                path_prefix=body.path_prefix,
+                referer_host=body.referer_host,
+                traffic=body.traffic,
+                bot=body.bot,
+                category=body.category,
+                provider_claim=body.provider,
+                purpose=body.purpose,
+                status_class=body.status_class,
+                search=body.search,
             )
         except InvestigationError as exc:
             return error_response(_ERROR_STATUS.get(exc.code, 500), exc.code, str(exc), request_id)

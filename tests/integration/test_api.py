@@ -233,7 +233,12 @@ def test_crawlers_findings_match_service(api):
         conn.close()
     assert [i["rule_id"] for i in crawlers["items"]] == [f.rule_id for f in expected_crawlers]
     assert [i["rule_id"] for i in findings["items"]] == [f.rule_id for f in expected_findings]
-    assert crawlers["items"] == []
+    # v3 catalog: the shared fixture's curl row matches the adapted CLI
+    # rule and ExampleCrawler matches the generic fallback; both are
+    # claims, never verified identities.
+    assert {i["rule_id"] for i in crawlers["items"]} == {"bot-auto-curl", "bot-suspected-generic"}
+    for item in crawlers["items"]:
+        assert "never a crawler" in item["meaning"] or "suspected automation" in item["meaning"]
     assert findings["coverage"]["unique_events"] == 10
     for item in findings["items"]:
         assert "meaning" in item and "limitations" in item and item["limitations"]

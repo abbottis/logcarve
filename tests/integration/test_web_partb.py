@@ -137,11 +137,16 @@ def test_crawler_details_structure(tmp_path, monkeypatch):
         details = service.crawler_details(conn, filt, rules)
     finally:
         conn.close()
-    assert len(details) == 1
+    # v3 catalog: Googlebot plus the adapted curl rule both match;
+    # exact per-index aggregates replace the old bounded agent scan.
+    assert len(details) == 2
     family = details[0]
     assert family["rule_id"] == "bot-search-google"
     assert family["requests"] == 2
     assert family["distinct_agents"] == 1
+    assert family["agents_truncated"] is False
+    assert family["paths_truncated"] is False
+    assert family["paths_agent_cap"] is None
     assert set(family) >= {
         "rule_id",
         "rule_version",
@@ -160,6 +165,9 @@ def test_crawler_details_structure(tmp_path, monkeypatch):
     assert [(row["path"], row["status"]) for row in family["not_found"]] == [("/missing", 404)]
     for row in family["top_paths"]:
         assert set(row) == {"path", "status", "requests"}
+    automation = details[1]
+    assert automation["rule_id"] == "bot-auto-curl"
+    assert automation["requests"] == 1
     rows, truncated = queries.paths_for_agents(conn, filt, [])
     assert rows == [] and truncated is False
 
@@ -226,14 +234,18 @@ def test_crawlers_view(web):
     assert "Claimed crawler families" in html
     assert "Well-known path observations" in html
     assert "robots.txt requests" in html
-    # The shared fixture matches no versioned bot rule: the page must say
-    # so honestly instead of inventing a family.
-    assert "No claimed crawlers in this window." in html
+    # v3 catalog: the shared fixture's curl and ExampleCrawler rows match
+    # versioned rules, so families render as claims with limitations.
+    assert "bot-auto-curl" in html
+    assert "bot-suspected-generic" in html
+    assert "No claimed crawlers in this window." not in html
+    assert "identity not verified" in html or "never a crawler" in html
 
 
 def test_crawler_truncation_labels_first_agents(tmp_path, monkeypatch):
-    """With 55 matching agents the family labels its samples: first 10
-    agents shown of 55, path sample over the first-50 cap, full counts kept."""
+    """With 55 matching agents the family keeps exact counts with a
+    bounded 10-agent sample and no truncation flags: the first-50 agent
+    cap no longer exists."""
     from pathlib import Path
 
     from app.analytics.rules import load_rules
@@ -256,16 +268,18 @@ def test_crawler_truncation_labels_first_agents(tmp_path, monkeypatch):
     assert len(details) == 1
     family = details[0]
     assert family["rule_id"] == "bot-search-google"
+    assert family["requests"] == 55
     assert family["distinct_agents"] == 55
     assert family["agents_shown"] == 10
     assert family["agents_total"] == 55
-    assert family["paths_truncated"] is True
+    assert family["agents_truncated"] is False
+    assert family["paths_truncated"] is False
     assert len(family["top_agents"]) == 10
 
     client = _authed_client(db)
     html = client.get(f"/crawlers?site=default&{WINDOW_QS}&tz=UTC").text
     assert "first 10 of 55" in html
-    assert "first 50 matching agents" in html
+    assert "first 50 matching agents" not in html
     assert "Claimed Googlebot" in html
     assert "identity not verified" in html
     assert t("finding.limitations") in html

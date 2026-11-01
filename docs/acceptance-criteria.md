@@ -37,6 +37,10 @@ All criteria are **NOT IMPLEMENTED / NOT RUN** at scaffold creation. Check a cri
 | OPS-02 | Persistent data survives restart; offline deterministic features work | Volume restart test and installation with synthetic demo data/provider unavailable |
 | OPS-03 | Performance is measured, not assumed | Reproducible 100k/1M synthetic benchmark, import/RAM/DB/query measurements and reference hardware |
 | QA-01 | Required tests and independent reviews complete | Actual pytest/httpx/Playwright results; reviewer evidence for parser/auth/tools/retention/authorization |
+| ANA-04 | Traffic-type, named-bot, category, provider and purpose filters change every count deterministically; every row has exactly one traffic class and bucket totals sum exactly | Hand-counted overlap/mixed-case/NULL/malicious-UA fixture; SQL-vs-Python classifier agreement; cross-consumer equality |
+| ANA-05 | Named-bot table sorts/paginates deterministically with stable ties; request explorer rows are sanitized, bounded and newest/oldest sortable | Hand-counted bot/sort/paging fixture; explorer schema checks (no raw lines, IPs, query values); invalid sort/filter rejection |
+| API-05 | Traffic/bot/browsers/resources/heatmap/clients/explorer endpoints enforce token site/source, bounded search/output and coverage metadata | Endpoint contract tests, cross-site/source denial, unknown-selector 400s, chat-off/provider-unreachable operation |
+| UI-05 | Traffic/bot/explorer controls reflect in every panel through safe URL state with filter-reset paging | Playwright: Apply flow, back/forward, empty states, populated/empty datasets (Slice B) |
 | QA-02 | UI visual QA supplements automated tests | Desktop/mobile light/dark screenshots, console/network review, no screenshot-only completion claim |
 | GOV-01 | Architecture/scope decisions and feature acceptance mapping are recorded | Accepted plan/ADR references; no silent promotion of DECISION/P1/P2 |
 | GOV-02 | License, LogWerk provenance and account/data-mode prerequisites are resolved | Owner decisions, upstream notices, verified setup record without credentials |

@@ -65,18 +65,176 @@ class SummaryResponse(BaseModel):
     limitations: list[str]
 
 
-class BucketOut(BaseModel):
+class BucketCount(BaseModel):
     bucket: str
     requests: int
     errors: int
+    bytes_total: int
 
 
 class TimeseriesResponse(BaseModel):
     site_id: str
     time_range: TimeRangeOut
     bucket: str
-    buckets: list[BucketOut]
+    buckets: list[BucketCount]
     coverage: dict[str, object]
+
+
+class BotRowOut(BaseModel):
+    rule_id: str
+    rule_version: int
+    category: str
+    title: str
+    meaning: str
+    provider: str | None = None
+    purpose: str | None = None
+    traffic: str
+    requests: int
+    errors_4xx: int
+    errors_5xx: int
+    bytes_total: int
+    distinct_agents: int
+    distinct_paths: int
+
+
+class BotTableResponse(BaseModel):
+    site_id: str
+    time_range: TimeRangeOut
+    filters: dict[str, object]
+    sort: str
+    items: list[BotRowOut]
+    total_rules: int
+    limit: int
+    offset: int
+    coverage: dict[str, object]
+    limitations: list[str]
+
+
+class PathCountOut(BaseModel):
+    path: str
+    status: int
+    requests: int
+
+
+class AgentSampleOut(BaseModel):
+    user_agent: str
+    requests: int
+
+
+class BotDetailResponse(BaseModel):
+    rule_id: str
+    rule_version: int
+    category: str
+    title: str
+    meaning: str
+    provider: str | None = None
+    purpose: str | None = None
+    traffic: str
+    filters: dict[str, object]
+    window: dict[str, str]
+    counts: dict[str, int]
+    top_paths: list[PathCountOut]
+    not_found: list[PathCountOut]
+    robots_requests: int
+    sitemap_requests: int
+    sample_agents: list[AgentSampleOut]
+    coverage: dict[str, object]
+    limitations: list[str]
+
+
+class ExplorerRowOut(BaseModel):
+    ts_utc: str
+    method: str
+    path: str
+    status: int
+    bytes: int | None = None
+    referer_host: str | None = None
+    user_agent: str | None = None
+    client_pseudonym: str
+    traffic: str
+    rule_id: str | None = None
+
+
+class ExplorerResponse(BaseModel):
+    site_id: str
+    time_range: TimeRangeOut
+    filters: dict[str, object]
+    sort: str
+    items: list[ExplorerRowOut]
+    total_rows: int
+    limit: int
+    offset: int
+    coverage: dict[str, object]
+    limitations: list[str]
+
+
+class ResourceKindOut(BaseModel):
+    kind: str
+    requests: int
+    errors: int
+    bytes_total: int
+
+
+class ResourceBreakdownResponse(BaseModel):
+    site_id: str
+    time_range: TimeRangeOut
+    filters: dict[str, object]
+    items: list[ResourceKindOut]
+    coverage: dict[str, object]
+    limitations: list[str]
+
+
+class BrowserShareOut(BaseModel):
+    family: str
+    requests: int
+
+
+class OsShareOut(BaseModel):
+    os: str
+    requests: int
+
+
+class BrowserBreakdownResponse(BaseModel):
+    site_id: str
+    time_range: TimeRangeOut
+    filters: dict[str, object]
+    families: list[BrowserShareOut]
+    systems: list[OsShareOut]
+    coverage: dict[str, object]
+    limitations: list[str]
+
+
+class HeatmapResponse(BaseModel):
+    site_id: str
+    time_range: TimeRangeOut
+    filters: dict[str, object]
+    timezone: str
+    matrix: list[list[int]]
+    utc_buckets: int
+    dst_merges: int
+    coverage: dict[str, object]
+    limitations: list[str]
+
+
+class ClientRowOut(BaseModel):
+    client_pseudonym: str
+    requests: int
+    errors: int
+    paths: int
+    first_seen: str | None = None
+    last_seen: str | None = None
+
+
+class ClientTopResponse(BaseModel):
+    site_id: str
+    time_range: TimeRangeOut
+    filters: dict[str, object]
+    items: list[ClientRowOut]
+    total_clients: int
+    limit: int
+    offset: int
+    coverage: dict[str, object]
+    limitations: list[str]
 
 
 class PathItemOut(BaseModel):
@@ -84,6 +242,24 @@ class PathItemOut(BaseModel):
     method: str
     requests: int
     errors: int
+    bytes_total: int
+
+
+class TrafficBucketOut(BaseModel):
+    traffic: str
+    requests: int
+    errors_4xx: int
+    errors_5xx: int
+    bytes_total: int
+
+
+class TrafficBreakdownResponse(BaseModel):
+    site_id: str
+    time_range: TimeRangeOut
+    filters: dict[str, object]
+    buckets: list[TrafficBucketOut]
+    coverage: dict[str, object]
+    limitations: list[str]
 
 
 class TopPathsResponse(BaseModel):

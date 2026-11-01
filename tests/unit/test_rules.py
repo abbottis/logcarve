@@ -15,8 +15,9 @@ SEC_RULES = ROOT / "config" / "security_rules.yaml"
 def test_shipped_rule_files_load_with_versions():
     bots = load_rules(BOT_RULES)
     sec = load_rules(SEC_RULES)
-    assert bots.version == 2
+    assert bots.version == 3
     assert sec.version == 1
+    assert len(bots.rules) == 77
     assert bots.provenance and sec.provenance
     assert {rule.id for rule in bots.rules} >= {
         "bot-search-google",

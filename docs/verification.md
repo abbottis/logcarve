@@ -666,3 +666,32 @@ Original development branches and their full history remain local.
   `cdccb82bb874c9cf8578229a4e0cc97047db639e64e306c38fc1b39696c5805e`.
   The existing local demo, private credentials and actual usage ledger
   were not modified by publication preparation.
+
+## 2026-11-01 — Slice A traffic analysis backend (analytics completion)
+
+Owner-authorized Slice A implementation; no merge to `main`, push,
+deployment or product calls. One lead, no agents. `npm run build`
+prerequisite completed (tracked `app/web/static/app.css` banner refresh;
+`app/web/static/js/` remains ignored build output).
+
+- Full locked suite: 378 passed, 2 skipped (loopback sockets unavailable
+  in sandbox: `test_external_client.py`), 0 failed.
+- Gates: `ruff check` clean, `ruff format --check` clean,
+  `uv lock --check` clean (no dependency changes).
+- New coverage: 52-UA shared vectors (`tests/fixtures/expected/ua_vectors.json`)
+  with SQL-vs-Python agreement; 30-row hand-counted traffic fixture
+  (breakdown sums, zero-filled buckets, sorts/paging, bot detail,
+  explorer sanitization/search, browsers/resources/heatmap/clients,
+  >5000 distinct-UA exact counts); 10-row API fixture (endpoints,
+  unknown/contradictory selectors, route-level bot-conflict 400 and
+  unknown-bot 404, cross-site denial, fractional/unknown tz 400);
+  trusted-scope tests (selected-parent enforcement, valid narrowing when
+  unset, unknown-selector and sensitive-search rejection, exact replay,
+  tool/service aggregate equality, chat-route scope over hostile args).
+- Scale note (provisional, not a guarantee): independent runner measured
+  100k rows / 100k distinct UAs with 25k exact per traffic bucket, import
+  2.204 s, filtered summary ~5.36–5.46 s, bot table 2.393 s, peak RSS
+  62.38 MiB. Repeated-UA latency and app-scale profiling stay Slice C work.
+- Pre-existing/environmental, unchanged by Slice A: `test_t8...guard`
+  needed built assets (resolved by the prerequisite build); 2 loopback
+  skips; browser/e2e execution stays with the independent local runner.

@@ -10,6 +10,13 @@ Launch from the project root:
 muse --model muse-spark-1.3 --reasoning-effort medium --contributor-mode off
 ```
 
+> 2026-11-01 owner authorization (fresh session only): for public source and
+> synthetic fixtures, the exact effective coding model
+> `muse-spark-1.3-contributor`, medium effort, Contributor ON is explicitly
+> authorized, overriding the default above for that data only.
+> Product Standard/egress controls stay fail-closed and separate. See
+> [analytics completion plan](analytics-completion-plan.md).
+
 For a difficult architecture/security review, optionally choose `muse-wonder-1.0` and high effort. These are project choices from the spec; verify availability. The documented Muse default is still Spark 1.2. Keep approvals/sandbox enabled and verify effective Standard handling separately before sensitive use.
 
 Project guidance requires workspace trust. Preserve the root `AGENTS.md`; `muse init --dry-run` previews initialization and `--force` overwrites existing rules. Muse's documented search walks from workspace root toward the nearest Git boundary, checking `AGENTS.md`, `CLAUDE.md`, `.agents/AGENTS.md`, `.claude/CLAUDE.md` in order per level. Deeper project rules prevail. The root instructions explicitly route area-rule reads rather than assuming automatic downward discovery. [Configuration reference](https://dev.meta.ai/docs/muse-code/configuration)

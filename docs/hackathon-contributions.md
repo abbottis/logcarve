@@ -8,7 +8,9 @@ The supplied spec identifies the prior LogWerk project and requires transparent 
 | 2026-10-28 | `docs/technical-spec.md` | Owner-supplied German specification v0.4 | Unmodified snapshot; checksum in `spec-provenance.md` |
 | 2026-10-31 | External client `findings` route correction and verification | New original LogCarve change implemented with AI assistance at the owner's request; no LogWerk import | Existing real-HTTP tests pass; full suite 137 passed in clean and conflicting environments; see `verification.md` |
 
-No LogWerk code, assets or rule datasets have been imported. The application uses third-party dependencies and browser assets listed in `THIRD_PARTY_NOTICES.md`; their licenses and notices remain applicable. Before each import, record source URL, commit/version, destination, license/notices, what predates the event and what changes are new. Keep the public demo/submission wording consistent with this record.
+| 2026-11-01 | Bot rule catalog v3: 70 LogWerk `botRules` patterns/names/provider-purpose labels adapted (pinned commit `d7ab01c`, MIT retained verbatim in `THIRD_PARTY_NOTICES.md`), 5 pre-existing LogCarve rule IDs kept, 2 original rules added (UptimeRobot monitoring, generic suspected-automation fallback); category/ordering/matcher remaps are new LogCarve work | Mixed adaptation with AI assistance at the owner's request; no LogWerk application code, session/person inference or sample data | `config/bot_rules.yaml` v3 (77 entries); see Slice A evidence in `verification.md` |
+
+No LogWerk application code, assets, session/person inference or sample data have been imported. The 70 adapted rule-catalog patterns are recorded above and in `THIRD_PARTY_NOTICES.md` with the retained MIT notice. The application otherwise uses third-party dependencies and browser assets listed in `THIRD_PARTY_NOTICES.md`; their licenses and notices remain applicable. Before each import, record source URL, commit/version, destination, license/notices, what predates the event and what changes are new. Keep the public demo/submission wording consistent with this record.
 
 Before submission: independently review the current Official Rules, verify eligibility/prior-work requirements and prepare the actual demonstration. Original LogCarve code and documentation are licensed Apache-2.0; third-party components retain their own licenses. Credit terms and an API balance do not establish submission eligibility or account access. Publishing a repository or submitting material has not been authorized by this scaffold task.
 
@@ -23,7 +25,8 @@ sole-manual-authorship claim.
 - Original implementation: parser, SQLite import/replay/backup/retention,
   shared analytics, scoped API, bounded model tools and local browser UI.
 - Third-party code/assets: the pinned packages and retained notices in
-  `THIRD_PARTY_NOTICES.md`; no LogWerk imports.
+  `THIRD_PARTY_NOTICES.md`; no LogWerk application-code imports (rule-pattern
+  adaptation of 2026-11-01 is recorded separately above).
 - Actual verification: 341 unit/integration tests, 15 browser E2E tests,
   28 container-browser cases and 23 isolated container smoke checks passed
   at the development checkpoint. See `verification.md` for environments

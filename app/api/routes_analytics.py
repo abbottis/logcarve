@@ -15,8 +15,16 @@ from fastapi import APIRouter, Query, Request
 from fastapi.responses import JSONResponse
 from pydantic import ValidationError
 
-from app.analytics import queries, service
-from app.analytics.contracts import AnalyticsFilter, TimeWindow, TopPathsQuery, TopReferrersQuery
+from app.analytics import service
+from app.analytics.classification import build_classifier, resolve_selector_indexes
+from app.analytics.contracts import (
+    AnalyticsFilter,
+    BotTableQuery,
+    ExplorerQuery,
+    TimeWindow,
+    TopPathsQuery,
+    TopReferrersQuery,
+)
 from app.api import schemas
 from app.api.deps import (
     read_store,
@@ -39,6 +47,16 @@ RefererHost = Annotated[str | None, Query(min_length=1, max_length=253)]
 Limit = Annotated[int, Query(ge=1, le=1000)]
 Offset = Annotated[int, Query(ge=0)]
 Timezone = Annotated[str, Query(min_length=1, max_length=64)]
+TrafficParam = Annotated[
+    Literal["all", "browser_like", "claimed_bot", "other_automation", "unknown"], Query()
+]
+StatusClassParam = Annotated[Literal["2xx", "3xx", "4xx", "5xx"] | None, Query()]
+SearchParam = Annotated[str | None, Query(min_length=1, max_length=128)]
+BotParam = Annotated[str | None, Query(min_length=1, max_length=64)]
+CategoryParam = Annotated[str | None, Query(min_length=1, max_length=64)]
+ProviderParam = Annotated[str | None, Query(min_length=1, max_length=120)]
+PurposeParam = Annotated[str | None, Query(min_length=1, max_length=120)]
+HeatmapTz = Annotated[str, Query(min_length=1, max_length=64)]
 
 
 def _deny(request_id: str, code: str, message: str, status: int = 400):
@@ -54,8 +72,15 @@ def _prepare(
     source_id: str | None,
     method: str | None,
     status: int | None,
+    status_class: str | None,
     path_prefix: str | None,
     referer_host: str | None,
+    search: str | None,
+    traffic: str,
+    bot: str | None,
+    category: str | None,
+    provider: str | None,
+    purpose: str | None,
     limit: int,
     offset: int,
     timezone: str,
@@ -84,8 +109,15 @@ def _prepare(
             window=TimeWindow(time_from=time_from, time_to=time_to),
             method=method,
             status=status,
+            status_class=status_class,  # type: ignore[arg-type]
             path_prefix=path_prefix,
             referer_host=referer_host,
+            search=search,
+            traffic=traffic,  # type: ignore[arg-type]
+            bot=bot,
+            category=category,
+            provider=provider,
+            purpose=purpose,
             limit=limit,
             offset=offset,
         )
@@ -94,6 +126,25 @@ def _prepare(
             None,
             None,
             _deny(request.state.request_id, "invalid_request", "Request validation failed."),
+        )
+    try:
+        clf = build_classifier(list(request.app.state.rules))
+        resolve_selector_indexes(
+            clf,
+            bot=filt.bot,
+            category=filt.category,
+            provider=filt.provider,
+            purpose=filt.purpose,
+        )
+    except ValueError:
+        return (
+            None,
+            None,
+            _deny(
+                request.state.request_id,
+                "invalid_request",
+                "Unknown or contradictory traffic/bot selector.",
+            ),
         )
     denied = require_token_site(token, filt.site_id, request.state.request_id)
     if denied is not None:
@@ -115,8 +166,15 @@ def _params(
     source_id: SourceId = None,
     method: Method = None,
     status: Status = None,
+    status_class: StatusClassParam = None,
     path_prefix: PathPrefix = None,
     referer_host: RefererHost = None,
+    search: SearchParam = None,
+    traffic: TrafficParam = "all",
+    bot: BotParam = None,
+    category: CategoryParam = None,
+    provider: ProviderParam = None,
+    purpose: PurposeParam = None,
     limit: Limit = 100,
     offset: Offset = 0,
     timezone: Timezone = "UTC",
@@ -128,8 +186,15 @@ def _params(
         "source_id": source_id,
         "method": method,
         "status": status,
+        "status_class": status_class,
         "path_prefix": path_prefix,
         "referer_host": referer_host,
+        "search": search,
+        "traffic": traffic,
+        "bot": bot,
+        "category": category,
+        "provider": provider,
+        "purpose": purpose,
         "limit": limit,
         "offset": offset,
         "timezone": timezone,
@@ -145,8 +210,15 @@ def get_summary(
     source_id: SourceId = None,
     method: Method = None,
     status: Status = None,
+    status_class: StatusClassParam = None,
     path_prefix: PathPrefix = None,
     referer_host: RefererHost = None,
+    search: SearchParam = None,
+    traffic: TrafficParam = "all",
+    bot: BotParam = None,
+    category: CategoryParam = None,
+    provider: ProviderParam = None,
+    purpose: PurposeParam = None,
     limit: Limit = 100,
     offset: Offset = 0,
     timezone: Timezone = "UTC",
@@ -160,8 +232,15 @@ def get_summary(
             source_id,
             method,
             status,
+            status_class,
             path_prefix,
             referer_host,
+            search,
+            traffic,
+            bot,
+            category,
+            provider,
+            purpose,
             limit,
             offset,
             timezone,
@@ -170,7 +249,7 @@ def get_summary(
     if err is not None:
         return err
     with read_store(request) as conn:
-        return service.summarize(conn, filt)
+        return service.summarize(conn, filt, request.app.state.rules)
 
 
 @router.get("/traffic/timeseries", response_model=schemas.TimeseriesResponse)
@@ -182,8 +261,15 @@ def get_timeseries(
     source_id: SourceId = None,
     method: Method = None,
     status: Status = None,
+    status_class: StatusClassParam = None,
     path_prefix: PathPrefix = None,
     referer_host: RefererHost = None,
+    search: SearchParam = None,
+    traffic: TrafficParam = "all",
+    bot: BotParam = None,
+    category: CategoryParam = None,
+    provider: ProviderParam = None,
+    purpose: PurposeParam = None,
     limit: Limit = 100,
     offset: Offset = 0,
     timezone: Timezone = "UTC",
@@ -198,8 +284,15 @@ def get_timeseries(
             source_id,
             method,
             status,
+            status_class,
             path_prefix,
             referer_host,
+            search,
+            traffic,
+            bot,
+            category,
+            provider,
+            purpose,
             limit,
             offset,
             timezone,
@@ -208,7 +301,7 @@ def get_timeseries(
     if err is not None:
         return err
     with read_store(request) as conn:
-        return service.timeseries(conn, filt, bucket)
+        return service.timeseries(conn, filt, bucket, request.app.state.rules)
 
 
 @router.get("/crawlers", response_model=schemas.FindingsResponse)
@@ -220,8 +313,15 @@ def get_crawlers(
     source_id: SourceId = None,
     method: Method = None,
     status: Status = None,
+    status_class: StatusClassParam = None,
     path_prefix: PathPrefix = None,
     referer_host: RefererHost = None,
+    search: SearchParam = None,
+    traffic: TrafficParam = "all",
+    bot: BotParam = None,
+    category: CategoryParam = None,
+    provider: ProviderParam = None,
+    purpose: PurposeParam = None,
     limit: Limit = 100,
     offset: Offset = 0,
     timezone: Timezone = "UTC",
@@ -235,8 +335,15 @@ def get_crawlers(
             source_id,
             method,
             status,
+            status_class,
             path_prefix,
             referer_host,
+            search,
+            traffic,
+            bot,
+            category,
+            provider,
+            purpose,
             limit,
             offset,
             timezone,
@@ -249,7 +356,7 @@ def get_crawlers(
         return {
             "items": [asdict(f) for f in findings],
             "total": len(findings),
-            "coverage": service.coverage_summary(conn, filt),
+            "coverage": service.coverage_summary(conn, filt, request.app.state.rules),
         }
 
 
@@ -262,8 +369,15 @@ def get_errors(
     source_id: SourceId = None,
     method: Method = None,
     status: Status = None,
+    status_class: StatusClassParam = None,
     path_prefix: PathPrefix = None,
     referer_host: RefererHost = None,
+    search: SearchParam = None,
+    traffic: TrafficParam = "all",
+    bot: BotParam = None,
+    category: CategoryParam = None,
+    provider: ProviderParam = None,
+    purpose: PurposeParam = None,
     limit: Limit = 100,
     offset: Offset = 0,
     timezone: Timezone = "UTC",
@@ -277,8 +391,15 @@ def get_errors(
             source_id,
             method,
             status,
+            status_class,
             path_prefix,
             referer_host,
+            search,
+            traffic,
+            bot,
+            category,
+            provider,
+            purpose,
             limit,
             offset,
             timezone,
@@ -287,13 +408,14 @@ def get_errors(
     if err is not None:
         return err
     with read_store(request) as conn:
-        items, total = queries.error_groups(conn, filt)
+        result = service.error_groups(conn, filt, request.app.state.rules)
+        items, total = result["items"], result["total_groups"]
         return {
             "items": items,
             "total_groups": total,
             "limit": filt.limit,
             "offset": filt.offset,
-            "coverage": service.coverage_summary(conn, filt),
+            "coverage": service.coverage_summary(conn, filt, request.app.state.rules),
         }
 
 
@@ -306,12 +428,21 @@ def get_paths(
     source_id: SourceId = None,
     method: Method = None,
     status: Status = None,
+    status_class: StatusClassParam = None,
     path_prefix: PathPrefix = None,
     referer_host: RefererHost = None,
+    search: SearchParam = None,
+    traffic: TrafficParam = "all",
+    bot: BotParam = None,
+    category: CategoryParam = None,
+    provider: ProviderParam = None,
+    purpose: PurposeParam = None,
     limit: Limit = 100,
     offset: Offset = 0,
     timezone: Timezone = "UTC",
-    sort: Annotated[Literal["requests_desc", "errors_desc"], Query()] = "requests_desc",
+    sort: Annotated[
+        Literal["requests_desc", "errors_desc", "bytes_desc"], Query()
+    ] = "requests_desc",
 ):
     _, filt, err = _prepare(
         request,
@@ -322,8 +453,15 @@ def get_paths(
             source_id,
             method,
             status,
+            status_class,
             path_prefix,
             referer_host,
+            search,
+            traffic,
+            bot,
+            category,
+            provider,
+            purpose,
             limit,
             offset,
             timezone,
@@ -332,7 +470,9 @@ def get_paths(
     if err is not None:
         return err
     with read_store(request) as conn:
-        result = service.top_paths(conn, TopPathsQuery(filt=filt, sort=sort))
+        result = service.top_paths(
+            conn, TopPathsQuery(filt=filt, sort=sort), request.app.state.rules
+        )
         return result
 
 
@@ -345,8 +485,15 @@ def get_referrers(
     source_id: SourceId = None,
     method: Method = None,
     status: Status = None,
+    status_class: StatusClassParam = None,
     path_prefix: PathPrefix = None,
     referer_host: RefererHost = None,
+    search: SearchParam = None,
+    traffic: TrafficParam = "all",
+    bot: BotParam = None,
+    category: CategoryParam = None,
+    provider: ProviderParam = None,
+    purpose: PurposeParam = None,
     limit: Limit = 100,
     offset: Offset = 0,
     timezone: Timezone = "UTC",
@@ -360,8 +507,15 @@ def get_referrers(
             source_id,
             method,
             status,
+            status_class,
             path_prefix,
             referer_host,
+            search,
+            traffic,
+            bot,
+            category,
+            provider,
+            purpose,
             limit,
             offset,
             timezone,
@@ -370,7 +524,7 @@ def get_referrers(
     if err is not None:
         return err
     with read_store(request) as conn:
-        return service.top_referrers(conn, TopReferrersQuery(filt=filt))
+        return service.top_referrers(conn, TopReferrersQuery(filt=filt), request.app.state.rules)
 
 
 @router.get("/security/findings", response_model=schemas.FindingsResponse)
@@ -382,8 +536,15 @@ def get_findings(
     source_id: SourceId = None,
     method: Method = None,
     status: Status = None,
+    status_class: StatusClassParam = None,
     path_prefix: PathPrefix = None,
     referer_host: RefererHost = None,
+    search: SearchParam = None,
+    traffic: TrafficParam = "all",
+    bot: BotParam = None,
+    category: CategoryParam = None,
+    provider: ProviderParam = None,
+    purpose: PurposeParam = None,
     limit: Limit = 100,
     offset: Offset = 0,
     timezone: Timezone = "UTC",
@@ -397,8 +558,15 @@ def get_findings(
             source_id,
             method,
             status,
+            status_class,
             path_prefix,
             referer_host,
+            search,
+            traffic,
+            bot,
+            category,
+            provider,
+            purpose,
             limit,
             offset,
             timezone,
@@ -411,7 +579,7 @@ def get_findings(
         return {
             "items": [asdict(f) for f in findings],
             "total": len(findings),
-            "coverage": service.coverage_summary(conn, filt),
+            "coverage": service.coverage_summary(conn, filt, request.app.state.rules),
         }
 
 
@@ -424,8 +592,15 @@ def get_performance(
     source_id: SourceId = None,
     method: Method = None,
     status: Status = None,
+    status_class: StatusClassParam = None,
     path_prefix: PathPrefix = None,
     referer_host: RefererHost = None,
+    search: SearchParam = None,
+    traffic: TrafficParam = "all",
+    bot: BotParam = None,
+    category: CategoryParam = None,
+    provider: ProviderParam = None,
+    purpose: PurposeParam = None,
     limit: Limit = 100,
     offset: Offset = 0,
     timezone: Timezone = "UTC",
@@ -439,8 +614,15 @@ def get_performance(
             source_id,
             method,
             status,
+            status_class,
             path_prefix,
             referer_host,
+            search,
+            traffic,
+            bot,
+            category,
+            provider,
+            purpose,
             limit,
             offset,
             timezone,
@@ -449,7 +631,436 @@ def get_performance(
     if err is not None:
         return err
     with read_store(request) as conn:
-        return service.summarize(conn, filt)["duration"]
+        return service.summarize(conn, filt, request.app.state.rules)["duration"]
+
+
+@router.get("/traffic/breakdown", response_model=schemas.TrafficBreakdownResponse)
+def get_traffic_breakdown(
+    request: Request,
+    site_id: SiteId,
+    time_from: TimeFrom,
+    time_to: TimeTo,
+    source_id: SourceId = None,
+    method: Method = None,
+    status: Status = None,
+    status_class: StatusClassParam = None,
+    path_prefix: PathPrefix = None,
+    referer_host: RefererHost = None,
+    search: SearchParam = None,
+    traffic: TrafficParam = "all",
+    bot: BotParam = None,
+    category: CategoryParam = None,
+    provider: ProviderParam = None,
+    purpose: PurposeParam = None,
+    limit: Limit = 100,
+    offset: Offset = 0,
+    timezone: Timezone = "UTC",
+):
+    _, filt, err = _prepare(
+        request,
+        **_params(
+            site_id,
+            time_from,
+            time_to,
+            source_id,
+            method,
+            status,
+            status_class,
+            path_prefix,
+            referer_host,
+            search,
+            traffic,
+            bot,
+            category,
+            provider,
+            purpose,
+            limit,
+            offset,
+            timezone,
+        ),
+    )
+    if err is not None:
+        return err
+    with read_store(request) as conn:
+        return service.traffic_breakdown(conn, filt, request.app.state.rules)
+
+
+@router.get("/traffic/resources", response_model=schemas.ResourceBreakdownResponse)
+def get_traffic_resources(
+    request: Request,
+    site_id: SiteId,
+    time_from: TimeFrom,
+    time_to: TimeTo,
+    source_id: SourceId = None,
+    method: Method = None,
+    status: Status = None,
+    status_class: StatusClassParam = None,
+    path_prefix: PathPrefix = None,
+    referer_host: RefererHost = None,
+    search: SearchParam = None,
+    traffic: TrafficParam = "all",
+    bot: BotParam = None,
+    category: CategoryParam = None,
+    provider: ProviderParam = None,
+    purpose: PurposeParam = None,
+    limit: Limit = 100,
+    offset: Offset = 0,
+    timezone: Timezone = "UTC",
+):
+    _, filt, err = _prepare(
+        request,
+        **_params(
+            site_id,
+            time_from,
+            time_to,
+            source_id,
+            method,
+            status,
+            status_class,
+            path_prefix,
+            referer_host,
+            search,
+            traffic,
+            bot,
+            category,
+            provider,
+            purpose,
+            limit,
+            offset,
+            timezone,
+        ),
+    )
+    if err is not None:
+        return err
+    with read_store(request) as conn:
+        return service.resource_breakdown(conn, filt, request.app.state.rules)
+
+
+@router.get("/traffic/browsers", response_model=schemas.BrowserBreakdownResponse)
+def get_traffic_browsers(
+    request: Request,
+    site_id: SiteId,
+    time_from: TimeFrom,
+    time_to: TimeTo,
+    source_id: SourceId = None,
+    method: Method = None,
+    status: Status = None,
+    status_class: StatusClassParam = None,
+    path_prefix: PathPrefix = None,
+    referer_host: RefererHost = None,
+    search: SearchParam = None,
+    traffic: TrafficParam = "all",
+    bot: BotParam = None,
+    category: CategoryParam = None,
+    provider: ProviderParam = None,
+    purpose: PurposeParam = None,
+    limit: Limit = 100,
+    offset: Offset = 0,
+    timezone: Timezone = "UTC",
+):
+    _, filt, err = _prepare(
+        request,
+        **_params(
+            site_id,
+            time_from,
+            time_to,
+            source_id,
+            method,
+            status,
+            status_class,
+            path_prefix,
+            referer_host,
+            search,
+            traffic,
+            bot,
+            category,
+            provider,
+            purpose,
+            limit,
+            offset,
+            timezone,
+        ),
+    )
+    if err is not None:
+        return err
+    with read_store(request) as conn:
+        return service.browser_breakdown(conn, filt, request.app.state.rules)
+
+
+@router.get("/traffic/heatmap", response_model=schemas.HeatmapResponse)
+def get_traffic_heatmap(
+    request: Request,
+    site_id: SiteId,
+    time_from: TimeFrom,
+    time_to: TimeTo,
+    source_id: SourceId = None,
+    method: Method = None,
+    status: Status = None,
+    status_class: StatusClassParam = None,
+    path_prefix: PathPrefix = None,
+    referer_host: RefererHost = None,
+    search: SearchParam = None,
+    traffic: TrafficParam = "all",
+    bot: BotParam = None,
+    category: CategoryParam = None,
+    provider: ProviderParam = None,
+    purpose: PurposeParam = None,
+    limit: Limit = 100,
+    offset: Offset = 0,
+    timezone: Timezone = "UTC",
+    tz: HeatmapTz = "UTC",
+):
+    _, filt, err = _prepare(
+        request,
+        **_params(
+            site_id,
+            time_from,
+            time_to,
+            source_id,
+            method,
+            status,
+            status_class,
+            path_prefix,
+            referer_host,
+            search,
+            traffic,
+            bot,
+            category,
+            provider,
+            purpose,
+            limit,
+            offset,
+            timezone,
+        ),
+    )
+    if err is not None:
+        return err
+    with read_store(request) as conn:
+        try:
+            return service.heatmap(conn, filt, request.app.state.rules, tz_name=tz)
+        except ValueError:
+            return _deny(request.state.request_id, "invalid_request", "Unknown timezone.")
+
+
+@router.get("/traffic/clients", response_model=schemas.ClientTopResponse)
+def get_traffic_clients(
+    request: Request,
+    site_id: SiteId,
+    time_from: TimeFrom,
+    time_to: TimeTo,
+    source_id: SourceId = None,
+    method: Method = None,
+    status: Status = None,
+    status_class: StatusClassParam = None,
+    path_prefix: PathPrefix = None,
+    referer_host: RefererHost = None,
+    search: SearchParam = None,
+    traffic: TrafficParam = "all",
+    bot: BotParam = None,
+    category: CategoryParam = None,
+    provider: ProviderParam = None,
+    purpose: PurposeParam = None,
+    limit: Limit = 100,
+    offset: Offset = 0,
+    timezone: Timezone = "UTC",
+):
+    _, filt, err = _prepare(
+        request,
+        **_params(
+            site_id,
+            time_from,
+            time_to,
+            source_id,
+            method,
+            status,
+            status_class,
+            path_prefix,
+            referer_host,
+            search,
+            traffic,
+            bot,
+            category,
+            provider,
+            purpose,
+            limit,
+            offset,
+            timezone,
+        ),
+    )
+    if err is not None:
+        return err
+    with read_store(request) as conn:
+        return service.client_top(conn, filt, request.app.state.rules)
+
+
+@router.get("/bots", response_model=schemas.BotTableResponse)
+def get_bots(
+    request: Request,
+    site_id: SiteId,
+    time_from: TimeFrom,
+    time_to: TimeTo,
+    source_id: SourceId = None,
+    method: Method = None,
+    status: Status = None,
+    status_class: StatusClassParam = None,
+    path_prefix: PathPrefix = None,
+    referer_host: RefererHost = None,
+    search: SearchParam = None,
+    traffic: TrafficParam = "all",
+    bot: BotParam = None,
+    category: CategoryParam = None,
+    provider: ProviderParam = None,
+    purpose: PurposeParam = None,
+    limit: Limit = 100,
+    offset: Offset = 0,
+    timezone: Timezone = "UTC",
+    sort: Annotated[
+        Literal["requests_desc", "name_asc", "category_asc", "errors_desc", "bytes_desc"],
+        Query(),
+    ] = "requests_desc",
+):
+    _, filt, err = _prepare(
+        request,
+        **_params(
+            site_id,
+            time_from,
+            time_to,
+            source_id,
+            method,
+            status,
+            status_class,
+            path_prefix,
+            referer_host,
+            search,
+            traffic,
+            bot,
+            category,
+            provider,
+            purpose,
+            limit,
+            offset,
+            timezone,
+        ),
+    )
+    if err is not None:
+        return err
+    with read_store(request) as conn:
+        return service.bot_table(conn, BotTableQuery(filt=filt, sort=sort), request.app.state.rules)
+
+
+@router.get("/bots/{rule_id}", response_model=schemas.BotDetailResponse)
+def get_bot_detail(
+    request: Request,
+    rule_id: str,
+    site_id: SiteId,
+    time_from: TimeFrom,
+    time_to: TimeTo,
+    source_id: SourceId = None,
+    method: Method = None,
+    status: Status = None,
+    status_class: StatusClassParam = None,
+    path_prefix: PathPrefix = None,
+    referer_host: RefererHost = None,
+    search: SearchParam = None,
+    traffic: TrafficParam = "all",
+    bot: BotParam = None,
+    category: CategoryParam = None,
+    provider: ProviderParam = None,
+    purpose: PurposeParam = None,
+    limit: Limit = 100,
+    offset: Offset = 0,
+    timezone: Timezone = "UTC",
+):
+    _, filt, err = _prepare(
+        request,
+        **_params(
+            site_id,
+            time_from,
+            time_to,
+            source_id,
+            method,
+            status,
+            status_class,
+            path_prefix,
+            referer_host,
+            search,
+            traffic,
+            bot,
+            category,
+            provider,
+            purpose,
+            limit,
+            offset,
+            timezone,
+        ),
+    )
+    if err is not None:
+        return err
+    with read_store(request) as conn:
+        try:
+            return service.bot_detail(conn, filt, request.app.state.rules, rule_id)
+        except KeyError:
+            return _deny(request.state.request_id, "unknown_bot", "Unknown bot rule.", 404)
+        except ValueError:
+            return _deny(
+                request.state.request_id,
+                "invalid_request",
+                "Contradictory traffic/bot selector.",
+            )
+
+
+@router.get("/requests", response_model=schemas.ExplorerResponse)
+def get_requests(
+    request: Request,
+    site_id: SiteId,
+    time_from: TimeFrom,
+    time_to: TimeTo,
+    source_id: SourceId = None,
+    method: Method = None,
+    status: Status = None,
+    status_class: StatusClassParam = None,
+    path_prefix: PathPrefix = None,
+    referer_host: RefererHost = None,
+    search: SearchParam = None,
+    traffic: TrafficParam = "all",
+    bot: BotParam = None,
+    category: CategoryParam = None,
+    provider: ProviderParam = None,
+    purpose: PurposeParam = None,
+    limit: Limit = 100,
+    offset: Offset = 0,
+    timezone: Timezone = "UTC",
+    sort: Annotated[Literal["newest", "oldest"], Query()] = "newest",
+):
+    _, filt, err = _prepare(
+        request,
+        **_params(
+            site_id,
+            time_from,
+            time_to,
+            source_id,
+            method,
+            status,
+            status_class,
+            path_prefix,
+            referer_host,
+            search,
+            traffic,
+            bot,
+            category,
+            provider,
+            purpose,
+            limit,
+            offset,
+            timezone,
+        ),
+    )
+    if err is not None:
+        return err
+    with read_store(request) as conn:
+        return service.request_explorer(
+            conn, ExplorerQuery(filt=filt, sort=sort), request.app.state.rules
+        )
 
 
 @router.get("/openapi.json")

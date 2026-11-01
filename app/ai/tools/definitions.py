@@ -17,7 +17,7 @@ from datetime import UTC, datetime
 
 from pydantic import BaseModel, Field, ValidationError
 
-from app.analytics import queries, service
+from app.analytics import service
 from app.analytics.contracts import AnalyticsFilter, TimeWindow, TopPathsQuery, TopReferrersQuery
 
 TOOL_NAMES = (
@@ -42,7 +42,12 @@ class ToolError(RuntimeError):
 
 
 class ToolArguments(BaseModel):
-    """Validated tool arguments; unknown fields are rejected, never ignored."""
+    """Validated tool arguments; unknown fields are rejected, never ignored.
+
+    Aggregate-only selectors: tools narrow the shared deterministic
+    aggregates but never return raw request rows (the sanitized explorer
+    is a UI/API read, never a tool).
+    """
 
     model_config = {"extra": "forbid"}
 
@@ -52,8 +57,17 @@ class ToolArguments(BaseModel):
     time_to: datetime
     method: str | None = Field(default=None, min_length=1, max_length=32)
     status: int | None = Field(default=None, ge=100, le=599)
+    status_class: str | None = Field(default=None, pattern="^(2xx|3xx|4xx|5xx)$")
     path_prefix: str | None = Field(default=None, min_length=1, max_length=1024)
     referer_host: str | None = Field(default=None, min_length=1, max_length=253)
+    traffic: str = Field(
+        default="all", pattern="^(all|browser_like|claimed_bot|other_automation|unknown)$"
+    )
+    bot: str | None = Field(default=None, min_length=1, max_length=64)
+    category: str | None = Field(default=None, min_length=1, max_length=64)
+    provider: str | None = Field(default=None, min_length=1, max_length=120)
+    purpose: str | None = Field(default=None, min_length=1, max_length=120)
+    search: str | None = Field(default=None, min_length=1, max_length=128)
     limit: int = Field(default=20, ge=1, le=TOOL_RESULT_LIMIT)
     offset: int = Field(default=0, ge=0)
     bucket: str = Field(default="hour", pattern="^(hour|day)$")
@@ -90,10 +104,23 @@ def _evidence_filters(args: ToolArguments, filt: AnalyticsFilter) -> dict[str, o
         filters["method"] = filt.method
     if filt.status is not None:
         filters["status"] = filt.status
+    if filt.status_class is not None:
+        filters["status_class"] = filt.status_class
     if filt.path_prefix is not None:
         filters["path_prefix"] = filt.path_prefix
     if filt.referer_host is not None:
         filters["referer_host"] = filt.referer_host
+    filters["traffic"] = filt.traffic
+    if filt.bot is not None:
+        filters["bot"] = filt.bot
+    if filt.category is not None:
+        filters["category"] = filt.category
+    if filt.provider is not None:
+        filters["provider"] = filt.provider
+    if filt.purpose is not None:
+        filters["purpose"] = filt.purpose
+    if filt.search is not None:
+        filters["search"] = filt.search
     filters["limit"] = filt.limit
     filters["offset"] = filt.offset
     filters["bucket"] = args.bucket
@@ -108,8 +135,15 @@ def _filter(args: ToolArguments) -> AnalyticsFilter:
             window=TimeWindow(time_from=args.time_from, time_to=args.time_to),
             method=args.method,
             status=args.status,
+            status_class=args.status_class,  # type: ignore[arg-type]
             path_prefix=args.path_prefix,
             referer_host=args.referer_host,
+            traffic=args.traffic,  # type: ignore[arg-type]
+            bot=args.bot,
+            category=args.category,
+            provider=args.provider,
+            purpose=args.purpose,
+            search=args.search,
             limit=args.limit,
             offset=args.offset,
         )
@@ -138,14 +172,31 @@ def execute_tool(
     _check_scope(conn, args)
     observed = datetime.now(UTC) if observation_time is None else observation_time
     filt = _filter(args)
+    try:
+        return _execute_validated(
+            conn,
+            rules,
+            name=name,
+            filt=filt,
+            args=args,
+            tool_call_id=tool_call_id,
+            observed=observed,
+        )
+    except ValueError as exc:
+        raise ToolError(
+            "invalid_arguments", "Tool selectors are unknown or contradictory."
+        ) from exc
+
+
+def _execute_validated(conn, rules, *, name, filt, args, tool_call_id, observed) -> dict:
     if name == "get_summary":
-        result = service.summarize(conn, filt, observation_time=observed)
+        result = service.summarize(conn, filt, rules, observation_time=observed)
     elif name == "get_timeseries":
-        result = service.timeseries(conn, filt, args.bucket)  # type: ignore[arg-type]
+        result = service.timeseries(conn, filt, args.bucket, rules)  # type: ignore[arg-type]
     elif name == "get_top_paths":
-        result = service.top_paths(conn, TopPathsQuery(filt=filt, sort="requests_desc"))
+        result = service.top_paths(conn, TopPathsQuery(filt=filt, sort="requests_desc"), rules)
     elif name == "get_top_referrers":
-        result = service.top_referrers(conn, TopReferrersQuery(filt=filt))
+        result = service.top_referrers(conn, TopReferrersQuery(filt=filt), rules)
     elif name == "get_crawler_claims":
         findings = service.crawler_claims(conn, filt, rules, observation_time=observed)
         result = {"items": [asdict(f) for f in findings], "total": len(findings)}
@@ -153,14 +204,13 @@ def execute_tool(
         findings = service.security_findings(conn, filt, rules, observation_time=observed)
         result = {"items": [asdict(f) for f in findings], "total": len(findings)}
     else:
-        items, total = queries.error_groups(conn, filt)
-        result = {"items": items, "total_groups": total}
+        result = service.error_groups(conn, filt, rules)
     return {
         "tool_call_id": tool_call_id,
         "tool": name,
         "filters": _evidence_filters(args, filt),
         "observation_time": observed.isoformat(),
-        "coverage": service.coverage_summary(conn, filt),
+        "coverage": service.coverage_summary(conn, filt, rules),
         "result": result,
     }
 

@@ -7,13 +7,28 @@
 | Method/path | Data |
 | --- | --- |
 | `GET /api/v1/summary` | Request totals, error/bot shares and coverage |
-| `GET /api/v1/traffic/timeseries` | Bounded request/status time buckets |
+| `GET /api/v1/traffic/timeseries` | Bounded request/status/byte time buckets |
+| `GET /api/v1/traffic/breakdown` | Exact per-traffic-class totals (zero-filled) |
+| `GET /api/v1/traffic/resources` | Requests/errors/bytes by path-based resource kind |
+| `GET /api/v1/traffic/browsers` | Claimed browser family/OS shares (browser-like rows) |
+| `GET /api/v1/traffic/heatmap` | Weekday/hour matrix for a display timezone (`tz`) |
+| `GET /api/v1/traffic/clients` | Top pseudonymized clients, aggregates only |
 | `GET /api/v1/crawlers` | Claimed crawler families, counts, paths and statuses |
+| `GET /api/v1/bots` | Named-bot table with allowlisted sort and paging |
+| `GET /api/v1/bots/{rule_id}` | One named bot: totals, top paths/404s, robots/sitemap, samples |
+| `GET /api/v1/requests` | Sanitized paginated request explorer (`newest`/`oldest`, bounded `search`) |
 | `GET /api/v1/errors` | Error groups by path/status/referrer |
 | `GET /api/v1/security/findings` | Deterministic investigation candidates with rule/evidence refs |
-| `GET /api/v1/paths` | Top paths/methods/counts/status groups |
+| `GET /api/v1/paths` | Top paths/methods/counts/errors/bytes |
 | `GET /api/v1/referrers` | Referring domains and destination paths |
 | `GET /api/v1/performance` | Measured duration distribution, or `available: false` |
+
+All analytics endpoints accept the shared selectors `traffic`, `bot`,
+`category`, `provider`, `purpose`, `search` (bounded, LIKE-escaped over the
+stored path, user agent, referrer host and client pseudonym),
+`status_class`, plus the existing method/status/path/referrer matchers and
+`limit`/`offset` paging. Unknown or contradictory selectors reject with a
+safe structured error; token site/source enforcement is unchanged.
 | `GET /healthz` | Minimal liveness |
 | `GET /readyz` | Restricted/internal DB readiness |
 

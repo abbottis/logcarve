@@ -3,9 +3,47 @@
 LogCarve bundles the browser assets and depends on the packages listed below.
 The supplied requirements document is retained as project input.
 
-The LogCarve project license is **Apache-2.0** (see `LICENSE`, decided 2026-10-29). The MIT license of the earlier LogWerk project does not by itself select LogCarve's license, and no LogWerk code or assets are imported until their source, license, copyright and required notices are verified and documented.
+The LogCarve project license is **Apache-2.0** (see `LICENSE`, decided 2026-10-29). The MIT license of the earlier LogWerk project does not by itself select LogCarve's license.
 
-Before importing code/assets, record source URL, version/commit, license, copyright notice and destination here and in `docs/hackathon-contributions.md` where relevant.
+LogWerk rule-catalog adaptation (accepted 2026-11-01): 70 bot-claim match
+patterns, display names and provider/purpose labels from the public LogWerk
+rule catalog were adapted into `config/bot_rules.yaml` (v3); 2 further
+entries are original LogCarve work (an UptimeRobot monitoring rule and a
+generic suspected-automation fallback). Source:
+https://github.com/abbottis/logwerk, file `parser.js` (`botRules`), pinned
+commit `d7ab01cae910fdd0c5165ee8378506c081c7124a`. No LogWerk application
+code, session/person inference or sample data was copied. Category mapping,
+precedence order, rule IDs, matcher form and the CLI/headless/scanner
+remap to `automation_tool` are new LogCarve work; the five pre-existing
+LogCarve rule IDs are unchanged. The upstream MIT text and copyright below
+are retained verbatim; the upstream LICENSE notice is authoritative even
+where the README names differ.
+
+### LogWerk (bot rule catalog source)
+
+```text
+MIT License
+
+Copyright (c) 2026 Batios
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in all
+copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+SOFTWARE.
+```
 
 | Bundled dependency/asset | License | Version and status |
 | --- | --- | --- |
@@ -19,7 +57,7 @@ Before importing code/assets, record source URL, version/commit, license, copyri
 | Jinja2 + MarkupSafe (Python runtime) | BSD-3-Clause | 3.1.6 + 3.0.4, pinned in `uv.lock` |
 | pytest-playwright + Playwright (dev/test only) | Apache-2.0 / MIT | 0.10.0 + 1.64.1, pinned in `uv.lock`; browsers in ignored `artifacts/` |
 
-No LogWerk code or assets are imported. The inventory records the browser assets and selected runtime/test packages; lockfiles provide the complete dependency versions. Installed Python distributions retain their own license files.
+No LogWerk application code or assets are imported (the 70 adapted rule-catalog patterns are recorded in the LogWerk entry above). The inventory records the browser assets and selected runtime/test packages; lockfiles provide the complete dependency versions. Installed Python distributions retain their own license files.
 
 ## Browser dependency license texts
 

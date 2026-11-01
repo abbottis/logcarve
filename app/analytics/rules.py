@@ -7,6 +7,7 @@ candidates, never proof of compromise. Loaders validate every entry and
 reject duplicates, so a typo can never silently broaden matching.
 """
 
+import re
 from pathlib import Path
 from typing import Literal
 
@@ -21,6 +22,10 @@ RuleCategory = Literal[
     "generic_bot",
     "suspected_automation",
     "unknown",
+    "social_bot",
+    "federation_crawler",
+    "feed_fetcher",
+    "automation_tool",
     "sensitive_path",
     "repeated_client_errors",
 ]
@@ -34,12 +39,15 @@ class Rule(BaseModel):
     category: RuleCategory
     title: str = Field(min_length=1, max_length=200)
     meaning: str = Field(min_length=1, max_length=500)
+    provider: str | None = Field(default=None, min_length=1, max_length=120)
+    purpose: str | None = Field(default=None, min_length=1, max_length=120)
     ua_contains: list[str] = Field(default_factory=list)
+    ua_regex: list[str] = Field(default_factory=list)
     path_contains: list[str] = Field(default_factory=list)
     min_client_errors: int | None = Field(default=None, ge=1)
     severity: ClaimSeverity = "info"
 
-    @field_validator("ua_contains", "path_contains")
+    @field_validator("ua_contains", "ua_regex", "path_contains")
     @classmethod
     def _non_empty_matcher(cls, values: list[str]) -> list[str]:
         for value in values:
@@ -47,17 +55,37 @@ class Rule(BaseModel):
                 raise ValueError("matchers must be 1..256 characters")
         return values
 
+    @field_validator("ua_regex")
+    @classmethod
+    def _compilable_regex(cls, values: list[str]) -> list[str]:
+        for value in values:
+            try:
+                re.compile(value)
+            except re.error as exc:
+                raise ValueError(f"invalid ua_regex {value!r}: {exc}") from exc
+        return values
+
     @model_validator(mode="after")
     def _has_matcher(self) -> "Rule":
-        if not self.ua_contains and not self.path_contains and self.min_client_errors is None:
+        if (
+            not self.ua_contains
+            and not self.ua_regex
+            and not self.path_contains
+            and self.min_client_errors is None
+        ):
             raise ValueError(f"rule {self.id} needs at least one matcher")
         return self
 
     def matches_ua(self, user_agent: str | None) -> bool:
-        if not self.ua_contains or not user_agent:
+        if not user_agent:
             return False
-        lowered = user_agent.lower()
-        return any(fragment.lower() in lowered for fragment in self.ua_contains)
+        if self.ua_contains:
+            lowered = user_agent.lower()
+            if any(fragment.lower() in lowered for fragment in self.ua_contains):
+                return True
+        return any(
+            re.search(pattern, user_agent, re.IGNORECASE) is not None for pattern in self.ua_regex
+        )
 
     def matches_path(self, path: str) -> bool:
         if not self.path_contains:

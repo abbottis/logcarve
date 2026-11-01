@@ -128,7 +128,13 @@ def test_top_paths_ties_and_pagination(analytics_db):
     assert page1["total_groups"] == 18
     assert [(i["path"], i["requests"]) for i in page1["items"]] == [("/", 2), ("/.env", 2)]
     assert [(i["path"], i["requests"]) for i in page2["items"]] == [("/x", 2), ("/about", 1)]
-    assert errors["items"][0] == {"path": "/.env", "method": "GET", "requests": 2, "errors": 2}
+    assert errors["items"][0] == {
+        "path": "/.env",
+        "method": "GET",
+        "requests": 2,
+        "errors": 2,
+        "bytes_total": 100,
+    }
     assert errors["items"][1]["path"] == "/boom"
 
 
@@ -159,17 +165,19 @@ def test_hour_buckets_empty_windows_and_equivalent_instants(analytics_db):
         "bucket": "2026-10-27T09:00:00+00:00",
         "requests": 14,
         "errors": 9,
+        "bytes_total": 1033,
     }
     assert by_bucket["2026-10-27T10:00:00+00:00"] == {
         "bucket": "2026-10-27T10:00:00+00:00",
         "requests": 7,
         "errors": 1,
+        "bytes_total": 740,
     }
     assert all(
         b["requests"] == 0 for b in result["buckets"] if b["bucket"] < "2026-10-27T09:00:00+00:00"
     )
     assert days["buckets"] == [
-        {"bucket": "2026-10-27T00:00:00+00:00", "requests": 21, "errors": 10}
+        {"bucket": "2026-10-27T00:00:00+00:00", "requests": 21, "errors": 10, "bytes_total": 1773}
     ]
     assert [r[0] for r in rows] == [
         "2026-10-27T09:00:00+00:00",
@@ -225,11 +233,30 @@ def test_crawler_claims_are_claims_not_identities(analytics_db):
     finally:
         conn.close()
     by_rule = {f.rule_id: f for f in claims}
-    assert set(by_rule) == {"bot-search-google", "bot-ai-gpt", "bot-search-bing"}
+    # v3 catalog: the fixture curl row matches the adapted CLI rule and
+    # ExampleCrawler matches the original generic fallback.
+    assert set(by_rule) == {
+        "bot-search-google",
+        "bot-ai-gpt",
+        "bot-search-bing",
+        "bot-auto-curl",
+        "bot-suspected-generic",
+    }
     assert by_rule["bot-search-google"].counts == {"requests": 1, "distinct_agents": 1}
+    limiting = (
+        "not verified",
+        "never a crawler",
+        "never a proven crawler",
+        "never a verified check",
+        "never a verified crawler",
+        "investigation lead",
+        "suspected automation",
+    )
     for finding in claims:
         assert finding.rule_version == 1
-        assert "not verified" in finding.meaning
+        # v3 catalog varies the claim wording by family (crawler claims say
+        # "not verified", automation rules say "never a crawler/proof").
+        assert any(phrase in finding.meaning for phrase in limiting)
         assert any("claimed identity only" in limit for limit in finding.limitations)
         assert finding.observation_time == NOW.isoformat()
         assert finding.window == {

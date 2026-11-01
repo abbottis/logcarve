@@ -31,6 +31,13 @@ def connect(
             conn.execute("PRAGMA journal_mode=WAL")
         conn.execute("PRAGMA foreign_keys=ON")
         conn.execute(f"PRAGMA busy_timeout={max(1, int(timeout_s * 1000))}")
+        # Ordered UA classifier scalar (read-only expression, no storage
+        # write). Lazy import keeps the storage layer free of an
+        # import-time analytics dependency; classification patterns always
+        # come from the versioned rule file via bound parameters.
+        from app.analytics.classification import register_sqlite_functions
+
+        register_sqlite_functions(conn)
         return conn
     except Exception:
         conn.close()

@@ -63,6 +63,7 @@
 ## Model boundary and costs
 
 - Muse Code default for this project: explicitly select `muse-spark-1.3`, medium effort, Contributor off.
+- Dated exception 2026-11-01 (owner-authorized, fresh session only): public source + synthetic fixtures use exact model `muse-spark-1.3-contributor`, medium effort, Contributor ON. Product Standard/egress controls stay fail-closed and separate.
 - Use `muse-wonder-1.0` selectively for difficult reviews; do not assume Wonder Full is covered by API credits.
 - CLI flags and `MODEL_SERVICE_TIER=standard` express intent; verify the effective account/provider data mode separately.
 - Until verified, use synthetic, nonconfidential data only. Do not replay sensitive history into Contributor services.

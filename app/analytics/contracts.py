@@ -14,9 +14,14 @@ from pydantic import BaseModel, Field, field_validator, model_validator
 
 MAX_LIMIT = 1000
 MAX_WINDOW_DAYS = 366
+MAX_SEARCH_LEN = 128
 BucketSize = Literal["hour", "day"]
-TopPathSort = Literal["requests_desc", "errors_desc"]
+TopPathSort = Literal["requests_desc", "errors_desc", "bytes_desc"]
 TopReferrerSort = Literal["requests_desc"]
+TrafficFilter = Literal["all", "browser_like", "claimed_bot", "other_automation", "unknown"]
+StatusClass = Literal["2xx", "3xx", "4xx", "5xx"]
+BotTableSort = Literal["requests_desc", "name_asc", "category_asc", "errors_desc", "bytes_desc"]
+ExplorerSort = Literal["newest", "oldest"]
 
 
 def _as_utc(value: datetime) -> datetime:
@@ -55,10 +60,27 @@ class AnalyticsFilter(BaseModel):
     window: TimeWindow
     method: str | None = Field(default=None, min_length=1, max_length=32)
     status: int | None = Field(default=None, ge=100, le=599)
+    status_class: StatusClass | None = Field(default=None)
     path_prefix: str | None = Field(default=None, min_length=1, max_length=1024)
     referer_host: str | None = Field(default=None, min_length=1, max_length=253)
+    search: str | None = Field(default=None, min_length=1, max_length=MAX_SEARCH_LEN)
+    traffic: TrafficFilter = "all"
+    bot: str | None = Field(default=None, min_length=1, max_length=64)
+    category: str | None = Field(default=None, min_length=1, max_length=64)
+    provider: str | None = Field(default=None, min_length=1, max_length=120)
+    purpose: str | None = Field(default=None, min_length=1, max_length=120)
     limit: int = Field(default=100, ge=1, le=MAX_LIMIT)
     offset: int = Field(default=0, ge=0)
+
+    @model_validator(mode="after")
+    def _status_consistent(self) -> "AnalyticsFilter":
+        if (
+            self.status is not None
+            and self.status_class is not None
+            and f"{self.status // 100}xx" != self.status_class
+        ):
+            raise ValueError("status and status_class contradict each other")
+        return self
 
 
 class TopPathsQuery(BaseModel):
@@ -69,3 +91,13 @@ class TopPathsQuery(BaseModel):
 class TopReferrersQuery(BaseModel):
     filt: AnalyticsFilter
     sort: TopReferrerSort = "requests_desc"
+
+
+class BotTableQuery(BaseModel):
+    filt: AnalyticsFilter
+    sort: BotTableSort = "requests_desc"
+
+
+class ExplorerQuery(BaseModel):
+    filt: AnalyticsFilter
+    sort: ExplorerSort = "newest"

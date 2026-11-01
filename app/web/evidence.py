@@ -37,7 +37,22 @@ def evidence_url(page_path: str, envelope_filters: dict, tz_name: str = "UTC") -
     }
     if envelope_filters.get("source_id") is not None:
         query["source"] = envelope_filters["source_id"]
-    for key in ("method", "status", "path_prefix", "referer_host", "limit", "offset", "bucket"):
+    for key in (
+        "method",
+        "status",
+        "status_class",
+        "path_prefix",
+        "referer_host",
+        "search",
+        "traffic",
+        "bot",
+        "category",
+        "provider",
+        "purpose",
+        "limit",
+        "offset",
+        "bucket",
+    ):
         if envelope_filters.get(key) is not None:
             query[key] = envelope_filters[key]
     return page_path + "?" + urlencode(query)

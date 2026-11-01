@@ -57,6 +57,7 @@ from app.ai.providers.meta_responses import (
     serialize_body,
 )
 from app.ai.tools.definitions import TOOL_NAMES, execute_tool, response_tool_definitions
+from app.analytics.classification import build_classifier, resolve_selector_indexes
 from app.analytics.contracts import TimeWindow
 from app.db.database import connect
 
@@ -129,10 +130,33 @@ class InvestigationResult:
 
 @dataclass(frozen=True)
 class ValidatedScope:
+    """Trusted investigation scope; model arguments can never widen it.
+
+    Traffic/bot/category/provider/purpose/status_class/search narrow the
+    same shared stored analytics the dashboard and API read. Search covers
+    sanitized indexed fields only (path, UA, referrer host, pseudonym);
+    the raw-row explorer itself stays a UI/API read, never a model tool.
+    """
+
     site_id: str
     source_id: str | None
     time_from: datetime
     time_to: datetime
+    method: str | None = None
+    status: int | None = None
+    status_class: str | None = None
+    path_prefix: str | None = None
+    referer_host: str | None = None
+    traffic: str = "all"
+    bot: str | None = None
+    category: str | None = None
+    provider_claim: str | None = None
+    purpose: str | None = None
+    search: str | None = None
+
+
+_TRAFFIC_VALUES = ("all", "browser_like", "claimed_bot", "other_automation", "unknown")
+_STATUS_CLASS_VALUES = ("2xx", "3xx", "4xx", "5xx")
 
 
 def load_system_prompt() -> str:
@@ -247,16 +271,53 @@ def validate_scope(
     source_id: str | None,
     time_from: datetime,
     time_to: datetime,
+    method: str | None = None,
+    status: int | None = None,
+    status_class: str | None = None,
+    path_prefix: str | None = None,
+    referer_host: str | None = None,
+    traffic: str = "all",
+    bot: str | None = None,
+    category: str | None = None,
+    provider_claim: str | None = None,
+    purpose: str | None = None,
+    search: str | None = None,
 ) -> ValidatedScope:
-    """Validate the trusted actor/site/source/window contract first.
+    """Validate the trusted actor/site/source/window/selector contract first.
 
     Runs before any budget reservation or provider dispatch using the
     shared TimeWindow bound and a read-only store handle. Only the
     "admin" actor kind may run investigations; model-supplied arguments
     are overridden with this scope later and can never widen it.
+    Selector membership against the versioned rules is checked by the
+    caller, which holds the rules.
     """
     if not isinstance(actor, Actor) or actor.kind != "admin":
         raise InvestigationError("forbidden_actor", "This actor may not run investigations.")
+    if traffic not in _TRAFFIC_VALUES:
+        raise InvestigationError("invalid_request", "The requested traffic selector is invalid.")
+    if status_class is not None and status_class not in _STATUS_CLASS_VALUES:
+        raise InvestigationError("invalid_request", "The requested status class is invalid.")
+    for name, value, bound in (
+        ("method", method, 32),
+        ("bot", bot, 64),
+        ("category", category, 64),
+        ("provider", provider_claim, 120),
+        ("purpose", purpose, 120),
+        ("path_prefix", path_prefix, 1024),
+        ("referer_host", referer_host, 253),
+        ("search", search, 128),
+    ):
+        if value is not None and (not isinstance(value, str) or not 1 <= len(value) <= bound):
+            raise InvestigationError(
+                "invalid_request", f"The requested {name} selector is invalid."
+            )
+    if status is not None and (not isinstance(status, int) or not 100 <= status <= 599):
+        raise InvestigationError("invalid_request", "The requested status selector is invalid.")
+    if status is not None and status_class is not None and f"{status // 100}xx" != status_class:
+        raise InvestigationError(
+            "invalid_request", "The requested status selectors contradict each other."
+        )
     try:
         window = TimeWindow(time_from=time_from, time_to=time_to)
     except ValidationError as exc:
@@ -288,6 +349,17 @@ def validate_scope(
         source_id=source_id,
         time_from=window.time_from,
         time_to=window.time_to,
+        method=method,
+        status=status,
+        status_class=status_class,
+        path_prefix=path_prefix,
+        referer_host=referer_host,
+        traffic=traffic,
+        bot=bot,
+        category=category,
+        provider_claim=provider_claim,
+        purpose=purpose,
+        search=search,
     )
 
 
@@ -429,6 +501,17 @@ def run_investigation(
     source_id: str | None = None,
     time_from: datetime,
     time_to: datetime,
+    method: str | None = None,
+    status: int | None = None,
+    status_class: str | None = None,
+    path_prefix: str | None = None,
+    referer_host: str | None = None,
+    traffic: str = "all",
+    bot: str | None = None,
+    category: str | None = None,
+    provider_claim: str | None = None,
+    purpose: str | None = None,
+    search: str | None = None,
     max_steps: int = MAX_STEPS,
     timeout_s: float = PROVIDER_TIMEOUT_S,
     cancel: threading.Event | None = None,
@@ -462,6 +545,19 @@ def run_investigation(
         raise InvestigationError("invalid_request", "The step bound is out of range.")
     if not PROVIDER_TIMEOUT_MIN_S <= timeout_s <= PROVIDER_TIMEOUT_MAX_S:
         raise InvestigationError("invalid_request", "The timeout bound is out of range.")
+    try:
+        selector_clf = build_classifier(list(rules))
+        resolve_selector_indexes(
+            selector_clf,
+            bot=bot,
+            category=category,
+            provider=provider_claim,
+            purpose=purpose,
+        )
+    except ValueError as exc:
+        raise InvestigationError(
+            "invalid_request", f"Unknown or contradictory selector: {exc}."
+        ) from exc
     scope = validate_scope(
         Path(db_path),
         actor=actor,
@@ -469,6 +565,17 @@ def run_investigation(
         source_id=source_id,
         time_from=time_from,
         time_to=time_to,
+        method=method,
+        status=status,
+        status_class=status_class,
+        path_prefix=path_prefix,
+        referer_host=referer_host,
+        traffic=traffic,
+        bot=bot,
+        category=category,
+        provider_claim=provider_claim,
+        purpose=purpose,
+        search=search,
     )
     try:
         gate.validate_for_real_data(settings)
@@ -476,6 +583,16 @@ def run_investigation(
         raise InvestigationError(
             "egress_blocked", "The assistant cannot run under these settings."
         ) from exc
+    if search is not None:
+        # Operator search text replays into typed tool arguments, so it
+        # crosses the egress boundary like the question: sensitive shapes
+        # reject the investigation instead of silently broadening the read.
+        try:
+            egress.check_outgoing(search, context="search selector")
+        except egress.EgressViolation as exc:
+            raise InvestigationError(
+                "egress_blocked", "The search selector cannot be sent safely."
+            ) from exc
     observed = datetime.now(UTC) if now is None else now
     if clock is None:
         clock_fn = (lambda: now) if now is not None else (lambda: datetime.now(UTC))
@@ -546,6 +663,17 @@ def run_investigation(
             scope.time_from,
             scope.time_to,
             history,
+            method=scope.method,
+            status=scope.status,
+            status_class=scope.status_class,
+            path_prefix=scope.path_prefix,
+            referer_host=scope.referer_host,
+            traffic=scope.traffic,
+            bot=scope.bot,
+            category=scope.category,
+            provider_claim=scope.provider_claim,
+            purpose=scope.purpose,
+            search=scope.search,
         )
         if is_real:
             # Real dispatch: decoded body from already-gated values,
@@ -562,6 +690,13 @@ def run_investigation(
                 scope.time_from,
                 scope.time_to,
                 [],
+                traffic=scope.traffic,
+                bot=scope.bot,
+                category=scope.category,
+                provider_claim=scope.provider_claim,
+                purpose=scope.purpose,
+                status_class=scope.status_class,
+                search=scope.search,
             )
             try:
                 body_dict = build_dispatch_body(
@@ -727,6 +862,17 @@ def run_investigation(
                         source_id=scope.source_id,
                         time_from=scope.time_from,
                         time_to=scope.time_to,
+                        method=scope.method,
+                        status=scope.status,
+                        status_class=scope.status_class,
+                        path_prefix=scope.path_prefix,
+                        referer_host=scope.referer_host,
+                        traffic=scope.traffic,
+                        bot=scope.bot,
+                        category=scope.category,
+                        provider_claim=scope.provider_claim,
+                        purpose=scope.purpose,
+                        search=scope.search,
                         tool_index=tool_total,
                         investigation_id=investigation_id,
                         observation_time=observed,
@@ -857,6 +1003,18 @@ def _compose_user_text(
     time_from: datetime,
     time_to: datetime,
     history: list[str],
+    *,
+    method: str | None = None,
+    status: int | None = None,
+    status_class: str | None = None,
+    path_prefix: str | None = None,
+    referer_host: str | None = None,
+    traffic: str = "all",
+    bot: str | None = None,
+    category: str | None = None,
+    provider_claim: str | None = None,
+    purpose: str | None = None,
+    search: str | None = None,
 ) -> str:
     """User message: scope, question and evidence text (no system prompt)."""
     lines = [
@@ -865,6 +1023,18 @@ def _compose_user_text(
         f"source_id: {source_id or '-'}",
         f"time_from: {time_from.isoformat()}",
         f"time_to: {time_to.isoformat()}",
+        f"method: {method or '-'}",
+        f"status: {status if status is not None else '-'}",
+        f"status_class: {status_class or '-'}",
+        f"path_prefix: {path_prefix or '-'}",
+        f"referer_host: {referer_host or '-'}",
+        f"traffic: {traffic}",
+        f"bot: {bot or '-'}",
+        f"category: {category or '-'}",
+        f"provider: {provider_claim or '-'}",
+        f"purpose: {purpose or '-'}",
+        f"status_class: {status_class or '-'}",
+        f"search: {search or '-'}",
         f"tools: {', '.join(TOOL_NAMES)}",
         "",
         f"Operator question: {question}",
@@ -888,11 +1058,41 @@ def _compose_prompt(
     time_from: datetime,
     time_to: datetime,
     history: list[str],
+    *,
+    method: str | None = None,
+    status: int | None = None,
+    status_class: str | None = None,
+    path_prefix: str | None = None,
+    referer_host: str | None = None,
+    traffic: str = "all",
+    bot: str | None = None,
+    category: str | None = None,
+    provider_claim: str | None = None,
+    purpose: str | None = None,
+    search: str | None = None,
 ) -> str:
     prompt = (
         system_prompt
         + "\n\n"
-        + _compose_user_text(question, site_id, source_id, time_from, time_to, history)
+        + _compose_user_text(
+            question,
+            site_id,
+            source_id,
+            time_from,
+            time_to,
+            history,
+            method=method,
+            status=status,
+            status_class=status_class,
+            path_prefix=path_prefix,
+            referer_host=referer_host,
+            traffic=traffic,
+            bot=bot,
+            category=category,
+            provider_claim=provider_claim,
+            purpose=purpose,
+            search=search,
+        )
     )
     try:
         return egress.check_outgoing(prompt, context="prompt")
@@ -900,6 +1100,20 @@ def _compose_prompt(
         raise InvestigationError(
             "output_limit_reached", "The investigation outgrew its prompt bound."
         ) from exc
+
+
+def _inherit_narrowing(scope_value, model_value, default):
+    """Scope wins when selected; otherwise a bounded model value may narrow.
+
+    A selected parent constraint (anything but the unset default) is
+    enforced exactly, so hostile omissions or overrides cannot widen the
+    read. An omitted model selector (None) always falls back to the
+    scope, and an unset parent leaves the dimension to the model, whose
+    value is still validated by the typed tool contract before execution.
+    """
+    if model_value is None:
+        return scope_value
+    return model_value if scope_value == default else scope_value
 
 
 def _execute_bounded_tool(
@@ -912,19 +1126,43 @@ def _execute_bounded_tool(
     source_id: str | None,
     time_from: datetime,
     time_to: datetime,
+    method: str | None = None,
+    status: int | None = None,
+    status_class: str | None = None,
+    path_prefix: str | None = None,
+    referer_host: str | None = None,
+    traffic: str = "all",
+    bot: str | None = None,
+    category: str | None = None,
+    provider_claim: str | None = None,
+    purpose: str | None = None,
+    search: str | None = None,
     tool_index: int,
     investigation_id: str,
     observation_time: datetime,
 ) -> dict:
-    # Site, source and time come from the trusted investigation scope,
-    # never from model-supplied arguments: the model may only propose
-    # matchers (method, status, path prefix, referer, paging, bucket)
-    # within those enforced bounds.
-    scoped = dict(arguments) if isinstance(arguments, dict) else {}
+    # Site, source and time always come from the trusted investigation
+    # scope. Every other selector is enforced when the parent selected it
+    # and left to bounded model narrowing otherwise; the merged arguments
+    # still cross the typed tool contract, so invalid or contradictory
+    # combinations fail closed instead of widening.
+    model = dict(arguments) if isinstance(arguments, dict) else {}
+    scoped = dict(model)
     scoped["site_id"] = site_id
     scoped["source_id"] = source_id
     scoped["time_from"] = time_from.isoformat()
     scoped["time_to"] = time_to.isoformat()
+    scoped["method"] = _inherit_narrowing(method, model.get("method"), None)
+    scoped["status"] = _inherit_narrowing(status, model.get("status"), None)
+    scoped["status_class"] = _inherit_narrowing(status_class, model.get("status_class"), None)
+    scoped["path_prefix"] = _inherit_narrowing(path_prefix, model.get("path_prefix"), None)
+    scoped["referer_host"] = _inherit_narrowing(referer_host, model.get("referer_host"), None)
+    scoped["traffic"] = _inherit_narrowing(traffic, model.get("traffic"), "all")
+    scoped["bot"] = _inherit_narrowing(bot, model.get("bot"), None)
+    scoped["category"] = _inherit_narrowing(category, model.get("category"), None)
+    scoped["provider"] = _inherit_narrowing(provider_claim, model.get("provider"), None)
+    scoped["purpose"] = _inherit_narrowing(purpose, model.get("purpose"), None)
+    scoped["search"] = _inherit_narrowing(search, model.get("search"), None)
     tool_call_id = f"{investigation_id[:8]}-tc{tool_index}"
     conn = connect(Path(db_path), read_only=True)
     try:

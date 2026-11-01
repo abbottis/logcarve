@@ -2,6 +2,14 @@
 
 ## Unreleased
 
+### 2026-11-01 — Slice A traffic analysis backend (analytics completion)
+
+- Bot catalog v3 (77 rules): 70 LogWerk `botRules` patterns/names/provider-purpose labels adapted (pinned commit `d7ab01c`, MIT retained verbatim), 5 pre-existing LogCarve IDs kept, 2 original rules added (UptimeRobot monitoring, generic suspected-automation fallback); CLI/headless/scanner → `automation_tool` remap documented.
+- Ordered file-priority UA classifier shared by SQL (`classify_ua` scalar) and Python, with per-UA cache, SQL-vs-Python agreement tests and priority/boundary vectors (`Mozilla/5.0 GPTBot/1.0`, `n8n` word boundaries).
+- Shared traffic/bot/category/provider/purpose/status-class/search selectors with server-validated narrowing; exact GROUP BY totals (no distinct-UA sampling), zero-filled buckets, sanitized request explorer, resources/browsers/heatmap/clients, named-bot table/detail with allowlisted sorts.
+- Trusted assistant scope: method/status/path_prefix/referer_host plus traffic/bot selectors flow ChatBody → ValidatedScope → tool injection → evidence URLs; selected parents enforced, unset parents allow bounded model narrowing.
+- New endpoints: `traffic/breakdown|resources|browsers|heatmap|clients`, `bots`, `bots/{rule_id}`, `requests`; review gates ANA-04/ANA-05/API-05/UI-05 recorded.
+
 ### 2026-10-31 — T9-B reinspection residuals (feature/t9-dashboard)
 
 - Fixed populated Security narrow overflow: the client pseudonym wraps safely (`break-all`) under a localized "Client pseudonym" label; 360px fits in both themes.
