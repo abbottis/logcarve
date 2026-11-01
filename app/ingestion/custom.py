@@ -9,21 +9,28 @@ A custom format is a JSON document validated before use::
      "max_pattern_len": 2048}
 
 Only allowlisted named groups may appear, at least the required set must
-appear, and group bodies are restricted to provably safe constructs
-(``\\S+``, ``\\d+``, bounded character classes, ``[^...]`` runs, short
-literals) with no nesting, no backreferences and no unbounded ambiguous
-quantifiers — so there is no catastrophic backtracking and no need for a
-regex-timeout dependency. No ``eval``, no code, no shell.
+appear, and named-group bodies are restricted to nesting-free constructs
+with no backreferences and no stacked or overlapping open quantifiers.
+Those allowlists shrink the hazard surface but cannot enumerate every
+ambiguous construct (notably ambiguity *outside* named groups, such as a
+trailing ``(?:a|aa)+$``) — so the real guarantee is a proven
+per-operation match timeout from the ``regex`` package
+(``Pattern.match(..., timeout=...)`` raising built-in ``TimeoutError``),
+mapped to the fixed ``custom_timeout`` rejection code. No ``eval``, no
+code, no shell, no thread timers.
 
-At parse time the same line/field bounds as the presets apply, plus a
-per-match wall budget: matching runs against lines already capped at
+At parse time the same line/field bounds as the presets apply, plus the
+hard match timeout: matching runs against lines already capped at
 ``max_line_bytes`` and every captured field is length-checked before use.
 """
 
 import json
+import math
 import re
 from dataclasses import dataclass
 from pathlib import Path
+
+import regex as _rx
 
 REQUIRED_GROUPS = frozenset({"host", "time", "request", "status"})
 OPTIONAL_GROUPS = frozenset(
@@ -48,6 +55,14 @@ ALLOWED_UNITS = frozenset({"s", "ms", "us"})
 
 MAX_PATTERN_LEN = 2048
 MAX_FORMAT_ID_LEN = 64
+# Hard per-operation match budget in seconds. Ambiguous constructs that
+# survive the static allowlists (notably outside named groups) abort via
+# the regex engine's own timeout instead of burning unbounded CPU; no
+# thread timer is used, so nothing keeps running after the abort.
+CUSTOM_MATCH_TIMEOUT_S = 0.5
+# Upper bound on a custom-format JSON file: one byte more is read so an
+# oversize file is rejected without ever buffering the whole file.
+MAX_SPEC_BYTES = 65536
 _FORMAT_ID_RE = re.compile(r"^custom-[a-z0-9][a-z0-9_-]{0,63}$")
 _GROUP_RE = re.compile(r"\(\?P<([A-Za-z_][A-Za-z0-9_]*)>")
 _BACKREF_RE = re.compile(r"\\[1-9]|\(\?P=")
@@ -153,7 +168,7 @@ class CustomFormat:
     """A validated administrator custom format mapping."""
 
     format_id: str
-    pattern: "re.Pattern[str]"
+    pattern: "_rx.Pattern[str]"
     timing: dict[str, dict[str, object]]
 
 
@@ -186,7 +201,12 @@ def load_spec(data: dict) -> CustomFormat:
         raise CustomFormatError("interrupted:custom_invalid")
     if not isinstance(pattern_text, str) or not pattern_text:
         raise CustomFormatError("interrupted:custom_invalid")
-    if len(pattern_text) > min(MAX_PATTERN_LEN, int(data.get("max_pattern_len", MAX_PATTERN_LEN))):
+    configured_cap = data.get("max_pattern_len", MAX_PATTERN_LEN)
+    if isinstance(configured_cap, bool) or not isinstance(configured_cap, int):
+        # Fail closed on wrong types (numeric strings, floats, containers):
+        # silent coercion would let an absurd cap through.
+        raise CustomFormatError("interrupted:custom_invalid")
+    if configured_cap < 1 or len(pattern_text) > min(MAX_PATTERN_LEN, configured_cap):
         raise CustomFormatError("interrupted:custom_invalid")
     if data.get("time_format", "combined") != "combined":
         raise CustomFormatError("interrupted:custom_invalid")
@@ -223,8 +243,8 @@ def load_spec(data: dict) -> CustomFormat:
         if not _check_body_safe(pattern_text[start : pos - 1]):
             raise CustomFormatError("interrupted:custom_invalid")
     try:
-        compiled = re.compile(pattern_text)
-    except re.error:
+        compiled = _rx.compile(pattern_text)
+    except (_rx.error, re.error):
         raise CustomFormatError("interrupted:custom_invalid") from None
     if compiled.groups != len(groups):
         # No unnamed capturing groups: keeps extraction positional-safe.
@@ -237,12 +257,17 @@ def load_spec(data: dict) -> CustomFormat:
 
 
 def load_spec_file(path: Path) -> CustomFormat:
-    """Load and validate a custom-format JSON file (bounded size)."""
+    """Load and validate a custom-format JSON file (bounded size).
+
+    At most ``MAX_SPEC_BYTES + 1`` bytes are ever read: an oversize file
+    is rejected without buffering the whole file first.
+    """
     try:
-        raw = path.read_bytes()
+        with open(path, "rb") as stream:
+            raw = stream.read(MAX_SPEC_BYTES + 1)
     except OSError:
         raise CustomFormatError("interrupted:custom_invalid") from None
-    if len(raw) > 65536:
+    if len(raw) > MAX_SPEC_BYTES:
         raise CustomFormatError("interrupted:custom_invalid")
     try:
         data = json.loads(raw.decode("utf-8"))
@@ -291,7 +316,13 @@ def parse_custom_line(
         line = raw.decode("utf-8")
     except UnicodeDecodeError:
         return reject("invalid_encoding")
-    match = spec.pattern.match(line)
+    try:
+        match = spec.pattern.match(line, timeout=CUSTOM_MATCH_TIMEOUT_S)
+    except TimeoutError:
+        # Proven per-operation budget (regex engine timeout, not a thread
+        # timer): ambiguous input aborts here with a fixed code, never
+        # exception text, and nothing keeps running afterwards.
+        return reject("custom_timeout")
     if match is None:
         return reject("malformed_line")
     get = match.group
@@ -343,10 +374,15 @@ def parse_custom_line(
         return reject("oversized_referer")
     server_host: str | None = None
     if captured.get("vhost"):
-        try:
-            server_host = _normalize_host(captured["vhost"], limits)
-        except ValueError:
-            return reject("invalid_host")
+        if captured["vhost"] == "-":
+            # A "-" vhost is the missing-host marker, never a hostname;
+            # absent hosts always pass host filtering.
+            server_host = None
+        else:
+            try:
+                server_host = _normalize_host(captured["vhost"], limits)
+            except ValueError:
+                return reject("invalid_host")
     cache_status = captured.get("cache") or None
     if cache_status == "-":
         cache_status = None
@@ -379,6 +415,8 @@ def parse_custom_line(
                     piece = normalize_timing(part, unit)
                     assert piece is not None
                     total += piece
+                    if not math.isfinite(total):
+                        raise TimingInvalid("invalid upstream timing total: overflow")
                 value = total
                 if name == "upstream_time":
                     upstream_count = len(parts)

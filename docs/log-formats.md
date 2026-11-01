@@ -25,12 +25,14 @@ Timing extensions are later work: Nginx seconds → milliseconds; Apache `%D` mi
 - `apache_vhost_combined`: `%v` server hostname followed by Combined
   (Apache escapes apply). `other.example`-style foreign hosts are skipped
   as valid foreign lines, never counted as the configured site.
-- `nginx_extended`: Combined prefixed with the server host and suffixed
-  with six measured fields: `cache` (`$upstream_cache_status`),
-  `request_time` (seconds → ms), `mime` (`$sent_http_content_type`,
-  `type/subtype`, optional `;params` without spaces), `tls`
+- `nginx_extended`: Combined followed by six trailing fields
+  (LogWerk NginxExtended order): `host`, `cache`
+  (`$upstream_cache_status`), `request_time` (seconds → ms), `mime`
+  (`$sent_http_content_type`, `type/subtype`, optional `;params` with at
+  most one embedded space such as `text/html; charset=utf-8`), `tls`
   (`$ssl_protocol`), and quoted `upstream_response_time` (seconds → ms,
-  summed when multi-valued with an explicit component count).
+  summed when multi-valued with an explicit component count). A leading
+  vhost is Apache vhost Combined, never this preset.
 - Referer handling adds a minimized path (`/old` from
   `https://example.org/old?x=1`, scheme kept only for http/https,
   credentials dropped, secrets masked) next to the existing host.
@@ -44,8 +46,10 @@ Timing extensions are later work: Nginx seconds → milliseconds; Apache `%D` mi
   `interrupted:gzip_*` codes. Identity is logical (decompressed) bytes,
   so the same plaintext imported plain or gzipped replays.
 - `auto` format resolves per file through sampled detection with
-  bounded confidence; Nginx/Apache Combined ties fail closed unless an
-  escape observation or an explicit `--format` decides. Administrator
-  custom mappings (`custom-*` JSON) are validated to nesting-free safe
-  regex constructs with required/allowed named fields and explicit
-  timing units; no eval, no code, no unbounded backtracking.
+  bounded confidence over genuine parse validity (not regex shape).
+  The indistinguishable Nginx/Apache Combined twins resolve to the
+  configured server flavor with both candidates reported; only
+  genuinely different or mixed formats fail closed. Administrator
+  custom mappings (`custom-*` JSON) keep nesting-free named-group
+  bodies plus a proven per-operation `regex` engine timeout
+  (`custom_timeout`, no thread timers); no eval, no code.

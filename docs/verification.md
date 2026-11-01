@@ -1844,3 +1844,24 @@ Acceptance impact: PAR-01 partially implemented at parser/import/CLI
 level (T1a). No performance/UI claims; T2 analytics, exports, masking,
 GeoIP, journeys and saved views remain later slices. Stopping here for
 independent re-inspection before T1b, per authorization.
+
+## 2026-11-01 — Parity T1a correction (five findings + gzip eof boundary)
+
+Bounded sole-writer correction on `feature/logwerk-parity-2026-11-01`,
+no amend, no T1b schema. Uncommitted base preserved throughout.
+
+| Check | Result | Evidence |
+| --- | --- | --- |
+| gzip eof duplicate-tail fix | PASS | Python 3.12 repro raised `interrupted:gzip_member_limit` before, yields exact 42 bytes / 2 members after; 12-combo read-size/output-cap param test green on 3.12 and 3.15 |
+| `regex==2026.9.29` lock | PASS | `uv lock --offline` + `uv export --offline` + `uv sync --frozen` via `UV_CACHE_DIR=/tmp/uvcache`; installed METADATA `License-Expression: Apache-2.0 AND CNRI-Python`, `Requires-Python: >=3.10`; `uv lock --check` clean |
+| Trailing extended preset + MIME | PASS | Approved trailing-host fixture incl. `text/html; charset=utf-8`; null row fixed to six trailing fields |
+| Engine timeout + spec validation | PASS | `(?:a\|aa)+$` outside-group ambiguity aborts at 0.5 s engine deadline (`custom_timeout`), subprocess hard-kill failsafe; size/type caps fail with fixed codes |
+| Timings finite/nonnegative | PASS | `-1`/400-digit/`nan`/`inf`/exponent reject; `s`/`ms`/`us` incl. zero; aggregate overflow rejects; outputs JSON-serializable |
+| Autodetect Combined default | PASS | Twins resolve to configured flavor (candidates honest); mixed grammars fail closed; validity-based scoring; sample caps |
+| Custom vhost + limits + abort | PASS | Site-hostname default incl. custom vhost; CLI exit 2 on bad limits; 16-timeout streak aborts with `interrupted:custom_timeout` |
+| Focused T1a unit/integration | PASS | 52 + 14 passed (project `.venv`, Python 3.12) |
+| Full `tests/unit tests/integration` | PASS | 600 passed, 2 skipped (loopback sockets unavailable in sandbox) |
+| `ruff check` + `ruff format --check` | PASS | Both clean |
+
+Acceptance impact: PAR-01 correction complete at parser/import/CLI
+level; no web/API/schema changes. Stopping for independent review.

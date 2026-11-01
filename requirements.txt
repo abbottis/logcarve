@@ -41,6 +41,8 @@ python-dotenv==1.2.4
     # via pydantic-settings
 pyyaml==6.0.3
     # via logcarve
+regex==2026.9.29
+    # via logcarve
 starlette==1.10.0
     # via fastapi
 typing-extensions==4.16.0

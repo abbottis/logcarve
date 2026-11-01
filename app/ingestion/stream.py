@@ -22,10 +22,12 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import BinaryIO
 
-from app.ingestion.autodetect import DEFAULT_SAMPLE_LINES
+from app.ingestion.autodetect import DEFAULT_SAMPLE_LINES, MAX_SAMPLE_LINES
 from app.ingestion.combined import (
+    APACHE_COMBINED,
     AUTO,
     CUSTOM,
+    NGINX_COMBINED,
     CombinedRecord,
     Limits,
     LineRejection,
@@ -41,6 +43,10 @@ from app.ingestion.gzipio import (
 from app.ingestion.sources import FileIdentity, HostFilter, identify_file, open_source_log
 
 _CHUNK_SIZE = 65536
+# Consecutive per-line engine-timeout rejections that abort an import:
+# a file that keeps timing the custom match out is adversarial input,
+# not a slow file, and fails honestly instead of burning CPU line by line.
+CUSTOM_TIMEOUT_ABORT_STREAK = 16
 
 
 @dataclass
@@ -241,6 +247,33 @@ def _parse_item(
     )
 
 
+def _check_sample_lines(sample_lines: int) -> None:
+    """Reject non-integer or out-of-range autodetect sample sizes."""
+    if (
+        isinstance(sample_lines, bool)
+        or not isinstance(sample_lines, int)
+        or not 1 <= sample_lines <= MAX_SAMPLE_LINES
+    ):
+        raise ValueError(f"autodetect_sample_lines must be an integer in 1..{MAX_SAMPLE_LINES}")
+
+
+def _abort_on_timeout_abuse(item, timeout_streak: int) -> int:
+    """Count consecutive custom-match engine timeouts; abort abuse honestly.
+
+    Returns the updated streak. A sustained run means adversarial input,
+    not a slow file, so the import fails with a fixed ``custom_timeout``
+    code through :class:`CustomFormatError` instead of burning CPU.
+    """
+    from app.ingestion.custom import CustomFormatError
+
+    if isinstance(item, LineRejection) and item.reason == "custom_timeout":
+        timeout_streak += 1
+        if timeout_streak >= CUSTOM_TIMEOUT_ABORT_STREAK:
+            raise CustomFormatError("interrupted:custom_timeout")
+        return timeout_streak
+    return 0
+
+
 def iter_records(
     path: Path,
     *,
@@ -253,18 +286,26 @@ def iter_records(
     custom_format=None,
     gzip_limits: GzipLimits | None = None,
     autodetect_sample_lines: int = DEFAULT_SAMPLE_LINES,
+    default_combined: str = NGINX_COMBINED,
 ) -> Iterator[CombinedRecord | LineRejection | HostSkipped]:
     """Stream one resolved source file, yielding records, rejections or skips.
 
     The file is opened read-only. Gzip sources are detected by magic bytes
     (never the extension) and decompressed within bounds. ``auto`` resolves
-    per file through sampled detection and fails closed on ambiguity.
-    Host-bearing lines outside ``host_filter`` yield :class:`HostSkipped`
-    instead of records. ``report`` accumulates accounting as items are
-    consumed; pass one in to inspect counts afterwards.
+    per file through sampled detection and fails closed on ambiguity; the
+    indistinguishable Combined twins resolve to ``default_combined`` (the
+    configured server flavor). Host-bearing lines outside ``host_filter``
+    yield :class:`HostSkipped` instead of records. ``report`` accumulates
+    accounting as items are consumed; pass one in to inspect counts
+    afterwards. A run of consecutive custom-match engine timeouts aborts
+    the import with a fixed ``custom_timeout`` failure instead of burning
+    CPU line by line.
     """
     from app.ingestion.autodetect import resolve_format
 
+    _check_sample_lines(autodetect_sample_lines)
+    if default_combined not in (NGINX_COMBINED, APACHE_COMBINED):
+        raise ValueError(f"unknown default_combined: {default_combined!r}")
     limits = limits or Limits()
     gzip_limits = gzip_limits or GzipLimits()
     identity = identify_file(path)
@@ -282,6 +323,7 @@ def iter_records(
             path,
             limits=limits,
             sample_lines=autodetect_sample_lines,
+            default_combined=default_combined,
             gzip_limits=gzip_limits,
         )
     if effective_format in (AUTO, CUSTOM):
@@ -306,6 +348,7 @@ def iter_records(
                 report.gzip_members = stats["members"]
 
         line_iter = iter_chunk_lines(_hashed_chunks(), max_line_bytes=limits.max_line_bytes)
+        timeout_streak = 0
         for raw in line_iter:
             line_number += 1
             item = _parse_item(
@@ -319,11 +362,13 @@ def iter_records(
                 limits=limits,
                 custom_format=custom_format,
             )
+            timeout_streak = _abort_on_timeout_abuse(item, timeout_streak)
             yield _account(item, report, limits, host_filter, line_number, raw.offset)
         if report is not None:
             report.consumed_sha256 = hasher.hexdigest()
         return
     with open_source_log(path) as stream:
+        timeout_streak = 0
         for raw in iter_raw_lines(stream, max_line_bytes=limits.max_line_bytes, hasher=hasher):
             line_number += 1
             item = _parse_item(
@@ -337,6 +382,7 @@ def iter_records(
                 limits=limits,
                 custom_format=custom_format,
             )
+            timeout_streak = _abort_on_timeout_abuse(item, timeout_streak)
             yield _account(item, report, limits, host_filter, line_number, raw.offset)
     # Reached only when the stream was consumed to EOF: the digest then
     # covers exactly the bytes this import read. Interruptions propagate
@@ -373,6 +419,8 @@ def collect_records(
     host_filter: HostFilter | None = None,
     custom_format=None,
     gzip_limits: GzipLimits | None = None,
+    autodetect_sample_lines: int = DEFAULT_SAMPLE_LINES,
+    default_combined: str = NGINX_COMBINED,
 ) -> tuple[list[CombinedRecord], ImportReport]:
     """Read a small source file fully; convenience wrapper for tests and previews.
 
@@ -392,6 +440,8 @@ def collect_records(
             host_filter=host_filter,
             custom_format=custom_format,
             gzip_limits=gzip_limits,
+            autodetect_sample_lines=autodetect_sample_lines,
+            default_combined=default_combined,
         )
         if isinstance(item, CombinedRecord)
     ]

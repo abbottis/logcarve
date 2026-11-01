@@ -44,9 +44,11 @@ from app.db.database import WriterBusy, writer_transaction
 from app.db.migrations_runner import migrate
 from app.ingestion.autodetect import AmbiguousFormat, UnmatchedFormat
 from app.ingestion.combined import (
+    APACHE_COMBINED,
     APACHE_VHOST_COMBINED,
     AUTO,
     CUSTOM,
+    NGINX_COMBINED,
     NGINX_EXTENDED,
     CombinedRecord,
     Limits,
@@ -88,6 +90,7 @@ FAILURE_CODES = (
     "interrupted:format_ambiguous",
     "interrupted:format_unmatched",
     "interrupted:custom_invalid",
+    "interrupted:custom_timeout",
 )
 _ALLOWED_SUMMARY_SEGMENTS = frozenset(
     (SOURCE_CHANGED_CODE, SOURCE_CONTENT_MISMATCH_CODE, *FAILURE_CODES)
@@ -202,20 +205,30 @@ def run_import(
         raise ValueError("hmac_key must be non-empty")
     if batch_size < 1:
         raise ValueError("batch_size must be at least 1")
+    if (
+        isinstance(autodetect_sample_lines, bool)
+        or not isinstance(autodetect_sample_lines, int)
+        or not 1 <= autodetect_sample_lines <= 1024
+    ):
+        raise ValueError("autodetect_sample_lines must be an integer in 1..1024")
     if source.format_id == CUSTOM and custom_format is None:
         raise CustomFormatError("interrupted:custom_invalid")
     if custom_format is not None and source.format_id not in (CUSTOM, custom_format.format_id):
         raise CustomFormatError("interrupted:custom_invalid")
     effective_filter = host_filter if host_filter is not None else source.host_filter()
-    if effective_filter is None and source.format_id in (
-        APACHE_VHOST_COMBINED,
-        NGINX_EXTENDED,
-        AUTO,
+    has_custom_vhost = custom_format is not None and "vhost" in custom_format.pattern.groupindex
+    if effective_filter is None and (
+        source.format_id in (APACHE_VHOST_COMBINED, NGINX_EXTENDED, AUTO) or has_custom_vhost
     ):
         # Host-bearing lines must never be silently attributed to this site:
         # without an explicit rule the configured site hostname is the filter.
         # Plain presets carry no host, so they pass through unaffected.
+        # Custom vhost mappings default the same way when applicable.
         effective_filter = HostFilter([site_hostname])
+    # The configured server flavor decides indistinguishable Combined twins.
+    default_combined = (
+        APACHE_COMBINED if server_type.strip().lower() == "apache" else NGINX_COMBINED
+    )
     now = clock or (lambda: datetime.now(UTC))
     migrate(db_path)
 
@@ -279,6 +292,7 @@ def run_import(
             custom_format=custom_format,
             gzip_limits=gzip_limits,
             autodetect_sample_lines=autodetect_sample_lines,
+            default_combined=default_combined,
         ):
             if isinstance(item, (LineRejection, HostSkipped)):
                 continue

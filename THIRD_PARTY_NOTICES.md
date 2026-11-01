@@ -55,6 +55,7 @@ SOFTWARE.
 | JetBrains Mono Variable (`fonts/jetbrains-mono-latin-wght-normal.woff2`) | SIL OFL 1.1 | 5.3.0 via fontsource; `fonts/JETBRAINS-MONO-OFL.txt` retained |
 | Lucide icons (18-icon subset in `icons/`) | ISC | 1.66.0 via lucide-static; `icons/LUCIDE-ISC.txt` retained |
 | Jinja2 + MarkupSafe (Python runtime) | BSD-3-Clause | 3.1.6 + 3.0.4, pinned in `uv.lock` |
+| `regex` (Python runtime, custom-format engine timeout) | Apache-2.0 AND CNRI-Python | 2026.9.29, pinned in `pyproject.toml`/`uv.lock`/`requirements.txt`; installed METADATA confirms `License-Expression: Apache-2.0 AND CNRI-Python`, `Requires-Python: >=3.10` |
 | pytest-playwright + Playwright (dev/test only) | Apache-2.0 / MIT | 0.10.0 + 1.64.1, pinned in `uv.lock`; browsers in ignored `artifacts/` |
 
 No LogWerk application code or assets are imported (the 70 adapted rule-catalog patterns are recorded in the LogWerk entry above). The inventory records the browser assets and selected runtime/test packages; lockfiles provide the complete dependency versions. Installed Python distributions retain their own license files.

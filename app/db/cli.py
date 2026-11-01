@@ -90,9 +90,13 @@ def cmd_import(args: argparse.Namespace) -> int:
             print(f"error: invalid custom format ({exc.code})", file=sys.stderr)
             return 2
     explicit_hosts = _split_hosts(args.host_filter) + _split_hosts(args.host_alias)
-    if not explicit_hosts and args.format in (APACHE_VHOST_COMBINED, NGINX_EXTENDED):
+    has_custom_vhost = custom_format is not None and "vhost" in custom_format.pattern.groupindex
+    if not explicit_hosts and (
+        args.format in (APACHE_VHOST_COMBINED, NGINX_EXTENDED, AUTO) or has_custom_vhost
+    ):
         # Vhost/extended sources always filter against the configured site
         # host so foreign hosts can never be silently counted as this site.
+        # Custom vhost mappings default the same way when applicable.
         explicit_hosts = [args.site_hostname]
     host_filter: HostFilter | None = None
     if explicit_hosts:
@@ -102,6 +106,34 @@ def cmd_import(args: argparse.Namespace) -> int:
             print("error: invalid host filter", file=sys.stderr)
             return 2
     allowed_hosts = sorted(host_filter.hosts) if host_filter is not None else None
+    try:
+        limits = Limits(
+            max_line_bytes=args.max_line_bytes,
+            max_diagnostics=args.max_diagnostics,
+        )
+        gzip_limits = GzipLimits(
+            max_compressed_bytes=args.max_compressed_bytes,
+            max_uncompressed_bytes=args.max_uncompressed_bytes,
+            max_compression_ratio=args.max_compression_ratio,
+            max_gzip_members=args.max_gzip_members,
+        )
+    except ValueError:
+        print("error: invalid resource limits", file=sys.stderr)
+        return 2
+    if (
+        isinstance(args.batch_size, bool)
+        or not isinstance(args.batch_size, int)
+        or args.batch_size < 1
+    ):
+        print("error: invalid batch size", file=sys.stderr)
+        return 2
+    if (
+        isinstance(args.autodetect_sample_lines, bool)
+        or not isinstance(args.autodetect_sample_lines, int)
+        or not 1 <= args.autodetect_sample_lines <= 1024
+    ):
+        print("error: invalid autodetect sample size", file=sys.stderr)
+        return 2
     payloads: list[dict] = []
     overall = "completed"
     for index, relative in enumerate(args.path):
@@ -126,18 +158,10 @@ def cmd_import(args: argparse.Namespace) -> int:
             path_alias=relative,
             hmac_key=_hmac_key(),
             batch_size=args.batch_size,
-            limits=Limits(
-                max_line_bytes=args.max_line_bytes,
-                max_diagnostics=args.max_diagnostics,
-            ),
+            limits=limits,
             host_filter=host_filter,
             custom_format=custom_format,
-            gzip_limits=GzipLimits(
-                max_compressed_bytes=args.max_compressed_bytes,
-                max_uncompressed_bytes=args.max_uncompressed_bytes,
-                max_compression_ratio=args.max_compression_ratio,
-                max_gzip_members=args.max_gzip_members,
-            ),
+            gzip_limits=gzip_limits,
             autodetect_sample_lines=args.autodetect_sample_lines,
         )
         entry = _result_payload(result)

@@ -20,7 +20,7 @@ import pytest
 from app.db import repositories
 from app.db.database import connect
 from app.db.importer import run_import
-from app.ingestion.custom import load_spec_file
+from app.ingestion.custom import CustomFormatError, load_spec, load_spec_file
 from app.ingestion.sources import HostFilter, SourceConfig
 
 ROOT = Path(__file__).resolve().parent.parent.parent
@@ -173,13 +173,14 @@ def test_auto_vhost_defaults_to_site_hostname_filter(tmp_path):
 def test_ambiguous_auto_fails_with_fixed_code(tmp_path):
     root = tmp_path / "logs"
     root.mkdir()
-    (root / "twins.log").write_bytes(
+    # Genuinely mixed grammars (Combined + Common) still fail closed.
+    (root / "mixed.log").write_bytes(
         b'203.0.113.20 - - [27/Oct/2026:10:15:32 +0100] "GET /x HTTP/1.1" 200 10 "-" "-"\n'
-        b'198.51.100.7 - - [27/Oct/2026:10:16:00 +0100] "GET /y HTTP/1.1" 200 5 "-" "-"\n'
+        b'198.51.100.7 - - [27/Oct/2026:10:16:00 +0100] "GET /y HTTP/1.1" 200 5\n'
     )
     db = tmp_path / "t1a.sqlite3"
     with pytest.raises(Exception) as excinfo:
-        _run(db, root, "twins.log", "auto")
+        _run(db, root, "mixed.log", "auto")
     assert getattr(excinfo.value, "code", "") == "interrupted:format_ambiguous"
     conn = connect(db, read_only=True)
     try:
@@ -187,6 +188,118 @@ def test_ambiguous_auto_fails_with_fixed_code(tmp_path):
     finally:
         conn.close()
     assert tuple(stored) == ("failed", "interrupted:format_ambiguous")
+
+
+def test_auto_twins_resolve_to_configured_server_flavor(tmp_path):
+    root = tmp_path / "logs"
+    root.mkdir()
+    (root / "twins.log").write_bytes(
+        b'203.0.113.20 - - [27/Oct/2026:10:15:32 +0100] "GET /x HTTP/1.1" 200 10 "-" "-"\n'
+        b'198.51.100.7 - - [27/Oct/2026:10:16:00 +0100] "GET /y HTTP/1.1" 200 5 "-" "-"\n'
+    )
+    db = tmp_path / "t1a.sqlite3"
+    # No override needed for an ordinary Combined file: nginx flavor first.
+    nginx_result = _run(db, root, "twins.log", "auto", server_type="nginx")
+    assert nginx_result.status == "completed"
+    assert nginx_result.records_inserted == 2
+    # The apache flavor decides the same grammar explicitly.
+    db2 = tmp_path / "t1b.sqlite3"
+    apache_result = _run(db2, root, "twins.log", "auto", server_type="apache")
+    assert apache_result.status == "completed"
+    assert apache_result.records_inserted == 2
+
+
+def test_custom_vhost_defaults_to_site_hostname_filter(tmp_path):
+    root = tmp_path / "logs"
+    root.mkdir()
+    (root / "vhost.log").write_bytes((T1A / "custom_vhost.txt").read_bytes())
+    db = tmp_path / "t1a.sqlite3"
+    spec = load_spec_file(T1A / "custom_vhost.json")
+    # No explicit filter: host-bearing custom lines default to the
+    # configured site hostname instead of leaking foreign hosts in.
+    result = _run(db, root, "vhost.log", spec.format_id, custom_format=spec)
+    assert result.status == "completed"
+    assert (result.records_inserted, result.records_skipped_foreign) == (2, 1)
+    # An explicit validated filter still wins over the default.
+    db2 = tmp_path / "t1b.sqlite3"
+    explicit = _run(
+        db2,
+        root,
+        "vhost.log",
+        spec.format_id,
+        custom_format=spec,
+        host_filter=HostFilter(["other.example"]),
+    )
+    assert (explicit.records_inserted, explicit.records_skipped_foreign) == (1, 2)
+
+
+def test_custom_timeout_abuse_fails_import_with_fixed_code(tmp_path):
+    root = tmp_path / "logs"
+    root.mkdir()
+    pattern = (
+        r"^(?P<host>\S+) \[(?P<time>[^\]]+)\] \"(?P<request>[^\"]*)\""
+        r" (?P<status>\d{3}) (?P<size>\d+|-) (?:a|aa)+$"
+    )
+    spec = load_spec({"format_id": "custom-adv", "pattern": pattern})
+    evil = b'203.0.113.20 [27/Oct/2026:10:15:32 +0100] "GET /x HTTP/1.1" 200 10 ' + b"a" * 45 + b"!"
+    (root / "evil.log").write_bytes(b"\n".join([evil] * 20) + b"\n")
+    db = tmp_path / "t1a.sqlite3"
+    with pytest.raises(CustomFormatError) as excinfo:
+        _run(db, root, "evil.log", spec.format_id, custom_format=spec)
+    assert excinfo.value.code == "interrupted:custom_timeout"
+    conn = connect(db, read_only=True)
+    try:
+        stored = conn.execute("SELECT status, error_summary FROM imports").fetchone()
+    finally:
+        conn.close()
+    assert tuple(stored) == ("failed", "interrupted:custom_timeout")
+
+
+def test_cli_rejects_invalid_resource_limits(tmp_path):
+    root = tmp_path / "logs"
+    root.mkdir()
+    (root / "a.log").write_bytes((T1A / "common.txt").read_bytes())
+    db = tmp_path / "limits.sqlite3"
+
+    def run_cli(*extra):
+        env = dict(os.environ)
+        env["HMAC_KEY"] = "parity-t1a-hmac-key"
+        return subprocess.run(
+            [
+                sys.executable,
+                "-m",
+                "app.db.cli",
+                "--db",
+                str(db),
+                "import",
+                "--source-id",
+                "t1a-source",
+                "--format",
+                "common",
+                "--root",
+                str(root),
+                "--path",
+                "a.log",
+                *extra,
+            ],
+            cwd=ROOT,
+            env=env,
+            capture_output=True,
+            text=True,
+            timeout=120,
+            check=False,
+        )
+
+    for extra in (
+        ("--max-compression-ratio", "nan"),
+        ("--max-compression-ratio", "-2"),
+        ("--max-gzip-members", "0"),
+        ("--max-line-bytes", "-5"),
+        ("--autodetect-sample-lines", "0"),
+    ):
+        proc = run_cli(*extra)
+        assert proc.returncode == 2, (extra, proc.stdout, proc.stderr)
+        assert "error: invalid" in proc.stderr
 
 
 def test_file_series_cli_reports_per_file_outcomes(tmp_path):

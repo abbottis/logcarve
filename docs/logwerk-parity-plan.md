@@ -78,3 +78,13 @@ integration tests green, full unit/integration suite 569 passed, Ruff
 clean; `uv --locked` BLOCKED by sandbox (coordinator re-runs). PAR-01
 partially implemented at parser/import/CLI level; no web/API/schema
 changes; independent re-inspection pending before T1b.
+
+Correction 2026-11-01 (same branch, no amend): fixed gzip eof
+tail/duplicate remainder, trailing NginxExtended order with `; charset`
+MIME, genuine `regex==2026.9.29` engine timeout (locked via
+`uv --offline`, `uv.lock` + `requirements.txt` regenerated, `.venv`
+synced, `uv lock --check` clean), finite-nonnegative timings,
+Combined-family default resolution, custom-vhost site default, limit
+validation, timeout-abuse abort. 52 unit + 14 integration T1a tests,
+full suite 600 passed / 2 env-skipped, Ruff clean. No T1b schema yet;
+stopping for independent review.

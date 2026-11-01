@@ -14,14 +14,17 @@ Presets
 ``apache_vhost_combined``
     Apache vhost Combined: ``%v`` (server hostname) followed by Combined.
 ``nginx_extended``
-    Nginx Extended: Combined followed by six well-defined fields::
+    Nginx Extended: Combined followed by six trailing fields AFTER the
+    User-Agent (LogWerk NginxExtended preset)::
 
-        <server_host> <combined...> <cache> <request_time> <mime> <tls> "<upstream_time>"
+        <combined...> <server_host> <cache> <request_time> <mime> <tls> "<upstream_time>"
 
-    ``cache`` is ``$upstream_cache_status`` (``-`` when absent),
+    ``server_host`` is the trailing ``$host`` (``-`` means absent, never
+    a name), ``cache`` is ``$upstream_cache_status`` (``-`` when absent),
     ``request_time`` is ``$request_time`` in seconds (``-`` when absent),
     ``mime`` is ``$sent_http_content_type`` (``type/subtype``, optional
-    ``;params`` without spaces; ``-`` when absent), ``tls`` is
+    ``;params`` possibly with one embedded space such as
+    ``text/html; charset=utf-8``; ``-`` when absent), ``tls`` is
     ``$ssl_protocol`` (``-`` when absent), and ``upstream_time`` is the
     quoted ``$upstream_response_time`` in seconds (``-`` when absent, or a
     comma/colon/space separated multi-value list that is summed).
@@ -40,6 +43,7 @@ fields, and rejections carry a short masked excerpt plus a reason code.
 
 import hashlib
 import hmac
+import math
 import re
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
@@ -62,7 +66,12 @@ RESOLVABLE_FORMATS = PRESETS + T1A_PRESETS + (AUTO, CUSTOM)
 
 @dataclass(frozen=True)
 class Limits:
-    """Bounded-input contract. Oversized input is rejected, never truncated silently."""
+    """Bounded-input contract. Oversized input is rejected, never truncated silently.
+
+    Values are validated on construction: sizes must be positive integers
+    (bools rejected) within a plausible ceiling so an absurd cap cannot
+    turn a bounded buffer into an unbounded allocation.
+    """
 
     max_line_bytes: int = 65536
     max_target_len: int = 8192
@@ -73,6 +82,27 @@ class Limits:
     diagnostic_excerpt_len: int = 200
     max_host_len: int = 253
     max_mime_len: int = 128
+
+    def __post_init__(self) -> None:
+        for name in (
+            "max_line_bytes",
+            "max_target_len",
+            "max_user_agent_len",
+            "max_referer_len",
+            "max_method_len",
+            "diagnostic_excerpt_len",
+            "max_host_len",
+            "max_mime_len",
+        ):
+            value = getattr(self, name)
+            if isinstance(value, bool) or not isinstance(value, int) or not 1 <= value <= 2**26:
+                raise ValueError(f"{name} must be an integer in 1..2**26")
+        if (
+            isinstance(self.max_diagnostics, bool)
+            or not isinstance(self.max_diagnostics, int)
+            or not 0 <= self.max_diagnostics <= 1_000_000
+        ):
+            raise ValueError("max_diagnostics must be an integer in 0..1000000")
 
 
 # A quoted field holds anything except a raw quote; backslash escapes
@@ -103,13 +133,19 @@ _VHOST_RE = re.compile(
 )
 
 _EXTENDED_RE = re.compile(
-    r"(?P<vhost>\S+)\s+"
-    + _COMBINED_BODY
+    _COMBINED_BODY
     + r"\s+"
     + _quoted("referer")
     + r"\s+"
     + _quoted("user_agent")
-    + r"\s+(?P<cache>\S+)\s+(?P<request_time>\S+)\s+(?P<mime>\S+)\s+(?P<tls>\S+)\s+"
+    # Trailing LogWerk NginxExtended fields: $host $upstream_cache_status
+    # $request_time $sent_http_content_type $ssl_protocol
+    # "$upstream_response_time". A leading vhost is Apache vhost Combined,
+    # never this preset. The MIME token may carry "; charset=..." params
+    # with an embedded space, so it accepts one optional second token;
+    # backtracking still pins the final TLS/upstream fields.
+    + r"\s+(?P<vhost>\S+)\s+(?P<cache>\S+)\s+(?P<request_time>\S+)"
+    + r"\s+(?P<mime>[^\s\"]+(?: +[^\s\"]+)?)\s+(?P<tls>\S+)\s+"
     + _quoted("upstream_time")
     + r"\s*\Z"
 )
@@ -162,17 +198,32 @@ class TimingInvalid(ValueError):
     """A present timing value cannot be interpreted under its declared unit."""
 
 
+def _checked_ms(number: float, factor: float, original: str) -> float:
+    """Scale a parsed timing and require a finite nonnegative result.
+
+    Zero is a valid measurement; negative, NaN, infinite and overflowing
+    values reject the line instead of persisting ``-1000``, ``inf`` or a
+    JSON-hostile NaN.
+    """
+    result = number * factor
+    if not math.isfinite(result) or result < 0:
+        raise TimingInvalid(f"invalid timing value: {original[:32]!r}")
+    return result
+
+
 def normalize_seconds_to_ms(value: str) -> float | None:
     """Normalize a seconds timing (Nginx ``$request_time``) to milliseconds.
 
     ``-`` means absent and yields ``None`` (never ``0``). Anything else must
-    be a plain decimal number; anything unparseable raises :class:`TimingInvalid`.
+    be a plain nonnegative decimal number with a finite millisecond value;
+    anything unparseable, negative or overflowing raises
+    :class:`TimingInvalid`.
     """
     if value == "-":
         return None
     if not _NUMBER_RE.match(value):
         raise TimingInvalid(f"invalid seconds timing: {value[:32]!r}")
-    return float(value) * 1000.0
+    return _checked_ms(float(value), 1000.0, value)
 
 
 def normalize_multi_seconds_to_ms(value: str) -> tuple[float | None, int]:
@@ -181,8 +232,8 @@ def normalize_multi_seconds_to_ms(value: str) -> tuple[float | None, int]:
     ``-`` means absent and yields ``(None, 0)``. A comma/colon/space
     separated multi-value list (Nginx ``$upstream_response_time`` with
     several upstreams tried) is summed explicitly and the component count
-    is returned alongside; any unparseable component raises
-    :class:`TimingInvalid`.
+    is returned alongside; any unparseable, negative or overflowing
+    component raises :class:`TimingInvalid`.
     """
     if value == "-":
         return None, 0
@@ -193,7 +244,12 @@ def normalize_multi_seconds_to_ms(value: str) -> tuple[float | None, int]:
     for part in parts:
         if not _NUMBER_RE.match(part):
             raise TimingInvalid(f"invalid upstream timing component: {part[:32]!r}")
-        total += float(part) * 1000.0
+        component = float(part) * 1000.0
+        if not math.isfinite(component) or component < 0:
+            raise TimingInvalid(f"invalid upstream timing component: {part[:32]!r}")
+        total += component
+        if not math.isfinite(total):
+            raise TimingInvalid("invalid upstream timing total: overflow")
     return total, len(parts)
 
 
@@ -201,8 +257,10 @@ def normalize_timing(value: str, unit: str) -> float | None:
     """Normalize a custom timing value under an explicit unit to milliseconds.
 
     ``unit`` is one of ``s`` (seconds), ``ms`` (milliseconds) or ``us``
-    (microseconds, Apache ``%D``). ``-`` means absent (``None``). Unknown
-    units raise :class:`TimingInvalid` so misconfiguration fails closed.
+    (microseconds, Apache ``%D``). ``-`` means absent (``None``); ``0``
+    stays a valid zero measurement. Unknown units, negative values and
+    non-finite results raise :class:`TimingInvalid` so misconfiguration
+    fails closed.
     """
     if value == "-":
         return None
@@ -212,10 +270,10 @@ def normalize_timing(value: str, unit: str) -> float | None:
         raise TimingInvalid(f"invalid timing value: {value[:32]!r}")
     number = float(value)
     if unit == "s":
-        return number * 1000.0
+        return _checked_ms(number, 1000.0, value)
     if unit == "us":
-        return number / 1000.0
-    return number
+        return _checked_ms(number, 1 / 1000.0, value)
+    return _checked_ms(number, 1.0, value)
 
 
 @dataclass(frozen=True)
@@ -501,10 +559,16 @@ def parse_line(
     mime_type: str | None = None
     tls_protocol: str | None = None
     if format_id in (APACHE_VHOST_COMBINED, NGINX_EXTENDED):
-        try:
-            server_host = _normalize_host(match.group("vhost"), limits)
-        except ValueError:
-            return reject("invalid_host")
+        raw_host = match.group("vhost")
+        if raw_host == "-":
+            # Trailing "-" is the missing-host marker (extended null rows),
+            # not a hostname; absent hosts always pass host filtering.
+            server_host = None
+        else:
+            try:
+                server_host = _normalize_host(raw_host, limits)
+            except ValueError:
+                return reject("invalid_host")
     if format_id == NGINX_EXTENDED:
         try:
             cache_status = _normalize_cache(match.group("cache"))
