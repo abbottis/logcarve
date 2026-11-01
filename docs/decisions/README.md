@@ -14,7 +14,8 @@ An ADR is proposed until an owner explicitly accepts it. Record date, owner deci
 | Runtime model | `muse-spark-1.3` Standard with verified account/provider policy | Required direction; access/effective tier unverified |
 | Open weights | `meta-models/muse-spark-open-1026` on a separately verified provider | Optional; URL/access/credits unknown |
 | External access | Local/VPN or explicitly secured TLS reverse proxy | Open; no automatic public exposure |
-| Project license / LogWerk reuse | Select license and document each imported source | Open; nothing imported |
+| Project license / LogWerk reuse | Select license and document each imported source | Apache-2.0 decided 2026-10-29; 70 MIT bot patterns adapted 2026-11-01; see `THIRD_PARTY_NOTICES.md` |
+| [0003 — LogWerk parity](0003-logwerk-parity.md) | Bounded parity scope with local-admin IP/masking, journeys, enrichment, offline GeoIP | Accepted 2026-11-01 by owner; implementation pending |
 | Meta credits/account | Verify actual team credit and billing/data-mode settings | Unverified; no balance assumed |
 | Public end users / submission | Review current terms, regions and Official Rules when relevant | Pending before public release/submission |
 

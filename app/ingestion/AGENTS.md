@@ -15,5 +15,6 @@ Read the root rules, `docs/log-formats.md` and ING criteria in `docs/acceptance-
 - Do not deduplicate solely by normalized event content.
 - Count accepted/rejected lines and expose format, size, duration and coverage in the import report.
 - Missing timing is nullable; Common, custom timing, gzip and incremental rotation handling remain later work.
+- Accepted exception 2026-11-01 (ADR 0003): parity stage T1 implements gzip, Common/Apache-vhost/Nginx-Extended presets, and opt-in incremental follow/rotation. No browser import UI.
 - Add synthetic parser fixtures with independent expected values before claiming format compatibility.
 - Parser/security boundary changes require independent review before release.

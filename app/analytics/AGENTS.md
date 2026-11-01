@@ -11,4 +11,5 @@ Read the root rules and ANA criteria in `docs/acceptance-criteria.md`.
 - Bot-family matching proves a User-Agent claim only; no verified identity without a separate verification path.
 - Findings are investigation candidates, never proof of compromise or attribution.
 - Do not infer sessions, unique people, rankings, indexation or conversions from request counts.
+- Accepted exception 2026-11-01 (ADR 0003): technical request-journey grouping (HMAC-client + sanitized UA, 30-min gap, documented boundary) is permitted for parity stage T2. Label them request journeys, never visitors or verified sessions; shared analyses never carry original IPs.
 - Use small hand-verifiable fixture totals; dashboard, API and AI tools must agree for the same filters.

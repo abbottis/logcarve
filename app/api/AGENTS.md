@@ -16,3 +16,4 @@ Read the root rules, `docs/external-api.md` and API criteria in `docs/acceptance
 - Map failures to safe structured `code`, `message`, `request_id` responses without SQL or paths.
 - Test invalid/expired/revoked tokens, missing scope, cross-site access, malformed filters and bounded results.
 - Prove summary/crawlers/findings work with chat disabled and provider access unavailable.
+- Accepted exception 2026-11-01 (ADR 0003): parity stage T3 adds full-result CSV+JSON export (streamed/bounded job, metadata headers, formula protection, privacy labels) with no raw IP/lines/query values regardless of admin IP view; API stays usable with AI off, no key, offline.

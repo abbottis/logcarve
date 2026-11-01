@@ -9,6 +9,7 @@ These conventions also guide `assets/` and `config/locales/` changes via the roo
 - Keep authored sources in `assets/src/` and served output in `app/web/static/`.
 - Retain asset/font licenses and provenance; avoid runtime CDN or remote font requests.
 - Use central English locale keys; include errors, starter questions and accessible labels.
+- Accepted exception 2026-11-01 (ADR 0003): parity prepares locale architecture and coverage only — no shipped translations and no locale chooser implying them. Mask original IPs server-side before render; no browser file-import UI.
 - Use semantic theme tokens and Tailwind standard colors from spec §3.4.
 - Honor system light/dark preference, allow a persisted override and prevent wrong-theme flash.
 - Keep scripts external and compatible with CSP `self`; do not require unsafe-inline/eval.

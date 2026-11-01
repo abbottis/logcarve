@@ -44,6 +44,16 @@ All criteria are **NOT IMPLEMENTED / NOT RUN** at scaffold creation. Check a cri
 | QA-02 | UI visual QA supplements automated tests | Desktop/mobile light/dark screenshots, console/network review, no screenshot-only completion claim |
 | GOV-01 | Architecture/scope decisions and feature acceptance mapping are recorded | Accepted plan/ADR references; no silent promotion of DECISION/P1/P2 |
 | GOV-02 | License, LogWerk provenance and account/data-mode prerequisites are resolved | Owner decisions, upstream notices, verified setup record without credentials |
+| PAR-01 | gzip/rotation/file-series ingest, presets, autodetect + CLI override, host filter, job accounting | Bounded streaming fixtures; vhost isolation; replay/replay-identity proofs (extends ING-01–05) |
+| PAR-02 | Enriched nullable fields; local-admin IP view (default full, suffix-mask, pseudonym-only); at-rest protection; fail-closed key absence | Mode/CSRF tests; no originals in API/exports/errors/tools; reprocess without duplicates (extends DB-01–02, PRIV-03, AUTH-01) |
+| PAR-03 | Measured latency/cache/MIME/version/host distributions via shared analytics | Hand-counted timing/cache fixtures; `available: false` when absent (extends ANA-01–02) |
+| PAR-04 | Bot 3xx/4xx/5xx per path, AI-only paths with caveat, referrer-path 404s, entry paths from journeys | Absence/coverage honesty; no indexing/training claims (extends ANA-03) |
+| PAR-05 | Request journeys with documented 30-min boundary, truncation/window honesty | Grouping/boundary fixtures; no original IP in shared analyses (extends ANA-01, PRIV-01) |
+| PAR-06 | Expanded versioned security patterns, pseudonym rates/sequences, 401/403 clusters, baseline comparisons | Exact-count large fixtures; 304/401 wording preserved; provenance kept (extends ANA-03) |
+| PAR-07 | Full-result CSV+JSON export with metadata, privacy labels, formula protection | Not-page equality; quoting; token/site enforcement; offline/AI-off run (extends API-01–04, PRIV-01) |
+| PAR-08 | Incremental follow/rotation, refresh on import, saved views, comparison windows | Checkpoint/replay-identity, restart/interruption, opt-in only (extends DB-01, UI-02) |
+| PAR-09 | Genuine offline country lookup with documented source/version/license; Unknown stays Unknown | Lookup tests without DB file (NOTRUN runtime); no IP egress (extends ANA-03, PRIV-01) |
+| PAR-10 | Locale preparation: central English keys, locale-ready formatting, coverage audit; no shipped translations | Coverage audit; no chooser implying translations (extends UI-01) |
 | GOV-03 | Reviewable delivery and hackathon materials exist | README/install/API/privacy docs, license, synthetic dataset, public-repo approval and 3-minute real-call demo; Official Rules reviewed |
 
 ## Definition of done

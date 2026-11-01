@@ -33,6 +33,8 @@
 - The external API, dashboard and deterministic analytics must work with chat disabled, no model key and no Internet.
 - Build the first slice in order: parser → SQLite → deterministic API → external client and internal Meta tools → UI.
 - Defer continuous ingestion, custom formats, MCP product server, webhooks and multi-site behavior to the roadmap.
+
+Accepted exception 2026-11-01 (owner scope `artifacts/task-inputs/logwerk-parity-owner-scope.md`, ADR 0003): the LogWerk parity stages T1–T5 may add gzip/measured-timing presets, bounded admin custom format mappings, hostname/alias host filtering (still one site, no multi-site platform), opt-in incremental follow/rotation, saved views, comparison windows, full-result export, request journeys, and genuine offline GeoIP. No browser file import UI and no shipped translations (locale preparation only).
 - No SIEM/WAF, autonomous blocking, offensive scanning, conversion attribution or unrestricted SQL/shell agent.
 
 ## Architecture
@@ -56,6 +58,8 @@
 - Use synthetic fixtures in development, tests, screenshots, CI and demos. Keep real logs outside agent workspaces.
 - Discard query values by default, minimize Referer data and mask secrets in paths and headers.
 - Pseudonymize client addresses with a secret HMAC key; pseudonymization is not proof of anonymity.
+
+Accepted exception 2026-11-01 (ADR 0003): local authenticated admin may view original client IPs with default full view and selectable suffix masking (IPv4+IPv6) or pseudonym-only modes. Masking is display masking, not anonymity. Originals never reach the external API, exports, errors, model tools, or public Git.
 - Raw lines and original IPs must not leak through DB exports, error messages, API schemas or model requests.
 - Retention may delete LogCarve-owned imported data only; backup and restore must be documented.
 - Keep `.env`, databases, actual logs, tokens, session exports and provider traces out of version control.

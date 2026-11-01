@@ -11,4 +11,5 @@ Read the root rules and `docs/security.md`; AUTH criteria require independent re
 - Require CSRF protection on browser mutations; do not treat SameSite alone as the full design.
 - Keep session and HMAC secrets distinct and outside source control; fail clearly when required secrets are absent.
 - Grant an analytics token no import, configuration or model-proxy capability.
+- Accepted exception 2026-11-01 (ADR 0003): the local-admin IP display mode (full/suffix-masked/pseudonym-only) is a session-protected setting; analytics tokens can never access originals or change the mode.
 - Cover unauthorized, forbidden, expired, revoked, cross-site and CSRF cases with integration tests.
