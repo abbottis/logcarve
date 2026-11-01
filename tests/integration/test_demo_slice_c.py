@@ -300,31 +300,45 @@ def test_mutated_rich_bytes_are_refused_untouched(tmp_path, monkeypatch, capsys)
 
 
 def test_foreign_rows_are_refused(tmp_path, monkeypatch, capsys):
+    from app.db.repositories import SourceBindingError
+
     root = _write_logs(tmp_path / "logs")
     db = tmp_path / "foreign.sqlite3"
     migrate(db)
     _import(db, root, "t8.log")
     _import(db, root, "rich.log")
     before = _counts(db)
-    run_import(
-        db,
-        source=SourceConfig(
-            source_id="example-combined",
-            format_id="nginx_combined",
-            allowed_root=root,
-            relative_path="t8.log",
-        ),
-        site_id="elsewhere",
-        site_name="s",
-        site_hostname="example.org",
-        server_type="nginx",
-        path_alias="t8.log",
-        hmac_key=HMAC_KEY,
-    )
-    assert _probe_verdict(monkeypatch, capsys, db)["verdict"] == "FOREIGN"
-    # Replay identity is site-agnostic, so the cross-site attempt inserts no
-    # rows; the FOREIGN verdict (extra site) is what stops the seeder.
-    assert _counts(db)["rows"] == before["rows"] == 120
+    # A source id bound to site "default" cannot be replayed under another
+    # site: the attempt is rejected with a fixed code before any write, so
+    # no extra site, import row or request row can pollute the store.
+    with pytest.raises(SourceBindingError) as excinfo:
+        run_import(
+            db,
+            source=SourceConfig(
+                source_id="example-combined",
+                format_id="nginx_combined",
+                allowed_root=root,
+                relative_path="t8.log",
+            ),
+            site_id="elsewhere",
+            site_name="s",
+            site_hostname="example.org",
+            server_type="nginx",
+            path_alias="t8.log",
+            hmac_key=HMAC_KEY,
+        )
+    assert excinfo.value.code == "source_site_mismatch"
+    after = _counts(db)
+    assert after["rows"] == before["rows"] == 120
+    assert after["imports"] == before["imports"]
+    conn = connect(db, read_only=True)
+    try:
+        assert conn.execute("SELECT id FROM sites ORDER BY id").fetchall() == [("default",)]
+    finally:
+        conn.close()
+    verdict = _probe_verdict(monkeypatch, capsys, db)
+    assert verdict["sites"] == ["default"]
+    assert verdict["verdict"] in ("SEEDED", "PARTIAL")
 
 
 def test_auth_token_and_usage_state_survive_upgrade(tmp_path, monkeypatch, capsys):

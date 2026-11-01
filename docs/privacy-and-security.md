@@ -8,6 +8,35 @@ Source logs remain read-only on administrator-approved roots. Parse locally and 
 
 Pseudonymization does not automatically anonymize data. Before real deployments, the operator must resolve the applicable legal basis, provider agreements, retention, locations and transfer requirements. The supplied spec's policy/credit statements are inputs to reverify at use, not an account check performed by this scaffold.
 
+## Encrypted original-IP store (parity T1b, local admin only)
+
+Accepted exception 2026-11-01 (ADR 0003): a local authenticated admin may
+view original client IPs. Originals persist ONLY in
+`request_original_ips` as AES-256-GCM ciphertext (`cryptography`
+50.0.2, fresh 12-byte nonce per encryption, site/source/event identity
+as length-prefixed associated data). The key comes ONLY from
+`ORIGINAL_IP_KEY` (32 bytes; hex/base64 standard or URL-safe, padded or
+unpadded; strict validation, never echoed) and is never
+`SESSION_SECRET`, `HMAC_KEY`, `MODEL_API_KEY` or `META_API_KEY`
+(equivalent encodings are normalized before the separation check).
+Missing/invalid/wrong/tampered keys fail closed with fixed
+`private_unavailable:*` codes; there is no plaintext fallback, and
+ordinary analytics keep working without a key.
+
+Capture is transient and explicit (`--capture-original-ips` /
+`capture_originals=True`, failing before any write without a valid
+key): parsers return a `repr`-safe `CapturedOriginal`, never a routine
+plaintext field, and only the private encrypt path reveals it. Originals
+never reach routine rows, reports, CLI output, the external API, shared
+analytics, model tools, exports, errors or logs. Pre-existing rows keep
+new enrichment fields NULL until an explicit read-only-source reprocess;
+a source id is immutably bound to its site (`source_site_mismatch`
+rejects cross-site import/reprocess before any write). Masking modes
+(full/suffix-mask/pseudonym-only) are display masking, not anonymity.
+Backups hold ciphertext only; key recovery stays separately documented.
+Retention cascades private rows with their parent requests and fails
+closed when foreign keys cannot be enforced.
+
 ## Outbound model boundary
 
 Before **every** provider call, validate allowed provider/model and independently verified effective service tier, authorize site/time scope, minimize payload fields, sanitize identifiers/secrets and enforce work/budget limits. Cover prompt/history, tool results, retries, caches and replay. Default export is metrics, time ranges, rule references and sanitized evidence.

@@ -287,6 +287,7 @@ def parse_custom_line(
     file_dev: int = 0,
     file_ino: int = 0,
     limits=None,
+    capture_original: bool = False,
 ):
     """Parse one line with a validated custom mapping (bounded, no eval)."""
     from app.ingestion.combined import (
@@ -307,8 +308,11 @@ def parse_custom_line(
 
     limits = limits or Limits()
 
-    def reject(reason: str) -> LineRejection:
-        return LineRejection(line_number, byte_offset, reason, _excerpt(raw, limits))
+    def reject(reason: str):
+        item = LineRejection(line_number, byte_offset, reason, _excerpt(reason, limits))
+        if capture_original:
+            return (item, None)
+        return item
 
     if len(raw) > limits.max_line_bytes:
         return reject("oversized_line")
@@ -394,17 +398,16 @@ def parse_custom_line(
         tls_protocol = None
     request_time_ms: float | None = None
     upstream_time_ms: float | None = None
-    upstream_count = 0
+    upstream_count: int | None = None
     for name in ("request_time", "upstream_time"):
         text = captured.get(name)
-        if not text:
+        if not text or text == "-":
+            # Absent timing infers no component count.
             continue
         unit = str(spec.timing.get(name, {}).get("unit", "s"))
         multi = bool(spec.timing.get(name, {}).get("multi", False))
         try:
-            if text == "-":
-                value: float | None = None
-            elif multi:
+            if multi:
                 from app.ingestion.combined import _MULTI_SEP_RE
 
                 total = 0.0
@@ -422,24 +425,25 @@ def parse_custom_line(
                     upstream_count = len(parts)
             else:
                 value = normalize_timing(text, unit)
+                if name == "upstream_time" and value is not None:
+                    upstream_count = 1
         except TimingInvalid:
             return reject("invalid_timing")
         if name == "request_time":
             request_time_ms = value
         else:
             upstream_time_ms = value
-            if multi and value is not None and upstream_count == 0:
-                upstream_count = 1
     from app.ingestion.combined import mask_secrets as _mask
 
-    return CombinedRecord(
+    host_text = captured["host"]
+    record = CombinedRecord(
         source_id=source_id,
         format_id=spec.format_id,
         line_number=line_number,
         byte_offset=byte_offset,
         file_dev=file_dev,
         file_ino=file_ino,
-        client_pseudonym=pseudonymize_client(captured["host"], hmac_key),
+        client_pseudonym=pseudonymize_client(host_text, hmac_key),
         timestamp_utc=timestamp_utc,
         tz_offset_minutes=tz_offset_minutes,
         request=request,
@@ -460,3 +464,8 @@ def parse_custom_line(
             tls_protocol=tls_protocol,
         ),
     )
+    if not capture_original:
+        return record
+    from app.ingestion.combined import _matched_original_host
+
+    return (record, _matched_original_host(host_text))

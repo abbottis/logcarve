@@ -151,7 +151,7 @@ def test_invalid_bytes_rejected_without_crash(tmp_path):
     assert len(report.diagnostics) == 1
 
 
-def test_diagnostics_bounded_and_masked():
+def test_diagnostics_bounded_and_withheld():
     _, report = collect_records(
         FIXTURES / "adversarial" / "combined_mixed.txt",
         source_id="example-combined",
@@ -162,9 +162,23 @@ def test_diagnostics_bounded_and_masked():
     assert len(report.diagnostics) == 2
     assert report.diagnostics_truncated == 7
     for diagnostic in report.diagnostics:
-        assert len(diagnostic.excerpt) <= 200
-        assert "hunter2" not in diagnostic.excerpt  # secrets stay masked in diagnostics
-    assert "[REDACTED]" in report.diagnostics[0].excerpt
+        # Fixed withheld markers carry no attacker bytes at all: no raw
+        # line prefix, no secret values, no original addresses -- only the
+        # reason code plus line/offset positions. Counters stay useful.
+        assert diagnostic.excerpt == f"<withheld>:{diagnostic.reason}"
+        assert "hunter2" not in diagnostic.excerpt
+        assert "203.0.113" not in diagnostic.excerpt
+        assert diagnostic.reason in {
+            "malformed_line",
+            "oversized_line",
+            "oversized_target",
+            "oversized_user_agent",
+            "invalid_encoding",
+            "invalid_time",
+            "invalid_status",
+            "empty_request",
+            "malformed_request",
+        }
 
 
 def test_oversized_line_keeps_no_content():

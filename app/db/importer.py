@@ -40,7 +40,7 @@ from datetime import UTC, datetime
 from pathlib import Path
 
 from app.db import repositories
-from app.db.database import WriterBusy, writer_transaction
+from app.db.database import WriterBusy, connect, writer_transaction
 from app.db.migrations_runner import migrate
 from app.ingestion.autodetect import AmbiguousFormat, UnmatchedFormat
 from app.ingestion.combined import (
@@ -50,9 +50,11 @@ from app.ingestion.combined import (
     CUSTOM,
     NGINX_COMBINED,
     NGINX_EXTENDED,
+    CapturedOriginal,
     CombinedRecord,
     Limits,
     LineRejection,
+    enrichment_policy,
 )
 from app.ingestion.custom import CustomFormat, CustomFormatError
 from app.ingestion.gzipio import GzipError, GzipLimits
@@ -146,6 +148,26 @@ class ImportResult:
     source_changed: bool = False
     consumed_sha256: str | None = None
     rejected_by_reason: dict[str, int] = field(default_factory=dict)
+    originals_captured: int = 0
+
+
+def _check_source_binding(db_path: Path, *, source_id: str, site_id: str) -> None:
+    """Reject a source id already bound to another site before any write.
+
+    ``ensure_source`` uses ``ON CONFLICT DO NOTHING``, so without this
+    check a replayed other-site source id would silently reuse the
+    foreign row (and attach replayed other-site originals to it).
+    Raises :class:`SourceBindingError` with the fixed
+    ``source_site_mismatch`` code, leaving core/metadata/private/auth/
+    usage state unchanged and creating no site.
+    """
+    probe = connect(db_path, read_only=True)
+    try:
+        registered = repositories.fetch_source(probe, source_id=source_id)
+    finally:
+        probe.close()
+    if registered is not None and str(registered["site_id"]) != site_id:
+        raise repositories.SourceBindingError()
 
 
 def _event_row(
@@ -154,7 +176,16 @@ def _event_row(
     import_id: int,
     site_id: str,
     file_fingerprint: str,
+    policy: str,
 ) -> tuple:
+    """Legacy core columns plus nullable T1b enrichment metadata.
+
+    ``duration_ms`` stays legacy (always ``None`` from the parser: Combined
+    never supplies timing). Measured timings land in
+    ``request_time_ms``/``upstream_time_ms``/``upstream_count`` with
+    ``None`` meaning absent; ``policy`` tags the parser policy.
+    """
+    extra = record.extra
     return (
         import_id,
         site_id,
@@ -171,6 +202,18 @@ def _event_row(
         record.user_agent,
         record.client_pseudonym,
         record.duration_ms,
+        record.format_id,
+        record.request.http_version,
+        extra.server_host if extra is not None else None,
+        extra.referer_scheme if extra is not None else None,
+        extra.referer_path if extra is not None else None,
+        extra.cache_status if extra is not None else None,
+        extra.mime_type if extra is not None else None,
+        extra.tls_protocol if extra is not None else None,
+        extra.request_time_ms if extra is not None else None,
+        extra.upstream_time_ms if extra is not None else None,
+        extra.upstream_count if extra is not None else None,
+        policy,
     )
 
 
@@ -193,6 +236,8 @@ def run_import(
     custom_format: CustomFormat | None = None,
     gzip_limits: GzipLimits | None = None,
     autodetect_sample_lines: int = 32,
+    capture_originals: bool = False,
+    ip_key: object = None,
 ) -> ImportResult:
     """Import one resolved source file; repeatable and interruption-safe.
 
@@ -200,6 +245,12 @@ def run_import(
     raw bytes for plain files) plus the record byte offset, so the same
     plaintext imported plain or gzipped replays instead of duplicating,
     while legitimate identical requests (distinct positions) stay distinct.
+
+    With ``capture_originals=True`` the validated client address of each
+    accepted record is additionally stored encrypted (AESGCM, separate
+    server key, per-event AAD). Capture without a valid configured key
+    fails before any write. Routine rows, reports and payloads never carry
+    originals regardless of this flag.
     """
     if not hmac_key:
         raise ValueError("hmac_key must be non-empty")
@@ -215,6 +266,32 @@ def run_import(
         raise CustomFormatError("interrupted:custom_invalid")
     if custom_format is not None and source.format_id not in (CUSTOM, custom_format.format_id):
         raise CustomFormatError("interrupted:custom_invalid")
+    from app.db import private as _private
+
+    private_key: bytes | None = None
+    if capture_originals:
+        # Fail before any write when no valid key is configured; a
+        # roundtrip self-test proves the key operates without storing it.
+        private_key = _private.require_ip_key(ip_key)
+        _private.decrypt_ip(
+            *_private.encrypt_ip(
+                "127.0.0.1",
+                key=private_key,
+                aad=_private.build_aad(
+                    site_id="self-test",
+                    source_id="self-test",
+                    file_fingerprint="self-test",
+                    byte_offset=0,
+                ),
+            ),
+            key=private_key,
+            aad=_private.build_aad(
+                site_id="self-test",
+                source_id="self-test",
+                file_fingerprint="self-test",
+                byte_offset=0,
+            ),
+        )
     effective_filter = host_filter if host_filter is not None else source.host_filter()
     has_custom_vhost = custom_format is not None and "vhost" in custom_format.pattern.groupindex
     if effective_filter is None and (
@@ -231,6 +308,7 @@ def run_import(
     )
     now = clock or (lambda: datetime.now(UTC))
     migrate(db_path)
+    _check_source_binding(db_path, source_id=source.source_id, site_id=site_id)
 
     resolved = resolve_source_path(source)
     try:
@@ -249,6 +327,7 @@ def run_import(
         )
     fingerprint = logical.logical_sha256
     size_before = resolved.stat().st_size
+    policy = enrichment_policy(source.format_id, custom_format)
 
     with writer_transaction(db_path, lock_timeout_s=lock_timeout_s) as conn:
         started = now().isoformat()
@@ -266,6 +345,9 @@ def run_import(
             server_type=server_type,
             format_id=source.format_id,
             path_alias=path_alias,
+            allowed_hosts=(
+                sorted(effective_filter.hosts) if effective_filter is not None else None
+            ),
         )
         import_id = repositories.create_import(
             conn,
@@ -275,13 +357,43 @@ def run_import(
             started_at=started,
         )
 
+    def _flush_batch(conn) -> None:
+        """Insert one batch and store captured originals encrypted (same transaction)."""
+        nonlocal inserted, originals_captured
+        inserted += repositories.insert_events(conn, batch)
+        if capture_originals and batch_private and private_key is not None:
+            placeholders = ",".join(["?"] * len(batch))
+            id_rows = conn.execute(
+                "SELECT id, byte_offset FROM requests WHERE source_id = ?"
+                " AND file_fingerprint = ? AND byte_offset IN (" + placeholders + ")",
+                (source.source_id, fingerprint, *[row[4] for row in batch]),
+            ).fetchall()
+            id_by_offset = {int(offset): int(row_id) for row_id, offset in id_rows}
+            for offset, captured in batch_private:
+                request_id = id_by_offset.get(offset)
+                if request_id is None:
+                    continue
+                aad = _private.build_aad(
+                    site_id=site_id,
+                    source_id=source.source_id,
+                    file_fingerprint=fingerprint,
+                    byte_offset=offset,
+                )
+                nonce, ciphertext = _private.encrypt_captured(captured, key=private_key, aad=aad)
+                if _private.store_private_ip(
+                    conn, request_id=request_id, nonce=nonce, ciphertext=ciphertext
+                ):
+                    originals_captured += 1
+
     stream_report = ImportReport(source_id=source.source_id, format_id=source.format_id)
     inserted = 0
+    originals_captured = 0
     batch: list[tuple] = []
+    batch_private: list[tuple[int, CapturedOriginal]] = []
     batch_index = 0
     failure: Exception | None = None
     try:
-        for item in iter_records(
+        for yielded in iter_records(
             resolved,
             source_id=source.source_id,
             format_id=source.format_id,
@@ -293,24 +405,39 @@ def run_import(
             gzip_limits=gzip_limits,
             autodetect_sample_lines=autodetect_sample_lines,
             default_combined=default_combined,
+            capture_original=capture_originals,
         ):
+            if capture_originals:
+                item, original = yielded
+            else:
+                item, original = yielded, None
             if isinstance(item, (LineRejection, HostSkipped)):
                 continue
             batch.append(
-                _event_row(item, import_id=import_id, site_id=site_id, file_fingerprint=fingerprint)
+                _event_row(
+                    item,
+                    import_id=import_id,
+                    site_id=site_id,
+                    file_fingerprint=fingerprint,
+                    policy=policy,
+                )
             )
+            if capture_originals and isinstance(original, CapturedOriginal):
+                batch_private.append((item.byte_offset, original))
             if len(batch) >= batch_size:
                 batch_index += 1
                 with writer_transaction(db_path, lock_timeout_s=lock_timeout_s) as conn:
-                    inserted += repositories.insert_events(conn, batch)
+                    _flush_batch(conn)
                 batch.clear()
+                batch_private.clear()
                 if after_batch is not None:
                     after_batch(batch_index)
         if batch:
             batch_index += 1
             with writer_transaction(db_path, lock_timeout_s=lock_timeout_s) as conn:
-                inserted += repositories.insert_events(conn, batch)
+                _flush_batch(conn)
             batch.clear()
+            batch_private.clear()
             if after_batch is not None:
                 after_batch(batch_index)
     except Exception as exc:  # noqa: BLE001 - recorded on the import row, then re-raised
@@ -393,6 +520,7 @@ def run_import(
         source_changed=source_changed,
         consumed_sha256=consumed,
         rejected_by_reason=dict(stream_report.rejected_by_reason),
+        originals_captured=originals_captured,
     )
 
 
@@ -414,6 +542,7 @@ def _failed_pre_import(
     records the interruption with an allowlisted code only.
     """
     migrate(db_path)
+    _check_source_binding(db_path, source_id=source.source_id, site_id=site_id)
     with writer_transaction(db_path) as conn:
         started = now().isoformat()
         repositories.ensure_site(

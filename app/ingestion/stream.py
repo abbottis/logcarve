@@ -17,6 +17,7 @@ identity, while offsets stay position-stable within that logical stream.
 """
 
 import hashlib
+import time
 from collections.abc import Iterator
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -47,6 +48,17 @@ _CHUNK_SIZE = 65536
 # a file that keeps timing the custom match out is adversarial input,
 # not a slow file, and fails honestly instead of burning CPU line by line.
 CUSTOM_TIMEOUT_ABORT_STREAK = 16
+# Absolute per-import engine-timeout budget: alternating adversarial and
+# valid lines reset the streak forever, so a second global bound is
+# required. Either bound aborts the import with the same fixed
+# ``custom_timeout`` code; accepted/rejected counts stay accurate and the
+# EOF digest is simply left unset on interruption.
+CUSTOM_TIMEOUT_ABORT_TOTAL = 32
+# Wall-clock budget for cumulative custom-match time per import. The
+# streak/total counters bound timeout *counts*; this bounds elapsed
+# *matching* time for inputs that time out slowly without hitting the
+# count quickly. No background threads: measured inline around matches.
+CUSTOM_TIMEOUT_ABORT_MATCH_S = 30.0
 
 
 @dataclass
@@ -94,13 +106,26 @@ class ImportReport:
             self.diagnostics_truncated += 1
 
 
+#: Fixed marker for skipped foreign hosts. The configured host itself is
+#: attacker-controlled log content (a foreign logged host can itself be an
+#: address), so the raw value is never retained in diagnostics, reports,
+#: errors or logs; counters plus line/offset positions keep the signal.
+WITHHELD_HOST = "<withheld>"
+
+
 @dataclass(frozen=True)
 class HostSkipped:
-    """A host-bearing line outside the configured filter: valid, not malformed."""
+    """A host-bearing line outside the configured filter: valid, not malformed.
+
+    ``host`` is always the fixed :data:`WITHHELD_HOST` marker, never the
+    raw foreign logged host, which could itself be an address. Host-filter
+    accounting (counts plus line/offset positions) stays useful without
+    retaining attacker-controlled bytes.
+    """
 
     line_number: int
     byte_offset: int
-    host: str
+    host: str = WITHHELD_HOST
 
 
 @dataclass(frozen=True)
@@ -212,18 +237,29 @@ def _parse_item(
     identity: FileIdentity,
     limits: Limits,
     custom_format=None,
-):
+    capture_original: bool = False,
+) -> tuple:
+    """Parse one line, always returning ``(item, original_or_None)``.
+
+    ``original`` is the validated client address text transiently
+    captured from the same match the HMAC derives from, present only
+    when ``capture_original`` is set and the line parsed. It must flow
+    only into the encrypted private channel, never into routine fields.
+    """
     from app.ingestion.custom import parse_custom_line
 
     if raw is None:
-        return LineRejection(
-            line_number,
-            byte_offset,
-            "oversized_line",
-            f"<line exceeds {limits.max_line_bytes} bytes>",
+        return (
+            LineRejection(
+                line_number,
+                byte_offset,
+                "oversized_line",
+                f"<line exceeds {limits.max_line_bytes} bytes>",
+            ),
+            None,
         )
     if custom_format is not None:
-        return parse_custom_line(
+        parsed = parse_custom_line(
             raw,
             spec=custom_format,
             source_id=source_id,
@@ -233,18 +269,29 @@ def _parse_item(
             file_dev=identity.dev,
             file_ino=identity.ino,
             limits=limits,
+            capture_original=capture_original,
         )
-    return parse_line(
-        raw,
-        source_id=source_id,
-        format_id=effective_format,
-        hmac_key=hmac_key,
-        line_number=line_number,
-        byte_offset=byte_offset,
-        file_dev=identity.dev,
-        file_ino=identity.ino,
-        limits=limits,
-    )
+    else:
+        parsed = parse_line(
+            raw,
+            source_id=source_id,
+            format_id=effective_format,
+            hmac_key=hmac_key,
+            line_number=line_number,
+            byte_offset=byte_offset,
+            file_dev=identity.dev,
+            file_ino=identity.ino,
+            limits=limits,
+            capture_original=capture_original,
+        )
+    if capture_original:
+        item, original = parsed
+        if not isinstance(item, CombinedRecord):
+            # Never carry an original out with a rejection: only records
+            # flow into the encrypted private channel.
+            return item, None
+        return item, original
+    return parsed, None
 
 
 def _check_sample_lines(sample_lines: int) -> None:
@@ -257,21 +304,36 @@ def _check_sample_lines(sample_lines: int) -> None:
         raise ValueError(f"autodetect_sample_lines must be an integer in 1..{MAX_SAMPLE_LINES}")
 
 
-def _abort_on_timeout_abuse(item, timeout_streak: int) -> int:
-    """Count consecutive custom-match engine timeouts; abort abuse honestly.
+def _abort_on_timeout_abuse(
+    item,
+    timeout_streak: int,
+    timeout_total: int,
+    timeout_match_s: float,
+) -> tuple[int, int]:
+    """Bound custom-match engine timeouts per import; abort abuse honestly.
 
-    Returns the updated streak. A sustained run means adversarial input,
-    not a slow file, so the import fails with a fixed ``custom_timeout``
-    code through :class:`CustomFormatError` instead of burning CPU.
+    Returns the updated ``(streak, total)``. The consecutive streak
+    catches sustained runs; the absolute total catches adversarial lines
+    interleaved with valid requests (which reset the streak forever);
+    the cumulative timed-out matching time catches slow timeouts before
+    the count alone would. Any bound fails with the fixed
+    ``custom_timeout`` code through :class:`CustomFormatError` instead of
+    burning CPU. Accepted/rejected counts stay accurate and the EOF
+    digest is left unset on interruption.
     """
     from app.ingestion.custom import CustomFormatError
 
     if isinstance(item, LineRejection) and item.reason == "custom_timeout":
         timeout_streak += 1
-        if timeout_streak >= CUSTOM_TIMEOUT_ABORT_STREAK:
+        timeout_total += 1
+        if (
+            timeout_streak >= CUSTOM_TIMEOUT_ABORT_STREAK
+            or timeout_total >= CUSTOM_TIMEOUT_ABORT_TOTAL
+            or timeout_match_s >= CUSTOM_TIMEOUT_ABORT_MATCH_S
+        ):
             raise CustomFormatError("interrupted:custom_timeout")
-        return timeout_streak
-    return 0
+        return timeout_streak, timeout_total
+    return 0, timeout_total
 
 
 def iter_records(
@@ -287,7 +349,8 @@ def iter_records(
     gzip_limits: GzipLimits | None = None,
     autodetect_sample_lines: int = DEFAULT_SAMPLE_LINES,
     default_combined: str = NGINX_COMBINED,
-) -> Iterator[CombinedRecord | LineRejection | HostSkipped]:
+    capture_original: bool = False,
+) -> Iterator[CombinedRecord | LineRejection | HostSkipped | tuple]:
     """Stream one resolved source file, yielding records, rejections or skips.
 
     The file is opened read-only. Gzip sources are detected by magic bytes
@@ -295,11 +358,16 @@ def iter_records(
     per file through sampled detection and fails closed on ambiguity; the
     indistinguishable Combined twins resolve to ``default_combined`` (the
     configured server flavor). Host-bearing lines outside ``host_filter``
-    yield :class:`HostSkipped` instead of records. ``report`` accumulates
+    yield :class:`HostSkipped` instead of records. With
+    ``capture_original=True`` each yield is an ``(item, original_or_None)``
+    pair; otherwise bare items are yielded and the default path stays
+    compatible. ``report`` accumulates
     accounting as items are consumed; pass one in to inspect counts
-    afterwards. A run of consecutive custom-match engine timeouts aborts
-    the import with a fixed ``custom_timeout`` failure instead of burning
-    CPU line by line.
+    afterwards. Sustained custom-match engine timeouts abort the import
+    with a fixed ``custom_timeout`` failure instead of burning CPU line
+    by line: a consecutive streak, an absolute per-import total (so
+    alternating adversarial/valid lines cannot reset the bound forever),
+    and a cumulative timed-out matching-time budget.
     """
     from app.ingestion.autodetect import resolve_format
 
@@ -349,9 +417,12 @@ def iter_records(
 
         line_iter = iter_chunk_lines(_hashed_chunks(), max_line_bytes=limits.max_line_bytes)
         timeout_streak = 0
+        timeout_total = 0
+        timeout_match_s = 0.0
         for raw in line_iter:
             line_number += 1
-            item = _parse_item(
+            match_start = time.monotonic() if custom_format is not None else 0.0
+            item, original = _parse_item(
                 raw.data,
                 effective_format=effective_format,
                 source_id=source_id,
@@ -361,17 +432,37 @@ def iter_records(
                 identity=identity,
                 limits=limits,
                 custom_format=custom_format,
+                capture_original=capture_original,
             )
-            timeout_streak = _abort_on_timeout_abuse(item, timeout_streak)
-            yield _account(item, report, limits, host_filter, line_number, raw.offset)
+            if (
+                custom_format is not None
+                and isinstance(item, LineRejection)
+                and item.reason == "custom_timeout"
+            ):
+                timeout_match_s += time.monotonic() - match_start
+            # The terminal timed-out line is accounted exactly once
+            # BEFORE the fixed interruption: _account runs first so the
+            # physical line lands in lines_total/rejected, while the EOF
+            # digest below is still left unset on interruption.
+            accounted = _account(item, report, limits, host_filter, line_number, raw.offset)
+            timeout_streak, timeout_total = _abort_on_timeout_abuse(
+                item, timeout_streak, timeout_total, timeout_match_s
+            )
+            # No original ever leaves with a skip or rejection: only
+            # accepted records flow into the encrypted private channel.
+            kept = original if isinstance(accounted, CombinedRecord) else None
+            yield (accounted, kept) if capture_original else accounted
         if report is not None:
             report.consumed_sha256 = hasher.hexdigest()
         return
     with open_source_log(path) as stream:
         timeout_streak = 0
+        timeout_total = 0
+        timeout_match_s = 0.0
         for raw in iter_raw_lines(stream, max_line_bytes=limits.max_line_bytes, hasher=hasher):
             line_number += 1
-            item = _parse_item(
+            match_start = time.monotonic() if custom_format is not None else 0.0
+            item, original = _parse_item(
                 raw.data,
                 effective_format=effective_format,
                 source_id=source_id,
@@ -381,9 +472,23 @@ def iter_records(
                 identity=identity,
                 limits=limits,
                 custom_format=custom_format,
+                capture_original=capture_original,
             )
-            timeout_streak = _abort_on_timeout_abuse(item, timeout_streak)
-            yield _account(item, report, limits, host_filter, line_number, raw.offset)
+            if (
+                custom_format is not None
+                and isinstance(item, LineRejection)
+                and item.reason == "custom_timeout"
+            ):
+                timeout_match_s += time.monotonic() - match_start
+            # Accounted before the abort (see the gzip path above): the
+            # terminal timed-out physical line counts exactly once.
+            accounted = _account(item, report, limits, host_filter, line_number, raw.offset)
+            timeout_streak, timeout_total = _abort_on_timeout_abuse(
+                item, timeout_streak, timeout_total, timeout_match_s
+            )
+            # No original ever leaves with a skip or rejection (see above).
+            kept = original if isinstance(accounted, CombinedRecord) else None
+            yield (accounted, kept) if capture_original else accounted
     # Reached only when the stream was consumed to EOF: the digest then
     # covers exactly the bytes this import read. Interruptions propagate
     # before this point and leave ``consumed_sha256`` unset.
@@ -395,7 +500,7 @@ def _account(item, report: ImportReport | None, limits: Limits, host_filter, lin
     if isinstance(item, CombinedRecord) and host_filter is not None:
         host = item.extra.server_host if item.extra is not None else None
         if host is not None and not host_filter.matches(host):
-            skipped = HostSkipped(line_number, offset, host[:253])
+            skipped = HostSkipped(line_number, offset)
             if report is not None:
                 report.note_skipped(skipped, limits.max_diagnostics)
             return skipped

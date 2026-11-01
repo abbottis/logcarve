@@ -136,11 +136,32 @@ def detect_lines(
     # a third grammar scoring alongside them means genuinely mixed input,
     # which still fails closed below.
     others_best = max(hits for name, hits in scores.items() if name not in _COMBINED_TWINS)
-    if (
-        scores[_combined.NGINX_COMBINED] == scores[_combined.APACHE_COMBINED] > others_best
-        and not apache_escape_seen
-    ):
-        confidence = scores[default_combined] / total
+    twins_hits = scores[_combined.NGINX_COMBINED]
+    if twins_hits == scores[_combined.APACHE_COMBINED] > others_best and not apache_escape_seen:
+        # The twins share one grammar, so they score as one Combined
+        # family against genuinely different grammars — but the family
+        # still clears the same confidence floor and margin as every
+        # other candidate. Otherwise low-confidence or mixed samples
+        # (e.g. mostly invalid lines, or Combined mixed with Common)
+        # would bypass the gates through this shortcut.
+        confidence = twins_hits / total
+        margin = (twins_hits - others_best) / total
+        if confidence < MIN_CONFIDENCE or margin < MIN_MARGIN:
+            close = (_combined.NGINX_COMBINED, _combined.APACHE_COMBINED)
+            if others_best > 0:
+                third = max(
+                    (name for name in _CANDIDATE_ORDER if name not in _COMBINED_TWINS),
+                    key=lambda name: (scores[name], -_CANDIDATE_ORDER.index(name)),
+                )
+                if scores[third] > 0:
+                    close = (_combined.NGINX_COMBINED, _combined.APACHE_COMBINED, third)
+            return DetectResult(
+                format_id=None,
+                confidence=confidence,
+                candidates=close,
+                ambiguous=True,
+                samples=total,
+            )
         return DetectResult(
             format_id=default_combined,
             confidence=confidence,

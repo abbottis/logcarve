@@ -53,3 +53,27 @@ Timing extensions are later work: Nginx seconds → milliseconds; Apache `%D` mi
   custom mappings (`custom-*` JSON) keep nesting-free named-group
   bodies plus a proven per-operation `regex` engine timeout
   (`custom_timeout`, no thread timers); no eval, no code.
+
+## T1b enrichment metadata (2026-11-01, PAR-02)
+
+- Persisted nullable metadata per event: format id, HTTP version,
+  logged host, Referer scheme/path, cache status, MIME, TLS, measured
+  `request_time_ms`/`upstream_time_ms`, `upstream_count` and the
+  `policy_version` tag. Pre-existing rows keep all of these NULL until
+  an explicit read-only-source reprocess enriches them.
+- Absent upstream timing parses to `(None, None)`: no component count
+  is inferred, so missing timing is never stored as `0`. A present
+  single value counts one component; a multi-value list counts its
+  parts. Legacy `duration_ms` stays NULL (Combined never supplies it).
+- `policy_version` records the explicit parser/normalization policy
+  (`t1b.1`; custom mappings append a `+custom:<sha16>` definition
+  fingerprint over the pattern and timing spec). Raw custom
+  configuration and secrets are never persisted; a policy change
+  re-enriches on reprocess.
+- Custom per-line engine timeouts keep a consecutive-streak bound plus
+  an absolute per-import total and a cumulative matching-time budget,
+  so adversarial lines interleaved with valid requests still abort
+  with `interrupted:custom_timeout`. The terminal timed-out line is
+  counted exactly once; the consumed-bytes digest stays unset.
+- Rejections carry fixed `<withheld>:<reason>` markers only, never raw
+  excerpts; foreign logged hosts are withheld the same way.

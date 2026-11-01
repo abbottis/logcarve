@@ -618,7 +618,10 @@ def test_host_filter_isolates_counts():
         1,
     )
     assert len(report.skipped_hosts) == 1
-    assert report.skipped_hosts[0].host == "other.example"
+    # Skipped foreign hosts are withheld: a logged host can itself be an
+    # address, so only counts plus line/offset positions are diagnostic.
+    assert report.skipped_hosts[0].host == "<withheld>"
+    assert report.skipped_hosts[0].line_number == 3
     # No filter: host-bearing lines pass through (documented, counted as accepted).
     _, open_report = collect_records(
         FIXTURES / "apache_vhost.txt",
@@ -765,7 +768,10 @@ def test_timing_rejects_negative_nonfinite_and_malformed():
         normalize_multi_seconds_to_ms(f"{huge_part}, {huge_part}")
     with pytest.raises(TimingInvalid):
         normalize_multi_seconds_to_ms("-1, 0.2")
-    assert normalize_multi_seconds_to_ms("-") == (None, 0)
+    # Absent upstream timing infers no component count: (None, None),
+    # so legacy rows keep NULL instead of a fabricated zero.
+    assert normalize_multi_seconds_to_ms("-") == (None, None)
+    assert normalize_multi_seconds_to_ms("0.100") == (pytest.approx(100.0), 1)
 
 
 def test_timing_units_zero_and_mime_cache_serialization():

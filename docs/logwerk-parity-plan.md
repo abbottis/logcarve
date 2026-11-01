@@ -88,3 +88,17 @@ Combined-family default resolution, custom-vhost site default, limit
 validation, timeout-abuse abort. 52 unit + 14 integration T1a tests,
 full suite 600 passed / 2 env-skipped, Ruff clean. No T1b schema yet;
 stopping for independent review.
+
+T1b 2026-11-01 (same branch, no amend): storage foundation at
+parser/import/CLI level. Nullable enrichment metadata
+(`policy_version` `t1b.1`, absent upstream stays NULL), AES-256-GCM
+original-IP store (`cryptography` 50.0.2, strict key validation,
+length-prefixed AAD, `repr`-safe transient capture), read-only-source
+reprocess over bounded keyset pages (no all-source materialization),
+immutable source/site binding (`source_site_mismatch` rejects cross-site
+import/reprocess before any write), atomic migrations via
+`sqlite3.complete_statement` plus an execution-layer authorizer, exact
+terminal-timeout accounting, and fail-closed retention when foreign keys
+cannot be enforced. PAR-02 partially implemented at parser/import/CLI
+level; no web/API changes; admin IP display modes are schema/helpers
+only until T4. Stopping for independent review.

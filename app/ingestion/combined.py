@@ -38,11 +38,14 @@ absent timing is ``None``, never ``0``; present-but-invalid timing rejects
 the line with ``invalid_timing``.
 
 Raw lines are never retained: accepted records carry only normalized
-fields, and rejections carry a short masked excerpt plus a reason code.
+fields, and rejections carry a fixed withheld marker plus a reason code.
+No attacker-controlled bytes (original IPs, query values, paths,
+User-Agents, Referers) ever land in diagnostics, reports, errors or logs.
 """
 
 import hashlib
 import hmac
+import ipaddress
 import math
 import re
 from dataclasses import dataclass, field
@@ -141,11 +144,14 @@ _EXTENDED_RE = re.compile(
     # Trailing LogWerk NginxExtended fields: $host $upstream_cache_status
     # $request_time $sent_http_content_type $ssl_protocol
     # "$upstream_response_time". A leading vhost is Apache vhost Combined,
-    # never this preset. The MIME token may carry "; charset=..." params
-    # with an embedded space, so it accepts one optional second token;
-    # backtracking still pins the final TLS/upstream fields.
+    # never this preset. The MIME field is the full
+    # $sent_http_content_type value: a media type plus any number of
+    # "; param=..." segments (e.g. "text/html; charset=utf-8;
+    # version=1.0"), so it may contain spaces. The lazy match plus the
+    # trailing TLS/upstream anchors pin the split: TLS is the last
+    # whitespace-separated token before the quoted upstream time.
     + r"\s+(?P<vhost>\S+)\s+(?P<cache>\S+)\s+(?P<request_time>\S+)"
-    + r"\s+(?P<mime>[^\s\"]+(?: +[^\s\"]+)?)\s+(?P<tls>\S+)\s+"
+    + r"\s+(?P<mime>[^\"]+?)\s+(?P<tls>\S+)\s+"
     + _quoted("upstream_time")
     + r"\s*\Z"
 )
@@ -226,17 +232,18 @@ def normalize_seconds_to_ms(value: str) -> float | None:
     return _checked_ms(float(value), 1000.0, value)
 
 
-def normalize_multi_seconds_to_ms(value: str) -> tuple[float | None, int]:
+def normalize_multi_seconds_to_ms(value: str) -> tuple[float | None, int | None]:
     """Normalize a quoted upstream timing to ``(total_ms, component_count)``.
 
-    ``-`` means absent and yields ``(None, 0)``. A comma/colon/space
+    ``-`` means absent and yields ``(None, None)``: no components were
+    logged, so no count is inferred. A comma/colon/space
     separated multi-value list (Nginx ``$upstream_response_time`` with
     several upstreams tried) is summed explicitly and the component count
     is returned alongside; any unparseable, negative or overflowing
     component raises :class:`TimingInvalid`.
     """
     if value == "-":
-        return None, 0
+        return None, None
     parts = [item for item in _MULTI_SEP_RE.split(value.strip()) if item]
     if not parts:
         raise TimingInvalid("empty upstream timing")
@@ -289,7 +296,9 @@ class ExtendedMetadata:
 
     All fields are nullable: absent stays ``None`` (never ``0`` or ``""``).
     Present-but-invalid values reject the line instead of landing here, so
-    ``None`` always means absent. T1b persists these without reparsing.
+    ``None`` always means absent -- including ``upstream_count``, which is
+    the number of upstream timing components only when an upstream timing
+    was actually logged. T1b persists these without reparsing.
     """
 
     server_host: str | None = None
@@ -298,9 +307,78 @@ class ExtendedMetadata:
     cache_status: str | None = None
     request_time_ms: float | None = None
     upstream_time_ms: float | None = None
-    upstream_count: int = 0
+    upstream_count: int | None = None
     mime_type: str | None = None
     tls_protocol: str | None = None
+
+
+#: Explicit parser/normalization policy version for reproducibility.
+#: Persisted per enriched row (legacy rows stay NULL); a policy change
+#: re-enriches on reprocess. Custom mappings additionally carry a
+#: definition fingerprint (see :func:`enrichment_policy`); raw custom
+#: configuration and secrets are never persisted.
+PARSER_POLICY_VERSION = "t1b.1"
+
+
+def enrichment_policy(format_id: str, custom_format: object = None) -> str:
+    """Policy tag persisted with enrichment metadata for reproducibility."""
+    if custom_format is None:
+        return PARSER_POLICY_VERSION
+    import hashlib as _hashlib
+    import json as _json
+
+    digest = _hashlib.sha256()
+    digest.update(str(getattr(custom_format, "format_id", format_id)).encode("utf-8"))
+    pattern = getattr(custom_format, "pattern", None)
+    source = getattr(pattern, "pattern", "")
+    digest.update(b"\x00" + str(source).encode("utf-8"))
+    timing = getattr(custom_format, "timing", {})
+    digest.update(b"\x00" + _json.dumps(timing, sort_keys=True, default=str).encode("utf-8"))
+    return f"{PARSER_POLICY_VERSION}+custom:{digest.hexdigest()[:16]}"
+
+
+@dataclass(frozen=True, slots=True)
+class CapturedOriginal:
+    """Transient SecretStr-safe capture of one validated original address.
+
+    The plaintext lives only in the private ``_plaintext`` slot and is
+    revealed solely through :meth:`reveal`, called immediately inside
+    proven encryption/admin-private functions. ``repr``/``str`` (and
+    therefore tuples, lists, logs and exception text carrying this
+    value) show only a fixed withheld marker, and the value is not
+    JSON-serializable, so routine ``repr``/``asdict``/serialization
+    paths cannot expose the original address. Use
+    ``capture_original=True`` parse paths only to route into the
+    encrypted private channel.
+    """
+
+    _plaintext: str
+
+    def reveal(self) -> str:
+        """Return the captured address text for immediate encryption."""
+        return self._plaintext
+
+    def __repr__(self) -> str:
+        return "CapturedOriginal(<withheld>)"
+
+    def __str__(self) -> str:
+        return "CapturedOriginal(<withheld>)"
+
+
+def validate_original_ip(text: str) -> str | None:
+    """Return ``text`` when it is a valid IPv4/IPv6 address, else ``None``.
+
+    Validation is transient and ingestion-local (no storage/crypto
+    dependency): the textual form is preserved exactly (including IPv6
+    spellings) so the legacy HMAC input stays byte-exact.
+    """
+    if not isinstance(text, str) or not text:
+        return None
+    try:
+        ipaddress.ip_address(text)
+    except ValueError:
+        return None
+    return text
 
 
 @dataclass(frozen=True)
@@ -327,7 +405,15 @@ class CombinedRecord:
 
 @dataclass(frozen=True)
 class LineRejection:
-    """A rejected line: position, reason code and a short masked excerpt."""
+    """A rejected line: position, reason code and a fixed withheld marker.
+
+    ``excerpt`` never carries attacker-controlled bytes: it is derived
+    only from the allowlisted reason code, so unparseable, invalid-UTF8,
+    oversized, custom-timeout, IPv4/IPv6 or query/secret-bearing lines
+    cannot leak original addresses or query values through diagnostics,
+    CLI reports, exceptions or logs. Bounded counters (by reason) plus
+    line/offset positions keep diagnostics useful.
+    """
 
     line_number: int
     byte_offset: int
@@ -342,10 +428,47 @@ def pseudonymize_client(host: str, hmac_key: bytes) -> str:
     return hmac.new(hmac_key, host.encode("utf-8"), hashlib.sha256).hexdigest()
 
 
-def _excerpt(raw: bytes, limits: Limits) -> str:
-    """Bounded masked excerpt for diagnostics; never the full raw line."""
-    text = raw[: limits.diagnostic_excerpt_len + 64].decode("utf-8", errors="replace")
-    return mask_secrets(_strip_controls(text[: limits.diagnostic_excerpt_len]))
+WITHHELD_EXCERPT = "<withheld>"
+
+#: Allowlisted rejection reasons that may appear in diagnostics. The
+#: withheld marker is derived only from these codes, never from raw input.
+_REJECTION_REASONS = frozenset(
+    {
+        "malformed_line",
+        "malformed_request",
+        "empty_request",
+        "oversized_line",
+        "oversized_target",
+        "oversized_referer",
+        "oversized_user_agent",
+        "oversized_field",
+        "invalid_status",
+        "invalid_time",
+        "invalid_encoding",
+        "invalid_host",
+        "invalid_cache",
+        "invalid_mime",
+        "invalid_tls",
+        "invalid_timing",
+        "custom_timeout",
+    }
+)
+
+
+def _excerpt(reason: str, limits: Limits | None = None) -> str:
+    """Fixed withheld marker for diagnostics; never attacker-controlled bytes.
+
+    The marker is derived only from the allowlisted reason code (plus the
+    static ``<withheld>`` prefix space): rejected raw lines — including
+    short lines that a truncation scheme would return almost in full,
+    malformed lines, invalid-UTF8 bytes, oversized lines, custom timeouts
+    and IPv4/IPv6/query/secret-bearing input — cannot leak original
+    addresses or query values through this channel. ``limits`` is accepted
+    for call-site compatibility and ignored.
+    """
+    _ = limits
+    code = reason if reason in _REJECTION_REASONS else "rejected"
+    return f"{WITHHELD_EXCERPT}:{code}"
 
 
 def _normalize_target(target: str) -> str:
@@ -465,6 +588,22 @@ def _normalize_request(request: str, limits: Limits) -> RequestLine:
     return RequestLine(method=method, target_path=path, http_version=version)
 
 
+def _matched_original_host(host_text: str) -> CapturedOriginal | None:
+    """Validated transient original address from the matched host group.
+
+    Returns a :class:`CapturedOriginal` wrapping the exact textual host
+    (IPv6 spellings preserved byte-exact for the legacy HMAC input) when
+    it is a valid IPv4/IPv6 address, else ``None``. The value is
+    transient: callers must route it only into the encrypted private
+    channel, never into routine fields or diagnostics. Never carried out
+    with a rejection or foreign-host skip.
+    """
+    validated = validate_original_ip(host_text)
+    if validated is None:
+        return None
+    return CapturedOriginal(validated)
+
+
 def parse_line(
     raw: bytes,
     *,
@@ -476,12 +615,28 @@ def parse_line(
     file_dev: int = 0,
     file_ino: int = 0,
     limits: Limits | None = None,
-) -> CombinedRecord | LineRejection:
-    """Parse one raw log line into a normalized record or a rejection."""
+    capture_original: bool = False,
+) -> (
+    CombinedRecord | LineRejection | tuple[CombinedRecord | LineRejection, CapturedOriginal | None]
+):
+    """Parse one raw log line into a normalized record or a rejection.
+
+    With ``capture_original=False`` (default) returns just the item and
+    stays fully compatible. With ``capture_original=True`` returns
+    ``(item, original_or_None)`` where the original is a
+    :class:`CapturedOriginal` transiently captured from the same match
+    the HMAC pseudonym derives from (``None`` for rejections: no
+    original is ever carried out with a rejection or foreign-host
+    skip). The side channel may carry ciphertext; routine plaintext
+    fields never carry originals.
+    """
     limits = limits or Limits()
 
-    def reject(reason: str) -> LineRejection:
-        return LineRejection(line_number, byte_offset, reason, _excerpt(raw, limits))
+    def reject(reason: str) -> LineRejection | tuple[LineRejection, None]:
+        item = LineRejection(line_number, byte_offset, reason, _excerpt(reason, limits))
+        if capture_original:
+            return (item, None)
+        return item
 
     try:
         pattern = _PRESET_RES[format_id]
@@ -555,7 +710,7 @@ def parse_line(
     cache_status: str | None = None
     request_time_ms: float | None = None
     upstream_time_ms: float | None = None
-    upstream_count = 0
+    upstream_count: int | None = None
     mime_type: str | None = None
     tls_protocol: str | None = None
     if format_id in (APACHE_VHOST_COMBINED, NGINX_EXTENDED):
@@ -593,14 +748,15 @@ def parse_line(
         except TimingInvalid:
             return reject("invalid_timing")
 
-    return CombinedRecord(
+    host_text = match.group("host")
+    record = CombinedRecord(
         source_id=source_id,
         format_id=format_id,
         line_number=line_number,
         byte_offset=byte_offset,
         file_dev=file_dev,
         file_ino=file_ino,
-        client_pseudonym=pseudonymize_client(match.group("host"), hmac_key),
+        client_pseudonym=pseudonymize_client(host_text, hmac_key),
         timestamp_utc=timestamp_utc,
         tz_offset_minutes=tz_offset_minutes,
         request=request,
@@ -621,3 +777,6 @@ def parse_line(
             tls_protocol=tls_protocol,
         ),
     )
+    if not capture_original:
+        return record
+    return (record, _matched_original_host(host_text))

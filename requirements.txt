@@ -11,9 +11,13 @@ argon2-cffi==25.1.0
 argon2-cffi-bindings==26.1.0
     # via argon2-cffi
 cffi==2.1.1
-    # via argon2-cffi-bindings
+    # via
+    #   argon2-cffi-bindings
+    #   cryptography
 click==8.5.0
     # via uvicorn
+cryptography==50.0.2
+    # via logcarve
 fastapi==0.162.0
     # via logcarve
 h11==0.16.0

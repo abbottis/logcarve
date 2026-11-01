@@ -30,6 +30,10 @@ class Settings(BaseSettings):
 
     session_secret: SecretStr = Field(min_length=1)
     hmac_key: SecretStr = Field(min_length=1)
+    # Separate optional server key for T1b encrypted original-IP storage.
+    # Never SESSION_SECRET/HMAC_KEY/MODEL_API_KEY; empty means capture and
+    # private reads fail closed while deterministic analytics keep working.
+    original_ip_key: SecretStr = SecretStr("")
 
     ai_enabled: bool = False
     model_provider: str = "meta"

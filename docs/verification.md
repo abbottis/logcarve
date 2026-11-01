@@ -1865,3 +1865,32 @@ no amend, no T1b schema. Uncommitted base preserved throughout.
 
 Acceptance impact: PAR-01 correction complete at parser/import/CLI
 level; no web/API/schema changes. Stopping for independent review.
+
+## 2026-11-01 — Parity T1b storage foundation (eight confirmed findings)
+
+Bounded sole-writer slice on `feature/logwerk-parity-2026-11-01`, no
+amend, public/synthetic checkout only. All code/tests written by the
+sole writer; no product calls, Docker, push, or deployment.
+
+| Check | Result | Evidence |
+| --- | --- | --- |
+| Migration atomicity (`complete_statement` + authorizer) | PASS | Comment-prefixed COMMIT rejected pre-write with neither table nor version; trigger CASE..END applies as one statement and fires; bracketed/quoted semicolons apply; mid-file failure rolls back DDL+version and retry works; held writer lock fails fast with `WriterBusy` |
+| Bounded reprocess (keyset pages, hard bound 1000) | PASS | 35 rows / batch 10 over 4+ batches: `rows_matched/verified` from SQL COUNT, trace hook proves every row-materializing read carries LIMIT, unbounded helper removed, rerun idempotent with kept originals |
+| Source/site binding | PASS | Wrong-site import raises `source_site_mismatch` with no new site/import/row; wrong-site reprocess with a valid separate key returns `rejected` with zero writes; owning site still enriches and reads |
+| Transient capture protection | PASS | `CapturedOriginal` repr/str/JSON withhold the address; HMAC byte-exact through capture; rejections and host-skips carry no original |
+| Strict key parsing, AAD, blobs | PASS | `base64(key)+'!!!'`, whitespace, bad lengths rejected; newline/unpadded URL-safe accepted; unpadded URL-safe HMAC reuse rejected; length-prefixed AAD has no delimiter collisions; TEXT blobs map to fixed `decrypt_failed` |
+| Nullable legacy metadata + policy | PASS | Schema-4 upgrade keeps all 12 enrichment fields NULL; new plain imports tag `t1b.1` with NULL absent timing; custom fingerprint distinguishes timing specs |
+| Exact abort accounting (plain + gzip) | PASS | Alternating timeout/valid lines: 63 lines read, 32 rejected, 31 accepted, digest unset; one genuine engine-timeout probe with subprocess failsafe retained |
+| Retention FK enforcement | PASS | FKs OFF inside an active transaction raises before deleting (rows and private rows intact); normal app connection cascades and counts |
+| Focused T1b unit/integration | PASS | 61 passed in `tests/unit/test_parity_t1b.py` + `tests/integration/test_parity_t1b_storage.py` (project `.venv`, Python 3.12.16) |
+| Full `tests/unit tests/integration` clean | PASS | 661 passed, 2 skipped (loopback sockets unavailable in sandbox) |
+| Full suites conflicting env (`AI_ENABLED=true LLM_WARN_AT_USD=999`) | PASS | 661 passed, 2 skipped |
+| `ruff check` + `ruff format --check` | PASS | Both clean over `app` + `tests` |
+| `uv lock --check --offline` | PASS | `UV_CACHE_DIR=/tmp/uvcache`; no missing universal-Python metadata encountered |
+
+Acceptance impact: PAR-02 partially implemented at parser/import/CLI
+level (T1b storage foundation). The pre-existing demo-slice-C
+cross-site test now asserts the mandated `source_site_mismatch`
+rejection (no extra site) instead of the old silent reuse. No
+web/API changes; admin IP display stays schema/helpers until T4.
+Stopping for independent review; T2 and later stages await it.
