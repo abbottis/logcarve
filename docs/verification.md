@@ -1708,3 +1708,29 @@ tests/integration/test_owner_ux_stage_b.py`: 66 passed.
 no manifest change, so `uv.lock` untouched. Browser E2E, full clean
 suites, fresh-image and runtime checks stay coordinator-owned (NOT RUN
 here). No product/provider calls.
+
+## 2026-11-01 test-only browser corrections (2 failures at a087c3e, no app change)
+
+Protected Chromium run reported 29 tests: 27 PASS, 2 FAIL, 36.98s.
+Both failures are test-side selector semantics; application code unchanged.
+
+1. `tests/e2e/test_owner_ux_browser.py::test_requests_sort_headers_and_details`
+   (line 261): `page.wait_for_selector(f"tr#{panel_id}[hidden]")` uses the
+   default `visible` state, so a correctly hidden row never satisfies the
+   wait (24 polls observed). Per Context7 primary `/microsoft/playwright-python`,
+   `wait_for` defaults to visible; `state="attached"` waits for DOM presence.
+   Fix: wait `[hidden]` with `state="attached"`, then assert the same panel
+   occurs exactly once, `is_hidden()`, and `aria-expanded == "false"` after
+   the Enter-key toggle. No app change.
+2. `tests/e2e/test_slice_b.py::test_explorer_columns_sanitized_and_timezone_aware`
+   (line 481): `get_by_role("link", name=re.compile(r"Time \(Europe/Berlin\)"))`
+   raises `InvalidSelectorError` (regex serialisation leaves the `/`
+   unescaped). Fix: deterministic CSS-scoped header link
+   `page.locator("thead th", has_text="Time (Europe/Berlin)").locator("a")`
+   for both asc/desc clicks, avoiding regex-with-slash. Asc/desc row ordering,
+   UTC titles, timezone display and privacy assertions preserved; local
+   `import re` removed (no other use). No app change.
+
+Checks here: `pytest --collect-only` 11 tests collected; `ruff check` PASS;
+`ruff format --check` PASS (2 files). Full protected browser run stays
+coordinator-owned: browser PASS is NOT claimed here.

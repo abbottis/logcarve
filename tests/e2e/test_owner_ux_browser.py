@@ -258,7 +258,10 @@ def test_requests_sort_headers_and_details(page, ux_base, observed):
         assert "Hide row details" in (toggle.get_attribute("aria-label") or "")
         toggle.focus()
         page.keyboard.press("Enter")
-        page.wait_for_selector(f"tr#{panel_id}[hidden]", timeout=10000)
+        page.wait_for_selector(f"tr#{panel_id}[hidden]", timeout=10000, state="attached")
+        panel = page.locator(f"tr#{panel_id}")
+        assert panel.count() == 1, "collapsed panel stays in the DOM exactly once"
+        assert panel.is_hidden(), "collapsed panel is hidden after keyboard toggle"
         assert toggle.get_attribute("aria-expanded") == "false"
         # Reload keeps the retained filter/sort state.
         page.get_by_role("link", name="Bytes").click()

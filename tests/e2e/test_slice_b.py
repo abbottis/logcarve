@@ -426,8 +426,6 @@ def test_paths_sort_bytes_and_heatmap_colors_both_themes(page, slice_base, obser
 
 
 def test_explorer_columns_sanitized_and_timezone_aware(page, slice_base, observed):
-    import re
-
     _login(page, slice_base)
     page.set_viewport_size({"width": 390, "height": 844})
     page.goto(f"{slice_base}/requests?site=default&{W1}&tz=Europe%2FBerlin")
@@ -478,14 +476,14 @@ def test_explorer_columns_sanitized_and_timezone_aware(page, slice_base, observe
     assert time_cells[0]["title"].endswith("+00:00"), time_cells[0]
     # The Time sort header toggles newest/oldest and actually reorders.
     newest_first_title = time_cells[0]["title"]
-    page.get_by_role("link", name=re.compile(r"Time \(Europe/Berlin\)")).click()
+    page.locator("thead th", has_text="Time (Europe/Berlin)").locator("a").click()
     page.wait_for_function("() => window.location.href.includes('sort=oldest')", timeout=10000)
     page.get_by_role("heading", name="Sanitized request rows").wait_for(timeout=10000)
     assert "sorted ascending" in page.content()
     oldest_cells = _time_cells()
     assert oldest_cells[0]["text"] != time_cells[0]["text"]
     assert oldest_cells[0]["title"] <= newest_first_title
-    page.get_by_role("link", name=re.compile(r"Time \(Europe/Berlin\)")).click()
+    page.locator("thead th", has_text="Time (Europe/Berlin)").locator("a").click()
     page.wait_for_function("() => window.location.href.includes('sort=newest')", timeout=10000)
     assert "sorted descending" in page.content()
     assert _time_cells()[0]["title"] == newest_first_title
