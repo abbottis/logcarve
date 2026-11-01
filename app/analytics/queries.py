@@ -189,6 +189,48 @@ def status_distribution(
     return [{"status": status, "requests": count} for status, count in rows]
 
 
+def _option_scope(filt: AnalyticsFilter) -> AnalyticsFilter:
+    """Dropdown scope: window/site/source plus non-method/status matchers.
+
+    Method/status/status-class narrowing is lifted so the dropdown can
+    always offer every value in the current scope (the current selection
+    is retained separately); everything else still narrows honestly.
+    """
+    return filt.model_copy(
+        update={"method": None, "status": None, "status_class": None, "limit": 1, "offset": 0}
+    )
+
+
+def distinct_methods(
+    conn: sqlite3.Connection, filt: AnalyticsFilter, classifier: Classifier | None = None
+) -> list[str]:
+    """Observed methods in scope; parameterized, bounded, ASCII-safe."""
+    scope = _option_scope(filt)
+    where, params = _where(scope, classifier)
+    rows = conn.execute(
+        "SELECT DISTINCT method FROM requests"
+        f" WHERE {where} AND method IS NOT NULL"
+        " ORDER BY method LIMIT 200",
+        params,
+    ).fetchall()
+    return [row[0] for row in rows if isinstance(row[0], str) and row[0].isascii()]
+
+
+def distinct_statuses(
+    conn: sqlite3.Connection, filt: AnalyticsFilter, classifier: Classifier | None = None
+) -> list[int]:
+    """Observed statuses in scope; parameterized, bounded, contract-range."""
+    scope = _option_scope(filt)
+    where, params = _where(scope, classifier)
+    rows = conn.execute(
+        "SELECT DISTINCT status FROM requests"
+        f" WHERE {where} AND status BETWEEN 100 AND 599"
+        " ORDER BY status LIMIT 500",
+        params,
+    ).fetchall()
+    return [row[0] for row in rows if isinstance(row[0], int)]
+
+
 _TOP_PATH_ORDER: dict[str, str] = {
     "requests_desc": "requests DESC, path ASC, method ASC",
     "errors_desc": "errors DESC, requests DESC, path ASC, method ASC",

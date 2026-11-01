@@ -86,7 +86,9 @@ def test_option_order_and_labels(web):
     labels = re.findall(r'<option value="[^"]+"[^>]*>([^<]+)</option>', _tz_select(page))
     assert len(labels) == len(values)
     assert all("_" not in label for label in labels), "labels must read with spaces"
-    assert "America/Argentina/Buenos Aires" in labels, "multi-level zones keep readable labels"
+    assert any(label.startswith("America/Argentina/Buenos Aires — UTC") for label in labels), (
+        "multi-level zones keep readable labels with signed offsets"
+    )
 
 
 def test_configured_default_first_and_applies(web, monkeypatch):

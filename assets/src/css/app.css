@@ -110,6 +110,13 @@
   overflow-x: auto;
 }
 
+/* Bot and group display names: ordinary names never break mid-word
+   (no letter-wrapping of "OpenAI" or "AI crawlers"). Wide tables keep
+   their natural width and scroll inside .table-scroll instead. */
+.bot-name {
+  white-space: nowrap;
+}
+
 /* Local htmx request indicators (htmx includeIndicatorStyles is off so
    no style element is injected at runtime, keeping style-src 'self'). */
 .htmx-indicator {

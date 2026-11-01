@@ -10,6 +10,7 @@ Every log-derived value renders through Jinja2 autoescaping.
 
 from dataclasses import asdict
 from datetime import UTC, datetime, timedelta
+from http import HTTPStatus
 from pathlib import Path
 from urllib.parse import quote, urlencode
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
@@ -36,6 +37,7 @@ from app.web.evidence import evidence_url as _evidence_url
 from app.web.locales import t
 from app.web.timezones import (
     display_options,
+    format_offset_suffix,
     resolve_default_timezone,
     resolve_request_timezone,
 )
@@ -389,6 +391,23 @@ def _page_url(path: str, params, site: str, **overrides) -> str:
     return path + "?" + urlencode(query)
 
 
+def _quick_url(path: str, params, site: str, drop: tuple[str, ...] = (), **set_values) -> str:
+    """Preset quick-view URL: same site/source/window, paging reset.
+
+    Only the stated matcher changes: conflicting keys in ``drop`` are
+    removed explicitly (e.g. a status quick view drops any status class
+    instead of stacking a contradiction), ``set_values`` apply, and the
+    offset restarts at the first page. Anything contradictory that
+    remains is still rejected by the normal filter validation.
+    """
+    query = _canonical_query(params, site)
+    for key in drop:
+        query.pop(key, None)
+    query.update({key: str(value) for key, value in set_values.items() if value is not None})
+    query["offset"] = 0
+    return path + "?" + urlencode(query)
+
+
 def _format_bucket(iso_value: str, tz: ZoneInfo, bucket: str) -> str:
     moment = datetime.fromisoformat(iso_value).astimezone(tz)
     if bucket == "hour":
@@ -523,8 +542,50 @@ def _overview_context(request, conn, rules, params) -> tuple[dict | None, str | 
         else None
     )
     top_claim = (
-        {"title": claims[0].title, "requests": claims[0].counts["requests"]} if claims else None
+        {
+            "title": display_bot_title(claims[0].title),
+            "requests": claims[0].counts["requests"],
+        }
+        if claims
+        else None
     )
+    _attach_observed_options(conn, context, filt, rules)
+    quick_views = [
+        {
+            "label": t("quick.404"),
+            "url": _quick_url("/errors", params, site, ("status", "status_class"), status=404),
+        },
+        {
+            "label": t("quick.5xx"),
+            "url": _quick_url(
+                "/errors", params, site, ("status", "status_class"), status_class="5xx"
+            ),
+        },
+        {
+            "label": t("quick.bots"),
+            "url": _quick_url(
+                "/crawlers",
+                params,
+                site,
+                ("traffic", "bot", "category", "provider", "purpose"),
+                traffic="claimed_bot",
+            ),
+        },
+        {
+            "label": t("quick.humans"),
+            "url": _quick_url(
+                "/requests",
+                params,
+                site,
+                ("traffic", "bot", "category", "provider", "purpose"),
+                traffic="browser_like",
+            ),
+        },
+        {
+            "label": t("quick.largest"),
+            "url": _quick_url("/", params, site, (), paths_sort="bytes_desc"),
+        },
+    ]
     timeline = [
         {
             "label": _format_bucket(b["bucket"], params["tz"], bucket),
@@ -554,6 +615,7 @@ def _overview_context(request, conn, rules, params) -> tuple[dict | None, str | 
     context.update(
         {
             "fragment_url": "/partials/overview",
+            "quick_views": quick_views,
             "summary": summary,
             "totals": totals,
             "error_share": error_share,
@@ -644,11 +706,82 @@ def overview_partial(request: Request):
     return response
 
 
+def display_bot_title(title: str) -> str:
+    """Presentation name for a bot rule: one leading claim prefix dropped.
+
+    Rule IDs, versions, meanings and stored data are untouched; only the
+    human label loses the repeated ``Claimed `` prefix. Matching is a
+    strict leading prefix so paths, agents or data are never rewritten.
+    """
+    if isinstance(title, str) and title.startswith("Claimed "):
+        return title[len("Claimed ") :]
+    return title
+
+
+def category_label(value: str | None) -> str:
+    """Human display label for a catalog category; API values unchanged."""
+    if value is None:
+        return t("provider.unspecified")
+    label = t(f"category.{value}")
+    if label != f"category.{value}":
+        return label
+    return str(value).replace("_", " ").title()
+
+
+def provider_label(value: str | None) -> str:
+    """Human display label for a provider; ``None`` reads as Unspecified."""
+    if value is None:
+        return t("provider.unspecified")
+    return value
+
+
+def purpose_label(value: str | None) -> str:
+    """Human display label for a purpose; ``None`` reads as Unspecified."""
+    if value is None:
+        return t("purpose.unspecified")
+    return value
+
+
+def status_label(code: int) -> str:
+    """Human status label: standard phrase or an honest unregistered note."""
+    try:
+        return f"{code} · {HTTPStatus(code).phrase}"
+    except ValueError:
+        return t("status.unregistered", code=code)
+
+
+def human_bytes(value: int | None) -> str:
+    """Readable byte size (B/KiB/MiB/...); unknown stays an em dash."""
+    if value is None:
+        return "—"
+    size = float(value)
+    for unit in ("B", "KiB", "MiB", "GiB", "TiB"):
+        if abs(size) < 1024 or unit == "TiB":
+            return f"{size:.0f} {unit}" if unit == "B" else f"{size:.1f} {unit}"
+        size /= 1024
+    return f"{size:.1f} TiB"
+
+
+#: Standard methods offered first; observed extras append after these.
+STANDARD_METHODS = ["GET", "HEAD", "POST", "PUT", "DELETE", "CONNECT", "OPTIONS", "TRACE", "PATCH"]
+
+
+def _standard_statuses() -> list[dict[str, object]]:
+    """Every standard HTTP status code with its registered phrase."""
+    return [
+        {"value": status.value, "label": f"{status.value} · {status.phrase}"}
+        for status in sorted(HTTPStatus, key=lambda s: s.value)
+    ]
+
+
 def _filter_options(rules) -> dict:
     """Select options for the traffic/bot filter controls (server-built).
 
     Options come from the versioned rule catalog so the bar can only
     submit values the backend accepts; unknown values still 400.
+    Method/status controls additionally offer observed scope values
+    (attached per request); option values stay exact API contract
+    values while labels read human-friendly.
     """
     bots = [rule for rule in rules if rule.ua_contains or rule.ua_regex]
     categories = sorted({rule.category for rule in bots})
@@ -661,6 +794,7 @@ def _filter_options(rules) -> dict:
             {
                 "id": rule.id,
                 "title": rule.title,
+                "display_title": display_bot_title(rule.title),
                 "category": rule.category,
                 "provider": rule.provider,
             }
@@ -669,25 +803,102 @@ def _filter_options(rules) -> dict:
         "categories": categories,
         "providers": providers,
         "purposes": purposes,
+        "methods": list(STANDARD_METHODS),
+        "statuses": _standard_statuses(),
     }
+
+
+def _attach_observed_options(conn, context: dict, filt, rules) -> None:
+    """Attach observed method/status values to the shared filter options.
+
+    Observed values come from two bounded, parameterized, scope-aware
+    queries (window/site/source plus non-method/status matchers, no
+    N+1): dropdowns offer standards plus anything actually seen, and a
+    currently selected valid value is retained even when unobserved.
+    """
+    clf = service.classifier_for_filter(filt, rules)
+    observed_methods = queries.distinct_methods(conn, filt, clf)
+    methods = list(STANDARD_METHODS)
+    for method in sorted(set(observed_methods)):
+        if method not in methods:
+            methods.append(method)
+    if filt.method is not None and filt.method not in methods:
+        methods.append(filt.method)
+    observed_statuses = queries.distinct_statuses(conn, filt, clf)
+    standard_values = [entry["value"] for entry in context["filter_options"]["statuses"]]
+    statuses = [entry for entry in context["filter_options"]["statuses"]]
+    for code in sorted(set(observed_statuses)):
+        if code not in standard_values:
+            statuses.append({"value": code, "label": status_label(code)})
+            standard_values.append(code)
+    if filt.status is not None and filt.status not in standard_values:
+        statuses.append({"value": filt.status, "label": status_label(filt.status)})
+    context["filter_options"]["methods"] = methods
+    context["filter_options"]["statuses"] = sorted(statuses, key=lambda e: e["value"])
+
+
+def _active_filter_display(matchers: dict, rules=None) -> list[dict[str, str]]:
+    """Human-readable active-filter pairs; submitted values unchanged.
+
+    IDs, paths, methods and search text render verbatim; catalog-backed
+    selectors render their display labels (plain bot names, spaced
+    categories, status phrases). Unknown bot IDs fall back to the raw
+    value instead of hiding the active filter.
+    """
+    titles: dict[str, str] = {}
+    if rules:
+        for rule in rules:
+            if rule.ua_contains or rule.ua_regex:
+                titles[rule.id] = display_bot_title(rule.title)
+    items = []
+    for key, value in matchers.items():
+        shown = value
+        if key == "traffic":
+            shown = t(f"traffic.{value}")
+        elif key == "category":
+            shown = category_label(value)
+        elif key == "provider":
+            shown = provider_label(value)
+        elif key == "purpose":
+            shown = purpose_label(value)
+        elif key == "bot":
+            shown = titles.get(value, value)
+        elif key == "status":
+            try:
+                shown = status_label(int(value))
+            except (TypeError, ValueError):
+                shown = value
+        items.append({"key": key, "value": shown})
+    return items
 
 
 def _base_context(request: Request, params, site: str, sites, path: str, rules=None) -> dict:
     """Shell context shared by every data page (single filter source)."""
     filt = _checked_base_filter(params, site)
     _checked_selectors(filt, rules)
+    window_start = filt.window.time_from
     return {
         "t": t,
+        "display_bot": display_bot_title,
+        "category_label": category_label,
+        "provider_label": provider_label,
+        "purpose_label": purpose_label,
+        "status_label": status_label,
+        "human_bytes": human_bytes,
         "request": request,
         "sites": [{"id": row[0], "name": row[1]} for row in sites],
         "site": site,
         "range": params["range"],
         "tz_name": params["tz_name"],
+        # Offsets are always labelled at the applied window start, never
+        # the review date, with an explicit DST caveat in the template.
+        "tz_offset": format_offset_suffix(params["tz_name"], window_start),
+        "window_start_date": window_start.astimezone(UTC).strftime("%Y-%m-%d"),
         # One effective default everywhere: option order, selection
         # fallback and the Settings display can never disagree. Full
         # pages render the notice from the filter bar only; data
         # partials opt into the out-of-band notice via `oob_notice`.
-        "display_timezones": display_options(_effective_default()),
+        "display_timezones": display_options(_effective_default(), window_start),
         "oob_notice": False,
         "display_from": params["display_from"],
         "display_to": params["display_to"],
@@ -699,6 +910,9 @@ def _base_context(request: Request, params, site: str, sites, path: str, rules=N
         "page_url": lambda path, **overrides: _page_url(path, params, site, **overrides),
         "evidence_url": _evidence_url,
         "matchers": {k: v for k, v in params["matchers"].items() if v is not None},
+        "active_filters": _active_filter_display(
+            {k: v for k, v in params["matchers"].items() if v is not None}, rules
+        ),
         "params_source": params["source"],
         "limit": params["limit"],
         "offset": params["offset"],
@@ -792,6 +1006,7 @@ def _security_context(request: Request, conn, params):
     items = [
         _finding_view(site, filt, finding) for finding in findings_all[offset : offset + limit]
     ]
+    _attach_observed_options(conn, context, filt, request.app.state.rules)
     context.update(
         {
             "summary": summary,
@@ -843,6 +1058,7 @@ def _crawlers_context(request: Request, conn, params):
     robots_requests = queries.scoped_path_count(conn, filt, clf, path="/robots.txt")
     sitemap_requests = queries.scoped_path_count(conn, filt, clf, path_prefix="/sitemap.xml")
     groups = service.bot_groups(conn, filt, request.app.state.rules)
+    _attach_observed_options(conn, context, filt, request.app.state.rules)
     context.update(
         {
             "summary": summary,
@@ -875,6 +1091,7 @@ def _errors_context(request: Request, conn, params):
     page_filt = filt.model_copy(update={"limit": params["limit"], "offset": params["offset"]})
     table = service.error_groups(conn, page_filt, request.app.state.rules)
     summary = service.summarize(conn, filt, request.app.state.rules)
+    _attach_observed_options(conn, context, filt, request.app.state.rules)
     context.update(
         {
             "summary": summary,
@@ -907,6 +1124,7 @@ def _requests_context(request: Request, conn, params):
         conn, ExplorerQuery(filt=page_filt, sort=sort), request.app.state.rules
     )
     summary = service.summarize(conn, filt, request.app.state.rules)
+    _attach_observed_options(conn, context, filt, request.app.state.rules)
     # Display timestamps in the selected timezone; the UTC instant stays
     # in the title attribute so both instants are inspectable. Stored
     # values are UTC ISO strings; unparsable ones fall back to verbatim.
@@ -936,7 +1154,7 @@ def _requests_context(request: Request, conn, params):
     return context, None
 
 
-ASK_STARTER_COUNT = 8
+ASK_STARTER_COUNT = 9
 
 
 def _ask_context(request: Request, conn, params):
@@ -953,6 +1171,7 @@ def _ask_context(request: Request, conn, params):
     filt = context["filt"]
     summary = service.summarize(conn, filt, request.app.state.rules)
     settings = load_settings()
+    _attach_observed_options(conn, context, filt, request.app.state.rules)
     starters = [
         {
             "category": t(f"ask.starter.{index}.category"),
@@ -1254,3 +1473,26 @@ def sources_page(request: Request):
     with read_store(request) as conn:
         context = _sources_context(request, conn)
     return templates.TemplateResponse(request, "pages/data_sources.html", context)
+
+
+def _help_context(request: Request) -> dict:
+    """Session-gated Help context; bearer tokens never open this UI.
+
+    Reuses the optional shared filter/window state so active navigation
+    survives a Help visit, exactly like Settings and Data Sources.
+    """
+    return {
+        "t": t,
+        "request": request,
+        "nav_query": _optional_nav_query(request),
+        "verify_url": (
+            "https://developers.google.com/crawling/docs/crawlers-fetchers/verify-google-requests"
+        ),
+    }
+
+
+@router.get("/help", response_class=HTMLResponse)
+def help_page(request: Request):
+    if _session_or_none(request) is None:
+        return _redirect_to_login(request)
+    return templates.TemplateResponse(request, "pages/help.html", _help_context(request))

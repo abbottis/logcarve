@@ -1,4 +1,4 @@
-{% if oob_notice %}<p id="filter-times-notice" hx-swap-oob="true" class="w-full text-sm text-base-content/70">{{ t("filter.times_in", tz=tz_name) }}</p>{% endif %}
+{% if oob_notice %}<p id="filter-times-notice" hx-swap-oob="true" class="w-full text-sm text-base-content/70">{{ t("filter.times_in", tz=tz_name) }} ({{ tz_offset }}; {{ t("filter.offset_note", date=window_start_date) }})</p>{% endif %}
 <p class="tech mb-4 text-sm text-base-content/70" data-observation-window>{{ window_from }} → {{ window_to }}</p>
 {% include "partials/active_matchers.html" %}
 {% if summary.warnings %}
@@ -19,7 +19,7 @@
         <thead><tr><th scope="col">{{ t("table.path") }}</th><th scope="col">{{ t("table.status") }}</th><th scope="col" class="text-right">{{ t("table.requests") }}</th><th scope="col" class="text-right">{{ t("table.referrer") }}</th></tr></thead>
         <tbody>
           {% for group in groups %}
-          <tr><td class="tech break-all">{{ group.path }}</td><td class="tech">{{ group.status }}</td><td class="text-right tech">{{ group.requests }}</td><td class="text-right tech">{{ group.referrers }}</td></tr>
+          <tr><td class="tech break-all">{{ group.path }}</td><td class="tech">{{ status_label(group.status) }}</td><td class="text-right tech">{{ group.requests }}</td><td class="text-right tech">{{ group.referrers }}</td></tr>
           {% endfor %}
         </tbody>
       </table>

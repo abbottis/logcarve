@@ -1,4 +1,4 @@
-{% if oob_notice %}<p id="filter-times-notice" hx-swap-oob="true" class="w-full text-sm text-base-content/70">{{ t("filter.times_in", tz=tz_name) }}</p>{% endif %}
+{% if oob_notice %}<p id="filter-times-notice" hx-swap-oob="true" class="w-full text-sm text-base-content/70">{{ t("filter.times_in", tz=tz_name) }} ({{ tz_offset }}; {{ t("filter.offset_note", date=window_start_date) }})</p>{% endif %}
 <p class="tech mb-4 text-sm text-base-content/70" data-observation-window>{{ window_from }} → {{ window_to }}</p>
 {% if summary.warnings %}
 <div class="mb-4 space-y-2" role="status">
@@ -72,7 +72,7 @@
             <thead><tr><th scope="col">{{ t("table.status") }}</th><th scope="col" class="text-right">{{ t("table.requests") }}</th></tr></thead>
             <tbody>
               {% for row in status_rows %}
-              <tr><td class="tech">{{ row.status }}</td><td class="text-right tech">{{ row.requests }}</td></tr>
+              <tr><td class="tech">{{ status_label(row.status) }}</td><td class="text-right tech">{{ row.requests }}</td></tr>
               {% endfor %}
             </tbody>
           </table>
@@ -81,6 +81,14 @@
     </div>
   </section>
 </div>
+
+<nav class="mt-6 flex flex-wrap items-center gap-2 text-sm" aria-label="{{ t("overview.quick_views") }}">
+  <span class="font-medium">{{ t("overview.quick_views") }}:</span>
+  {% for view in quick_views %}
+  <a class="btn btn-outline btn-xs" href="{{ view.url }}">{{ view.label }}</a>
+  {% endfor %}
+</nav>
+<p class="mt-1 text-sm text-base-content/70">{{ t("quick.note") }}</p>
 
 <div class="mt-6 grid gap-6 xl:grid-cols-2">
   <section class="card bg-base-100 shadow" aria-labelledby="paths-h">
@@ -99,7 +107,7 @@
           <thead><tr><th scope="col">{{ t("table.path") }}</th><th scope="col">{{ t("table.method") }}</th><th scope="col" class="text-right" {% if paths_sort == "requests_desc" %}aria-sort="descending"{% endif %}>{{ t("table.requests") }}</th><th scope="col" class="text-right" {% if paths_sort == "errors_desc" %}aria-sort="descending"{% endif %}>{{ t("table.errors") }}</th><th scope="col" class="text-right" {% if paths_sort == "bytes_desc" %}aria-sort="descending"{% endif %}>{{ t("table.bytes") }}</th></tr></thead>
           <tbody>
             {% for item in paths["items"] %}
-            <tr><td class="tech break-all">{{ item.path }}</td><td class="tech">{{ item.method }}</td><td class="text-right tech">{{ item.requests }}</td><td class="text-right tech">{{ item.errors }}</td><td class="text-right tech">{{ item.bytes_total }}</td></tr>
+            <tr><td class="tech break-all">{{ item.path }}</td><td class="tech">{{ item.method }}</td><td class="text-right tech">{{ item.requests }}</td><td class="text-right tech">{{ item.errors }}</td><td class="text-right tech" title="{{ item.bytes_total }}">{{ human_bytes(item.bytes_total) }}</td></tr>
             {% endfor %}
           </tbody>
         </table>
@@ -134,6 +142,7 @@
   <section class="card bg-base-100 shadow" aria-labelledby="traffic-type-h">
     <div class="card-body">
       <h2 id="traffic-type-h" class="card-title text-base">{{ t("overview.traffic_breakdown") }}</h2>
+      <p class="text-sm text-base-content/70">{{ t("traffic.browser_like_note") }}</p>
       <div class="chart-frame"><canvas id="traffic-breakdown" aria-label="{{ t("overview.traffic_breakdown") }}" role="img"></canvas></div>
       <script id="traffic-breakdown-data" type="application/json">{{ {"buckets": traffic["buckets"], "requestsLabel": t("table.requests")} | tojson }}</script>
       <div class="table-scroll overflow-x-auto">

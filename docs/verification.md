@@ -1496,3 +1496,54 @@ import-quality notes) is independently reverified. Historical real
 AI 2-of-3 INCOMPLETE, no-new-paid-authorization, actual-demo-AI-off
 and x86-NOT-RUN are preserved. Coding Contributor usage stays
 separate from product Standard/data-egress/caps.
+
+## 2026-11-01 — Stage A owner-UX review (plan + labels/offsets/dropdowns/Crawlers/Help/starter/quick views)
+
+Bounded implementation on `feature/owner-ux-review-2026-11-01`, sole writer,
+exact model `muse-spark-1.3-contributor`/medium/Contributor ON; sandbox +
+approval ON, no agents/calls/push/main merge/production/deploy. Synthetic
+fixtures only; no schema/data migration, fixtures/digests/seeds untouched.
+Plan: `docs/owner-ux-review-plan.md` (date/reason, A1–A11, Stage B deferred).
+
+Change: presentation-only label/data separation (`display_bot_title`,
+`category/provider/purpose/status/human_bytes` display helpers; rule
+YAML, API fields/IDs/versions/provenance, stored data untouched);
+timezone option labels carry the signed UTC offset at the APPLIED window
+start (`format_offset_suffix`, bounded cached ZoneInfo, ETC/GMT-reverse,
+fractional, DST both sides, historical sub-minute seconds, malformed →
+"UTC offset unavailable"); offset notice updates only on successful
+Apply/OOB with DST caveat; method/status are native dropdowns (All +
+`http.HTTPStatus` standards + scoped observed/current-selected values,
+two bounded parameterized queries, permissive parsing unchanged);
+Crawlers groups stacked full-width with `.bot-name{white-space:nowrap}`
+(local rebuild, no page-overflow hiding); session-gated `/help` + sidebar
+with safe placeholder curl/stdlib examples and Google verification link
+(documentation only, no network); Ask AI starter 9 (manual-review
+firewall draft, populate-only, never applies/invents IPs); five Overview
+quick views preserving site/source/window with explicit matcher
+replacement + paging reset; status phrases + readable bytes as table
+polish; `traffic.claimed_bot` reads "Bots" with browser-like/identity
+legends. Stage B (8-column Requests overview, conflicting-bot signal)
+explicitly NOT implemented here.
+
+Actual results (project .venv, Python 3.12.16, same session, clean tree
+before commit): new `tests/unit/test_owner_ux_labels.py` (11 tests:
+prefix strip, category map, Unspecified, phrases incl. unregistered,
+human bytes, DST/fraction/Etc/GMT/sub-minute/malformed offsets,
+catalog completeness, bounded cache) PASS; new
+`tests/integration/test_owner_ux_stage_a.py` (12 tests: native
+dropdowns, selection/observed-custom retention, no-prefix dropdown,
+stacked readable groups, window-start offset incl. summer/winter,
+session-gated Help with safe examples, bearer-cannot-open-UI, Help
+filter state, firewall starter populate-only, quick-view scope/replace,
+quick-view follow-ups) PASS; full `tests/unit tests/integration`
+501 passed, 2 skipped (pre-existing skips); `ruff check .` PASS;
+`ruff format --check .` PASS (164 files). Four pre-existing tests
+updated for the authorized wording/count changes
+(`test_web_partb`, `test_web_slice_b2`, `test_web_timezones`).
+New e2e `tests/e2e/test_owner_ux_stage_a.py` (filters/offset,
+Crawlers nowrap, Help, 1440/1024/768/390 both themes): BLOCKED in this
+sandbox — chromium launch denied by the enclosing sandbox
+(MachPortRendezvous permission, kill EPERM); no retry, no weakening;
+coordinator runs `uv run --locked pytest tests/e2e -q` outside it.
+Docker/8080 NOT RUN here. No product/provider calls, no purchases.

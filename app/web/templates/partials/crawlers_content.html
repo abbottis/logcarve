@@ -1,4 +1,4 @@
-{% if oob_notice %}<p id="filter-times-notice" hx-swap-oob="true" class="w-full text-sm text-base-content/70">{{ t("filter.times_in", tz=tz_name) }}</p>{% endif %}
+{% if oob_notice %}<p id="filter-times-notice" hx-swap-oob="true" class="w-full text-sm text-base-content/70">{{ t("filter.times_in", tz=tz_name) }} ({{ tz_offset }}; {{ t("filter.offset_note", date=window_start_date) }})</p>{% endif %}
 <p class="tech mb-4 text-sm text-base-content/70" data-observation-window>{{ window_from }} → {{ window_to }}</p>
 {% include "partials/active_matchers.html" %}
 {% if summary.warnings %}
@@ -22,25 +22,28 @@
 <section class="card mt-6 bg-base-100 shadow" aria-labelledby="groups-h">
   <div class="card-body">
     <h2 id="groups-h" class="card-title text-base">{{ t("crawlers.groups_title") }}</h2>
+    <p class="text-sm text-base-content/70">{{ t("bot.identity_note") }}</p>
     <p class="text-sm text-base-content/70">{{ t("crawlers.groups_note") }}</p>
     {% if groups["providers"] %}
     <div class="chart-frame"><canvas id="bot-provider-groups" aria-label="{{ t("crawlers.groups_chart") }}" role="img"></canvas></div>
     <script id="bot-provider-groups-data" type="application/json">{{ {"rows": groups["providers"], "requestsLabel": t("table.requests")} | tojson }}</script>
     {% endif %}
-    <div class="grid gap-6 lg:grid-cols-3">
-      {% for dimension, title in [("categories", "filter.category"), ("providers", "filter.provider"), ("purposes", "filter.purpose")] %}
-      <div class="table-scroll overflow-x-auto">
+    <div class="space-y-6">
+      {% for dimension, title, labeller in [("categories", "filter.category", category_label), ("providers", "filter.provider", provider_label), ("purposes", "filter.purpose", purpose_label)] %}
+      <section aria-label="{{ t(title) }}">
         <h3 class="mb-2 text-sm font-medium">{{ t(title) }}</h3>
+        <div class="table-scroll overflow-x-auto">
         <table class="table table-sm">
           <caption class="sr-only">{{ t(title) }}</caption>
           <thead><tr><th scope="col">{{ t("table.value") }}</th><th scope="col" class="text-right">{{ t("table.requests") }}</th><th scope="col" class="text-right">{{ t("table.errors") }}</th><th scope="col" class="text-right">{{ t("table.bytes") }}</th><th scope="col" class="text-right">{{ t("table.rules") }}</th></tr></thead>
           <tbody>
             {% for group in groups[dimension] %}
-            <tr><td class="tech break-all">{{ group.name }}</td><td class="text-right tech">{{ group.requests }}</td><td class="text-right tech">{{ group.errors_4xx + group.errors_5xx }}</td><td class="text-right tech">{{ group.bytes_total }}</td><td class="text-right tech">{{ group.rules }}</td></tr>
+            <tr><td class="bot-name">{{ labeller(None) if group.name == "unclaimed" else labeller(group.name) }}</td><td class="text-right tech">{{ group.requests }}</td><td class="text-right tech">{{ group.errors_4xx + group.errors_5xx }}</td><td class="text-right tech">{{ group.bytes_total }}</td><td class="text-right tech">{{ group.rules }}</td></tr>
             {% endfor %}
           </tbody>
         </table>
-      </div>
+        </div>
+      </section>
       {% endfor %}
     </div>
   </div>
@@ -65,12 +68,12 @@
           <tr>
             <td>
               <details>
-                <summary class="cursor-pointer font-medium">{{ row.title }} <span class="tech text-sm text-base-content/70">{{ row.rule_id }} v{{ row.rule_version }}</span></summary>
+                <summary class="cursor-pointer font-medium bot-name">{{ display_bot(row.title) }} <span class="tech text-sm text-base-content/70">{{ row.rule_id }} v{{ row.rule_version }}</span></summary>
                 <div class="mt-2 rounded-lg border border-base-300 p-3 text-sm">
                   <p class="text-base-content/70">{{ row.meaning }}</p>
                   <dl class="mt-2 flex flex-wrap gap-x-6 gap-y-1">
-                    <div><dt class="inline text-base-content/70">{{ t("crawlers.provider") }}: </dt><dd class="inline tech">{{ row.provider or "—" }}</dd></div>
-                    <div><dt class="inline text-base-content/70">{{ t("crawlers.purpose") }}: </dt><dd class="inline tech">{{ row.purpose or "—" }}</dd></div>
+                    <div><dt class="inline text-base-content/70">{{ t("crawlers.provider") }}: </dt><dd class="inline">{{ provider_label(row.provider) }}</dd></div>
+                    <div><dt class="inline text-base-content/70">{{ t("crawlers.purpose") }}: </dt><dd class="inline">{{ purpose_label(row.purpose) }}</dd></div>
                     <div><dt class="inline text-base-content/70">{{ t("crawlers.traffic") }}: </dt><dd class="inline tech">{{ t("traffic." + row.traffic) }}</dd></div>
                     <div><dt class="inline text-base-content/70">{{ t("crawlers.agents") }}: </dt><dd class="inline tech">{{ row.distinct_agents }}</dd></div>
                   </dl>
@@ -111,7 +114,7 @@
                 </div>
               </details>
             </td>
-            <td class="tech">{{ row.category }}</td>
+            <td class="bot-name">{{ category_label(row.category) }}</td>
             <td class="text-right tech">{{ row.requests }}</td>
             <td class="text-right tech">{{ row.errors_4xx + row.errors_5xx }}</td>
             <td class="text-right tech">{{ row.bytes_total }}</td>

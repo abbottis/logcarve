@@ -280,7 +280,8 @@ def test_crawler_truncation_labels_first_agents(tmp_path, monkeypatch):
     html = client.get(f"/crawlers?site=default&{WINDOW_QS}&tz=UTC").text
     assert "first 10 of 55" in html
     assert "first 50 matching agents" not in html
-    assert "Claimed Googlebot" in html
+    assert "Googlebot" in html
+    assert "Claimed Googlebot" not in html, "display names drop the repeated prefix"
     assert "identity not verified" in html
     assert t("finding.limitations") in html
 
@@ -289,7 +290,7 @@ def test_ask_view_starters_and_disabled_state(web):
     client, _ = web
     _login(client)
     html = client.get(f"/ask?site=default&{WINDOW_QS}&tz=UTC").text
-    assert html.count("data-starter-prompt") == 8
+    assert html.count("data-starter-prompt") == 9
     assert t("ai.disabled") in html
     assert t("ask.hint") in html
     assert 'data-site="default"' in html

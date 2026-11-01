@@ -1,4 +1,4 @@
-{% if oob_notice %}<p id="filter-times-notice" hx-swap-oob="true" class="w-full text-sm text-base-content/70">{{ t("filter.times_in", tz=tz_name) }}</p>{% endif %}
+{% if oob_notice %}<p id="filter-times-notice" hx-swap-oob="true" class="w-full text-sm text-base-content/70">{{ t("filter.times_in", tz=tz_name) }} ({{ tz_offset }}; {{ t("filter.offset_note", date=window_start_date) }})</p>{% endif %}
 <p class="tech mb-4 text-sm text-base-content/70" data-observation-window>{{ window_from }} → {{ window_to }}</p>
 {% include "partials/active_matchers.html" %}
 {% if summary.warnings %}

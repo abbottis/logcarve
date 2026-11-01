@@ -130,14 +130,16 @@ def test_bot_groups_exact_and_pagination_independent(web):
     _login(client)
     base = f"site=default&{WINDOW_QS}&tz=UTC"
     page = client.get(f"/crawlers?{base}").text
-    assert "Claimed bots by category, provider and purpose" in page
+    assert "Bots by category, provider and purpose" in page
     assert "configured catalog claims" in page
     assert 'id="bot-provider-groups-data"' in page
     # Grouped shares ignore the table page limit/offset exactly.
     narrow = client.get(f"/crawlers?{base}&limit=1&offset=1").text
     assert narrow.count("bot-provider-groups-data") == 1
-    full_groups = re.findall(r'class="tech break-all">([^<]+)</td>', page)
-    narrow_groups = re.findall(r'class="tech break-all">([^<]+)</td>', narrow)
+    full_section = page.split('id="bots-h"')[0].split('id="groups-h"')[1]
+    narrow_section = narrow.split('id="bots-h"')[0].split('id="groups-h"')[1]
+    full_groups = re.findall(r'class="bot-name">([^<]+)</td>', full_section)
+    narrow_groups = re.findall(r'class="bot-name">([^<]+)</td>', narrow_section)
     assert full_groups and full_groups == narrow_groups
 
 
@@ -226,4 +228,4 @@ def test_settings_and_sources_keep_matchers_roundtrip(web):
     assert _params(back[0])["status"] == ["404"]
     again = client.get(html.unescape(back[0]))
     assert again.status_code == 200
-    assert "Claimed bots" in again.text
+    assert ">Bots</option>" in again.text

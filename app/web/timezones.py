@@ -31,6 +31,7 @@ unconverted times.
 from __future__ import annotations
 
 import os
+from datetime import UTC, datetime
 from functools import lru_cache
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError, available_timezones
 
@@ -77,9 +78,66 @@ def is_supported(name: object) -> bool:
     return True
 
 
-def display_label(name: str) -> str:
-    """Readable option label; the submitted value stays the exact key."""
-    return name.replace("_", " ")
+@lru_cache(maxsize=128)
+def _zone(name: str) -> ZoneInfo:
+    """Bounded cache of constructed zones; one object reused per request."""
+    return ZoneInfo(name)
+
+
+def offset_at(name: str, ref: datetime | None) -> object | None:
+    """Signed UTC offset of ``name`` at instant ``ref`` (window start).
+
+    Returns a ``timedelta`` (east positive, west negative, fractional
+    and sub-minute values preserved) or ``None`` when the zone or the
+    reference cannot be resolved. Never touches the filesystem with
+    caller input: only exact catalogue keys are constructed.
+    """
+    try:
+        zone = _zone(name)
+    except (ZoneInfoNotFoundError, ValueError):
+        return None
+    moment = ref
+    if moment is None:
+        moment = datetime.now(UTC)
+    if moment.tzinfo is None:
+        moment = moment.replace(tzinfo=UTC)
+    try:
+        return moment.astimezone(zone).utcoffset()
+    except (ValueError, OverflowError, OSError):
+        return None
+
+
+def format_offset_suffix(name: str, ref: datetime | None) -> str:
+    """Signed `UTC±HH:MM` suffix for ``name`` at ``ref`` (window start).
+
+    Exact hours and minutes; seconds are appended only for historical
+    sub-minute offsets. Falls back to an unavailable marker instead of
+    guessing when the offset cannot be resolved.
+    """
+    from datetime import timedelta
+
+    delta = offset_at(name, ref)
+    if not isinstance(delta, timedelta):
+        return "UTC offset unavailable"
+    total = int(delta.total_seconds())
+    sign = "+" if total >= 0 else "-"
+    rest = abs(total)
+    hours, rest = divmod(rest, 3600)
+    minutes, seconds = divmod(rest, 60)
+    if seconds:
+        return f"UTC{sign}{hours:02d}:{minutes:02d}:{seconds:02d}"
+    return f"UTC{sign}{hours:02d}:{minutes:02d}"
+
+
+def display_label(name: str, ref: datetime | None = None) -> str:
+    """Readable option label with signed offset; value stays the exact key.
+
+    The offset is calculated for the applied window start ``ref``
+    (never the review date), so historical and DST windows read
+    truthfully. ``ref=None`` falls back to now for non-window callers.
+    """
+    readable = name.replace("_", " ")
+    return f"{readable} — {format_offset_suffix(name, ref)}"
 
 
 def ordered_timezones(default: str | None = None) -> list[str]:
@@ -100,9 +158,17 @@ def ordered_timezones(default: str | None = None) -> list[str]:
     return ordered
 
 
-def display_options(default: str | None = None) -> list[dict[str, str]]:
-    """Option dicts for the native timezone ``<select>``."""
-    return [{"value": name, "label": display_label(name)} for name in ordered_timezones(default)]
+def display_options(
+    default: str | None = None, ref: datetime | None = None
+) -> list[dict[str, str]]:
+    """Option dicts for the native timezone ``<select>``.
+
+    Labels carry the signed offset at the applied window start ``ref``;
+    option values stay exact IANA keys.
+    """
+    return [
+        {"value": name, "label": display_label(name, ref)} for name in ordered_timezones(default)
+    ]
 
 
 def _is_env_region_key(name: str) -> bool:

@@ -61,7 +61,7 @@
     <select id="f-bot" name="bot" class="select select-bordered select-sm">
       <option value="" {% if not filt.bot %}selected{% endif %}>{{ t("filter.all_bots") }}</option>
       {% for bot in filter_options.bots %}
-      <option value="{{ bot.id }}" {% if filt.bot == bot.id %}selected{% endif %}>{{ bot.title }}</option>
+      <option value="{{ bot.id }}" {% if filt.bot == bot.id %}selected{% endif %}>{{ bot.display_title }}</option>
       {% endfor %}
     </select>
   </div>
@@ -70,7 +70,7 @@
     <select id="f-category" name="category" class="select select-bordered select-sm">
       <option value="" {% if not filt.category %}selected{% endif %}>{{ t("filter.all") }}</option>
       {% for category in filter_options.categories %}
-      <option value="{{ category }}" {% if filt.category == category %}selected{% endif %}>{{ category }}</option>
+      <option value="{{ category }}" {% if filt.category == category %}selected{% endif %}>{{ category_label(category) }}</option>
       {% endfor %}
     </select>
   </div>
@@ -79,7 +79,7 @@
     <select id="f-provider" name="provider" class="select select-bordered select-sm">
       <option value="" {% if not filt.provider %}selected{% endif %}>{{ t("filter.all") }}</option>
       {% for provider in filter_options.providers %}
-      <option value="{{ provider }}" {% if filt.provider == provider %}selected{% endif %}>{{ provider }}</option>
+      <option value="{{ provider }}" {% if filt.provider == provider %}selected{% endif %}>{{ provider_label(provider) }}</option>
       {% endfor %}
     </select>
   </div>
@@ -88,7 +88,7 @@
     <select id="f-purpose" name="purpose" class="select select-bordered select-sm">
       <option value="" {% if not filt.purpose %}selected{% endif %}>{{ t("filter.all") }}</option>
       {% for purpose in filter_options.purposes %}
-      <option value="{{ purpose }}" {% if filt.purpose == purpose %}selected{% endif %}>{{ purpose }}</option>
+      <option value="{{ purpose }}" {% if filt.purpose == purpose %}selected{% endif %}>{{ purpose_label(purpose) }}</option>
       {% endfor %}
     </select>
   </div>
@@ -102,11 +102,21 @@
   </div>
   <div class="form-control">
     <label class="label py-1" for="f-method"><span class="label-text">{{ t("filter.method") }}</span></label>
-    <input id="f-method" name="method" type="text" value="{{ filt.method or "" }}" maxlength="32" class="input input-bordered input-sm tech" placeholder="GET">
+    <select id="f-method" name="method" class="select select-bordered select-sm">
+      <option value="" {% if not filt.method %}selected{% endif %}>{{ t("filter.all") }}</option>
+      {% for method in filter_options.methods %}
+      <option value="{{ method }}" {% if filt.method == method %}selected{% endif %}>{{ method }}</option>
+      {% endfor %}
+    </select>
   </div>
   <div class="form-control">
     <label class="label py-1" for="f-status"><span class="label-text">{{ t("filter.status_exact") }}</span></label>
-    <input id="f-status" name="status" type="number" min="100" max="599" value="{{ filt.status if filt.status is not none else "" }}" class="input input-bordered input-sm tech" placeholder="404">
+    <select id="f-status" name="status" class="select select-bordered select-sm">
+      <option value="" {% if filt.status is none %}selected{% endif %}>{{ t("filter.all") }}</option>
+      {% for entry in filter_options.statuses %}
+      <option value="{{ entry.value }}" {% if filt.status == entry.value %}selected{% endif %}>{{ entry.label }}</option>
+      {% endfor %}
+    </select>
   </div>
   <div class="form-control">
     <label class="label py-1" for="f-referer-host"><span class="label-text">{{ t("filter.referrer") }}</span></label>
@@ -121,5 +131,5 @@
     <input id="f-search" name="search" type="search" value="{{ filt.search or "" }}" maxlength="128" class="input input-bordered input-sm" placeholder="{{ t("filter.search_placeholder") }}">
   </div>
   <button type="submit" class="btn btn-primary btn-sm">{{ t("filter.apply") }}</button>
-  <p id="filter-times-notice" class="w-full text-sm text-base-content/70">{{ t("filter.times_in", tz=tz_name) }}</p>
+  <p id="filter-times-notice" class="w-full text-sm text-base-content/70">{{ t("filter.times_in", tz=tz_name) }} ({{ tz_offset }}; {{ t("filter.offset_note", date=window_start_date) }})</p>
 </form>

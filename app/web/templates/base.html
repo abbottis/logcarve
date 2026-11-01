@@ -22,7 +22,7 @@
     <div id="nav-backdrop" class="fixed inset-0 z-30 hidden bg-black/50 lg:hidden" aria-hidden="true"></div>
     <nav id="side-nav" class="fixed inset-y-0 left-0 z-40 hidden w-60 shrink-0 overflow-y-auto border-r border-base-300 bg-base-100 p-4 lg:static lg:block" aria-label="{{ t("nav.main") }}">
       <ul class="menu gap-1">
-        {% for item in [("overview", "/", "nav.overview", "layout-dashboard"), ("security", "/security", "nav.security", "shield-alert"), ("crawlers", "/crawlers", "nav.crawlers", "bot"), ("errors", "/errors", "nav.errors", "circle-alert"), ("requests", "/requests", "nav.requests", "globe"), ("ask", "/ask", "nav.ask_ai", "sparkles"), ("settings", "/settings", "nav.settings", "settings"), ("sources", "/data-sources", "nav.data_sources", "database")] %}
+        {% for item in [("overview", "/", "nav.overview", "layout-dashboard"), ("security", "/security", "nav.security", "shield-alert"), ("crawlers", "/crawlers", "nav.crawlers", "bot"), ("errors", "/errors", "nav.errors", "circle-alert"), ("requests", "/requests", "nav.requests", "globe"), ("ask", "/ask", "nav.ask_ai", "sparkles"), ("help", "/help", "nav.help", "info"), ("settings", "/settings", "nav.settings", "settings"), ("sources", "/data-sources", "nav.data_sources", "database")] %}
         <li>
           {# The active view keeps its full current canonical filters;
              other views take the shared window plus every global event
