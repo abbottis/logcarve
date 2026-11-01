@@ -401,15 +401,17 @@ def security_findings(
                     )
                 )
         if rule.min_client_errors is not None:
-            for candidate in queries.repeated_client_errors(
+            candidates = queries.repeated_client_errors(
                 conn, filt, min_errors=rule.min_client_errors, classifier=clf
-            ):
-                sample_paths = queries.sample_paths_for_client(
-                    conn,
-                    filt,
-                    client_pseudonym=str(candidate["client_pseudonym"]),
-                    classifier=clf,
-                )
+            )
+            batched = queries.sample_paths_for_clients(
+                conn,
+                filt,
+                [str(candidate["client_pseudonym"]) for candidate in candidates],
+                classifier=clf,
+            )
+            for candidate in candidates:
+                sample_paths = batched.get(str(candidate["client_pseudonym"]), [])
                 findings.append(
                     Finding(
                         rule_id=rule.id,

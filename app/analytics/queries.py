@@ -416,6 +416,56 @@ def sample_paths_for_client(
     return [{"path": path, "status": status, "hits": hits} for path, status, hits in rows]
 
 
+#: Bounds for :func:`sample_paths_for_clients`: one batched query replaces
+#: up to 100 per-client scans with at most 100 * per-client-limit rows.
+MAX_SAMPLE_CLIENTS = 100
+SAMPLE_PATHS_PER_CLIENT = 5
+
+
+def sample_paths_for_clients(
+    conn: sqlite3.Connection,
+    filt: AnalyticsFilter,
+    client_pseudonyms: list[str],
+    *,
+    limit: int = SAMPLE_PATHS_PER_CLIENT,
+    classifier: Classifier | None = None,
+) -> dict[str, list[dict[str, object]]]:
+    """Batched top-``limit`` (path, status, hits) rows per client pseudonym.
+
+    One parameterized query over the full scoped filter (every base
+    selector applies BEFORE grouping, exactly as in
+    :func:`sample_paths_for_client`): per-client groups are ranked with
+    ``ROW_NUMBER()`` partitioned by client, ordered by hits DESC, path
+    ASC, status ASC — the same order as the single-client query. The
+    result maps each requested pseudonym to its sample list (missing
+    clients map to ``[]``). All-status sampling semantics are preserved:
+    no status predicate is added here. An empty request list returns
+    without touching the database.
+    """
+    wanted = [p for p in dict.fromkeys(client_pseudonyms) if p][:MAX_SAMPLE_CLIENTS]
+    if not wanted or limit < 1:
+        return {p: [] for p in dict.fromkeys(client_pseudonyms) if p}
+    where, params = _where(filt, classifier)
+    placeholders = ", ".join("?" for _ in wanted)
+    rows = conn.execute(
+        "SELECT client_pseudonym, path, status, hits FROM ("
+        " SELECT client_pseudonym, path, status, COUNT(*) AS hits,"
+        " ROW_NUMBER() OVER (PARTITION BY client_pseudonym"
+        " ORDER BY COUNT(*) DESC, path ASC, status ASC) AS rn"
+        f" FROM requests WHERE {where} AND client_pseudonym IN ({placeholders})"
+        " GROUP BY client_pseudonym, path, status"
+        ") WHERE rn <= ? ORDER BY client_pseudonym ASC, rn ASC",
+        [*params, *wanted, limit],
+    ).fetchall()
+    grouped: dict[str, list[dict[str, object]]] = {p: [] for p in wanted}
+    for client, path, status, hits in rows:
+        if len(grouped[client]) < limit:
+            grouped[client].append({"path": path, "status": status, "hits": hits})
+    for requested in dict.fromkeys(client_pseudonyms):
+        grouped.setdefault(requested, [])
+    return grouped
+
+
 def coverage(
     conn: sqlite3.Connection, filt: AnalyticsFilter, classifier: Classifier | None = None
 ) -> dict[str, object]:

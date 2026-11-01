@@ -1,5 +1,39 @@
 # Verification record
 
+## 2026-11-01 — Slice C targeted performance gate: batched per-client path sampling (plan)
+
+Bounded optimization only, on clean `ca491c2` (`feature/traffic-analytics`).
+Independent 100k profile: filtered Overview 8.825s, `service.security_findings`
+7.950s, 100× `sample_paths_for_client` scans 7.641s with 14.27M
+`classify_ua` calls. Fix: one shared parameterized batched
+top-5-per-client `(path, status, hits)` helper over the full scoped filter,
+using SQLite window ranking (`ROW_NUMBER() PARTITION BY client_pseudonym
+ORDER BY hits DESC, path ASC, status ASC`), bounded to 100 clients / 500
+returned rows, empty set returns without a query. No schema/index migration,
+no writes, no cross-request cache, no new dependency, no API/model contract
+change. Original all-status sampling semantics kept exactly: every base
+filter (site/source/window/method/status/class/path/referrer/search/
+traffic/bot) applies before grouping; per-client order and findings
+order/caps unchanged. Tests: hand-counted ties, cross-site/source
+separation, window/time bounds, status/class narrowing, filter no-widening,
+empty and cap cases, plus old-vs-new equality.
+
+Results 2026-11-01 (same session, clean tree before commit): new
+`tests/integration/test_security_batch_sampling.py` (12 tests) covers
+per-candidate old-vs-new equality, tie order, all-status semantics
+(200/500 rows stay sampled), per-client top-5 cap, status/class/path/
+search/method narrowing, in/out-of-window bounds, cross-site isolation,
+cross-source narrowing, classifier (`claimed_bot`) scoping, empty-list
+zero-statement cheap path, 101-client/500-row bounds with exactly 1 traced
+SQL statement, findings counts/order/samples, and empty-window findings.
+Focused + existing suites
+(`test_security_batch_sampling`, `test_analytics`, `test_api`,
+`test_demo_slice_c`, `test_t8_preparation`, `test_web_partb`,
+`unit/test_ai_tools`): 106 passed, exit 0. `ruff check .` PASS,
+`ruff format --check .` PASS (152 files) after formatting the new test
+file. Full unit/integration, browser/candidate and 100k benchmark reruns
+are coordinator-owned (NOT RUN here).
+
 ## 2026-11-01 — Slice C fixture-quality correction (browser/SEO breadth, undeployed)
 
 Owner-authorized bounded correction on clean `f740e6f`
