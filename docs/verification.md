@@ -1317,3 +1317,28 @@ settled display, caps/ledgers intact), API-04 (chat contract without
 raw-log/proxy regressions — full suite green). Prior incomplete real
 AI demo and no-new-paid-call status retained. Independent
 reinspection required; no merge to `main`, no production deployment.
+
+## 2026-11-01 — Independent correction: timezone residuals + AI projection truthfulness
+
+Six confirmed in-scope defects on bc1e057 fixed; cost-display fixes
+(onecall24524/50327/52889) preserved; 4000/8000/65536 caps and all
+budget/egress gates unchanged.
+
+| Check | Result | Evidence |
+| --- | --- | --- |
+| BEFORE reproduction (stubbed native, blocked sockets, temp DBs) | FAIL as reported | Full Overview DOM has 2× `filter-times-notice`; TZ=Asia/Tokyo unset-config orders UTC first while selecting Tokyo; wire says `sec-repeated-client-errorsx0`, `buckets=10 ...requests=0` over a 72-bin/30-event window |
+| AFTER: full pages 1 notice, partials 1 OOB notice, Apply-fail none | PASS | New `test_web_oob_notice.py`: 6 passed |
+| AFTER: effective default orders options + labels Settings; explicit URL wins | PASS | Same file; existing `test_partial_swap_carries_updated_timezone_notice` still green |
+| AFTER: findings carry named counts + v1; timeseries 72 bins/30 requests on wire AND fake history | PASS | New `test_assistant_projection.py`: 8 passed (incl. native↔fake normalized-equality, exact-scope parse-back incl. `;|`
+`[evidence fake]`, overflow fail-closed, poison/legacy withheld + failed-import warning) |
+| Full `pytest tests/unit tests/integration` | PASS | 476 passed, 2 skipped (pre-existing loopback-bind skips) |
+| `ruff check app tests` + `ruff format --check app tests` | PASS | All checks passed; 114 files formatted |
+| `pytest tests/e2e/test_timezone_select.py` | BLOCKED | Sandbox cannot launch headless shell (TargetClosedError at browser launch); environmental, not a product regression |
+| Real AI-02/x86/Docker/smoke | NOT RUN | No production transport, key, account or paid call; pending gates unchanged |
+
+Acceptance impact: timezone display consistency (filter bar, Settings,
+OOB updates), AI-01/AI-03 (truthful bounded evidence on both model
+paths), PRIV-01/02 (egress re-proven; hostile/legacy diagnostics
+withheld; no raw logs, IPs, secrets or clients cross), COST-01/02
+(ledger/display untouched, suite green). Historical failures and
+pending gates preserved. No merge, no deploy, no new dependencies.

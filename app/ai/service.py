@@ -59,6 +59,7 @@ from app.ai.providers.meta_responses import (
 from app.ai.tools.definitions import TOOL_NAMES, execute_tool, response_tool_definitions
 from app.analytics.classification import build_classifier, resolve_selector_indexes
 from app.analytics.contracts import TimeWindow
+from app.analytics.service import LIMITATIONS_BOT, LIMITATIONS_LOGS, LIMITATIONS_SECURITY
 from app.db.database import connect
 
 SYSTEM_PROMPT_PATH = Path(__file__).resolve().parent / "prompts" / "assistant_system.md"
@@ -1128,6 +1129,68 @@ def _inherit_narrowing(scope_value, model_value, default):
     return model_value if scope_value == default else scope_value
 
 
+def _projection_quality(tool_name: str, envelope: dict) -> dict:
+    """Compact quality state the model needs to interpret one result.
+
+    Timing, warning notes, import state and the tool's limitation text
+    travel explicitly; a bare count is never a substitute. Only
+    server-generated notes and integer import metadata travel — stored
+    `error_summary` free text (including legacy pre-allowlist
+    diagnostics and any poisoned metadata) is never included.
+    """
+    coverage = envelope.get("coverage")
+    coverage = coverage if isinstance(coverage, dict) else {}
+    result = envelope.get("result")
+    result = result if isinstance(result, dict) else {}
+    quality: dict[str, object] = {}
+    duration = result.get("duration")
+    if isinstance(duration, dict):
+        quality["timing"] = "available" if duration.get("available") else "unavailable"
+    warnings: list[str] = []
+    raw_warnings = result.get("warnings")
+    if isinstance(raw_warnings, list):
+        warnings.extend(item for item in raw_warnings if isinstance(item, str))
+    by_status: dict[str, int] = {}
+    imports = coverage.get("imports")
+    if isinstance(imports, list):
+        for imp in imports:
+            if not isinstance(imp, dict):
+                continue
+            status = imp.get("status")
+            if isinstance(status, str) and status:
+                by_status[status] = by_status.get(status, 0) + 1
+            imp_id = imp.get("import_id")
+            if not isinstance(imp_id, int) or isinstance(imp_id, bool):
+                continue
+            if status == "failed":
+                note = f"import {imp_id} failed: committed batches kept, resume to complete"
+            elif status == "running":
+                note = f"import {imp_id} still running: data may be partial"
+            else:
+                continue
+            if note not in warnings:
+                warnings.append(note)
+    attempts = coverage.get("import_attempts")
+    if isinstance(attempts, dict):
+        quality["imports"] = {
+            str(key): value for key, value in attempts.items() if isinstance(value, int)
+        }
+    if by_status:
+        quality["imports_by_status"] = dict(sorted(by_status.items()))
+    if warnings:
+        quality["warnings_total"] = len(warnings)
+        quality["warnings"] = warnings[:3]
+        if len(warnings) > 3:
+            quality["warnings_more"] = len(warnings) - 3
+    if tool_name == "get_security_findings":
+        quality["limitations"] = [*LIMITATIONS_SECURITY, *LIMITATIONS_LOGS]
+    elif tool_name == "get_crawler_claims":
+        quality["limitations"] = [*LIMITATIONS_BOT, *LIMITATIONS_LOGS]
+    else:
+        quality["limitations"] = list(LIMITATIONS_LOGS)
+    return quality
+
+
 def _execute_bounded_tool(
     db_path: Path,
     rules,
@@ -1204,6 +1267,8 @@ def _execute_bounded_tool(
             filters=envelope["filters"],
             observation_time=envelope["observation_time"],
             coverage=envelope["coverage"],
+            full_result=envelope["result"] if isinstance(envelope.get("result"), dict) else None,
+            quality=_projection_quality(name, envelope),
         )
     except egress.EgressViolation as exc:
         if exc.code == "payload_too_large":

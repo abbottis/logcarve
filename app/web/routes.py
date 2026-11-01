@@ -34,7 +34,11 @@ from app.api.deps import read_store, require_admin_session
 from app.config import load_settings
 from app.web.evidence import evidence_url as _evidence_url
 from app.web.locales import t
-from app.web.timezones import display_options, resolve_request_timezone
+from app.web.timezones import (
+    display_options,
+    resolve_default_timezone,
+    resolve_request_timezone,
+)
 
 router = APIRouter()
 templates = Jinja2Templates(directory=str(Path(__file__).resolve().parent / "templates"))
@@ -79,7 +83,7 @@ def _session_or_none(request: Request):
     return None if isinstance(session, JSONResponse) else session
 
 
-def _configured_default() -> str | None:
+def _configured_default_from(settings) -> str | None:
     """Validated configured default timezone, or None when unusable.
 
     Settings stay the authority; any load/validation failure falls back
@@ -88,10 +92,6 @@ def _configured_default() -> str | None:
     so the resolver's reliable regional server `TZ` fallback stays
     reachable; only an explicitly configured value wins over `TZ`.
     """
-    try:
-        settings = load_settings()
-    except (ValidationError, OSError, ValueError):
-        return None
     if "default_timezone" not in settings.model_fields_set:
         # Not explicitly configured (neither environment nor `.env`):
         # leave the default absent so the resolver's reliable regional
@@ -99,6 +99,32 @@ def _configured_default() -> str | None:
         return None
     candidate = settings.default_timezone
     return candidate if isinstance(candidate, str) and candidate else None
+
+
+def _configured_default() -> str | None:
+    """Configured default from live settings, or None when unusable."""
+    try:
+        settings = load_settings()
+    except (ValidationError, OSError, ValueError):
+        return None
+    return _configured_default_from(settings)
+
+
+def _effective_default(settings=None) -> str:
+    """One resolved default for ordering, selection fallback and Settings.
+
+    An explicitly configured default wins; otherwise the trusted
+    regional server `TZ` applies; anything unusable names `UTC`. The
+    same value orders the option list and labels the Settings display
+    so the two can never disagree. An explicit `tz` URL value still
+    wins for the selected display zone without changing this default.
+    """
+    if settings is None:
+        try:
+            settings = load_settings()
+        except (ValidationError, OSError, ValueError):
+            return resolve_default_timezone(None)
+    return resolve_default_timezone(_configured_default_from(settings))
 
 
 def _parse_view_params(request: Request, now: datetime, default_limit: int = 20):
@@ -612,6 +638,7 @@ def overview_partial(request: Request):
     # Push the canonical full-page filter URL (not the fragment
     # endpoint) so reload, back and forward land on the real page with
     # the applied filters. This header overrides hx-push-url behavior.
+    context["oob_notice"] = True
     response = templates.TemplateResponse(request, "partials/overview_content.html", context)
     response.headers["HX-Push-Url"] = context["canonical_url"]
     return response
@@ -656,7 +683,12 @@ def _base_context(request: Request, params, site: str, sites, path: str, rules=N
         "site": site,
         "range": params["range"],
         "tz_name": params["tz_name"],
-        "display_timezones": display_options(_configured_default()),
+        # One effective default everywhere: option order, selection
+        # fallback and the Settings display can never disagree. Full
+        # pages render the notice from the filter bar only; data
+        # partials opt into the out-of-band notice via `oob_notice`.
+        "display_timezones": display_options(_effective_default()),
+        "oob_notice": False,
         "display_from": params["display_from"],
         "display_to": params["display_to"],
         "window_from": filt.window.time_from.isoformat(),
@@ -973,7 +1005,11 @@ def _settings_context(request: Request):
         "request": request,
         "nav_query": _optional_nav_query(request),
         "app_base_url": settings.app_base_url,
-        "default_timezone": settings.default_timezone,
+        # The same resolved effective default that orders the filter-bar
+        # options: configured value wins, otherwise the trusted regional
+        # server TZ, otherwise UTC. Never the raw "UTC" placeholder while
+        # routing actually falls back to a regional zone.
+        "default_timezone": _effective_default(settings),
         "retention_days": settings.retention_days,
         "external_api_enabled": settings.external_api_enabled,
         "ai_enabled": settings.ai_enabled,
@@ -1069,6 +1105,7 @@ def security_partial(request: Request):
         return HTMLResponse(
             f'<p class="alert alert-error" role="alert">{t(error)}</p>', status_code=400
         )
+    context["oob_notice"] = True
     response = templates.TemplateResponse(request, "partials/security_content.html", context)
     response.headers["HX-Push-Url"] = context["canonical_url"]
     return response
@@ -1106,6 +1143,7 @@ def crawlers_partial(request: Request):
         return HTMLResponse(
             f'<p class="alert alert-error" role="alert">{t(error)}</p>', status_code=400
         )
+    context["oob_notice"] = True
     response = templates.TemplateResponse(request, "partials/crawlers_content.html", context)
     response.headers["HX-Push-Url"] = context["canonical_url"]
     return response
@@ -1143,6 +1181,7 @@ def errors_partial(request: Request):
         return HTMLResponse(
             f'<p class="alert alert-error" role="alert">{t(error)}</p>', status_code=400
         )
+    context["oob_notice"] = True
     response = templates.TemplateResponse(request, "partials/errors_content.html", context)
     response.headers["HX-Push-Url"] = context["canonical_url"]
     return response
@@ -1180,6 +1219,7 @@ def requests_partial(request: Request):
         return HTMLResponse(
             f'<p class="alert alert-error" role="alert">{t(error)}</p>', status_code=400
         )
+    context["oob_notice"] = True
     response = templates.TemplateResponse(request, "partials/requests_content.html", context)
     response.headers["HX-Push-Url"] = context["canonical_url"]
     return response
