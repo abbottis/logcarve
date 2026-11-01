@@ -3,11 +3,10 @@
 Status: **DELIVERED and independently verified — 2026-11-01, closeout.**
 ANA-04/ANA-05 accepted; API-05 and UI-05 added to
 [acceptance criteria](acceptance-criteria.md). No application changes in this
-document. Slices A, B and C were implemented on
-`feature/traffic-analytics` and verified by the independent local runner
-(see `docs/verification.md`); implementation plus independent AI-assisted
-planning, review and testing produced the result, with no exclusive
-single-tool or manual-only authorship claim.
+document. Slices A, B and C were implemented by Muse with separate
+AI-assisted planning, review and testing, on `feature/traffic-analytics`,
+and verified by the independent local runner
+(see `docs/verification.md`).
 
 Owner request: complete fundamental log analysis, LogWerk-style traffic
 selection and named-bot sorting, then implement and test. References:
@@ -233,7 +232,7 @@ Tests: integration (filter propagation, URL state) + repeatable Playwright
 local assets only, real Chart datasets, paging/sorting), console/network
 clean.
 
-### Slice C — synthetic demo data, compatibility, measured scale (AUTHORIZED 2026-11-01, DELIVERED FOR INDEPENDENT RUNTIME VERIFICATION)
+### Slice C — synthetic demo data, compatibility, measured scale (AUTHORIZED 2026-11-01, DELIVERED AND INDEPENDENTLY VERIFIED)
 
 Decision (concrete, review-accepted): preserve the original T8 fixture
 untouched; add one additive synthetic fixture with hand counts exercising
@@ -255,10 +254,11 @@ tracked isolated candidate procedure
 (`scripts/demo/verify_candidate.sh`, project `logcarve-demo-candidate`,
 loopback 8091), combined-window demo URL (26 Oct–01 Nov), and the accepted
 B legacy-test update (`status=404` preserved across navigation; behavior
-unchanged). STOP for independent runtime verification (candidate Docker
-run, offline smoke, protected Playwright incl. the updated B case, and
-the typical whole-page 100k benchmark, and the persistent-demo update at
-clean source `e81d2d0`. No claim beyond the evidence in
+unchanged). Independent runtime verification is finished and recorded
+in `docs/verification.md`: candidate Docker run, offline smoke,
+protected Playwright including the updated B case, the typical
+whole-page 100k benchmark, and the persistent-demo update, all at clean
+source `e81d2d0`. No claim beyond the evidence in
 `docs/verification.md`.
 
 Non-goals (recorded, not silently promoted): gzip/custom formats, rotation,

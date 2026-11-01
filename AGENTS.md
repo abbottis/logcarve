@@ -4,7 +4,7 @@
 
 - LogCarve is a self-hosted, AI-assisted web access-log analysis tool.
 - LogCarve itself is Apache-2.0 (see `LICENSE`); upstream LogWerk rule adaptations retain MIT (see `THIRD_PARTY_NOTICES.md`).
-- This checkout holds the analytics closeout on `feature/traffic-analytics` (slices A/B/C delivered and independently verified at clean `e81d2d0` per `docs/analytics-completion-plan.md`); measure the current state from the code and `docs/verification.md`, never from scaffold-era statements.
+- This checkout holds the analytics closeout (slices A/B/C delivered and independently verified at clean application source `e81d2d0` on the reviewed public source branch `feature/traffic-analytics`, per `docs/analytics-completion-plan.md`); the canonical working checkout was integrated on `local/analytics-completion-2026-11-01` (application equivalent `030df8a`). Inspect `git status` rather than assuming a branch name. Later doc-only commits do not repeat application tests; measure the current state from the code and `docs/verification.md`, never from scaffold-era statements.
 - Read `docs/mvp.md`, `docs/architecture.md` and the relevant acceptance criteria before implementation.
 - `docs/technical-spec.md` is the supplied v0.4 requirements snapshot, written in German.
 - Treat statements about future functionality as requirements, never as evidence of implementation.

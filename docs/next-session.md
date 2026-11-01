@@ -2,12 +2,16 @@
 
 ## Where things stand
 
-- `feature/traffic-analytics` at clean source `e81d2d0`: fundamental
+- Analytics closeout at clean application source `e81d2d0` on the
+  reviewed public source branch `feature/traffic-analytics`: fundamental
   traffic graphs, traffic selection with the 77-rule bot catalog, bot
   sorting and drilldowns, and the sanitized request explorer are
   implemented and independently verified (see `docs/verification.md`).
-  Muse implementation plus independent AI-assisted planning, review and
-  testing produced the result; no exclusive authorship claim.
+  The canonical working checkout was integrated on
+  `local/analytics-completion-2026-11-01` (application equivalent
+  `030df8a`); inspect `git status` rather than assuming a branch name.
+  Later doc-only commits do not repeat application tests. Muse
+  implementation with separate AI-assisted planning, review and testing.
 - Local demo dataset is 120 synthetic rows (30 legacy 26–28 Oct
   byte-identical plus 90 rich 29–31 Oct) under unchanged
   `example-combined`.

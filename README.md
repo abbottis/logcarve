@@ -6,10 +6,13 @@ AI-assisted, self-hosted web access-log analytics for security, crawler activity
 deterministic analytics, authenticated REST API, bounded Meta assistant,
 browser dashboard and local synthetic demo are implemented. Fundamental
 traffic graphs, traffic selection with a 77-rule bot catalog, bot sorting
-and drilldowns, and a sanitized request explorer are available on
-`feature/traffic-analytics` (clean source `e81d2d0`); independent runtime
-verification is recorded in the [verification history](docs/verification.md).
-No `main` merge, release claim or deployment is included.
+and drilldowns, and a sanitized request explorer are available from the
+reviewed public source branch `feature/traffic-analytics` (clean
+application source `e81d2d0`); independent runtime verification is
+recorded in the [verification history](docs/verification.md).
+No `main` merge, release claim or production deployment is included; the
+local persistent demo was updated in place. Inspect `git status` for the
+active checkout rather than assuming a branch name.
 
 ## Run the local synthetic demo
 
@@ -42,7 +45,7 @@ replays the verified synthetic fixture without resetting auth or usage.
 - SQLite migrations, replay-safe batch imports, retention and online backups.
 - One deterministic analytics layer shared by the dashboard, API and tools.
 - Server-side admin sessions and separate scoped, site-bound API tokens.
-- Overview, Security, Crawlers, Errors, Ask AI, Settings and Data Sources.
+- Overview, Security, Crawlers, Errors, Requests, Ask AI, Settings and Data Sources.
 - Fundamental request/error/byte timelines, traffic and bot shares, paths,
   referrers, resource kinds, claimed browser/OS distributions, weekday/hour
   heatmap and pseudonymized client aggregates.

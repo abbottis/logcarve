@@ -7,7 +7,6 @@ The supplied spec identifies the prior LogWerk project and requires transparent 
 | 2026-10-28 | Directory scaffold, project instructions, four project skills and derived planning/configuration docs | New LogCarve preparation from supplied v0.4 spec and official Muse docs | Local files; no application behavior claimed |
 | 2026-10-28 | `docs/technical-spec.md` | Owner-supplied German specification v0.4 | Unmodified snapshot; checksum in `spec-provenance.md` |
 | 2026-10-31 | External client `findings` route correction and verification | New original LogCarve change implemented with AI assistance at the owner's request; no LogWerk import | Existing real-HTTP tests pass; full suite 137 passed in clean and conflicting environments; see `verification.md` |
-
 | 2026-11-01 | Bot rule catalog v3: 70 LogWerk `botRules` patterns/names/provider-purpose labels adapted (pinned commit `d7ab01c`, MIT retained verbatim in `THIRD_PARTY_NOTICES.md`), 5 pre-existing LogCarve rule IDs kept, 2 original rules added (UptimeRobot monitoring, generic suspected-automation fallback); category/ordering/matcher remaps are new LogCarve work | Mixed adaptation with AI assistance at the owner's request; no LogWerk application code, session/person inference or sample data | `config/bot_rules.yaml` v3 (77 entries); see Slice A evidence in `verification.md` |
 | 2026-11-01 | Analytics completion slices A/B/C on `feature/traffic-analytics` (clean `e81d2d0`): traffic classification, scoped API and trusted assistant filters; rich dashboard panels with traffic/bot controls, sortable bot drilldowns and sanitized request explorer; combined 120-row synthetic demo dataset with probe/seeder and isolated candidate procedure | New LogCarve work implemented with AI assistance at the owner's request plus independent AI-assisted planning, review and testing; no LogWerk application code | Independently verified per `verification.md`: 428 unit/integration, 22 E2E, 53/53 API probe, 8/0 candidate Compose, 24/0 offline smoke, 32-case browser matrix |
 
@@ -18,10 +17,8 @@ Before submission: independently review the current Official Rules, verify eligi
 ## Analytics closeout, 1 November 2026
 
 The backend, deterministic analytics, authentication/API, bounded assistant,
-browser dashboard and local demo were developed under owner direction with
-Muse implementation plus independent AI-assisted planning, review and
-testing. This record makes no exclusive-tool, Muse-only or
-sole-manual-authorship claim.
+browser dashboard and local demo were developed under owner direction:
+Muse implementation with separate AI-assisted planning, review and testing.
 
 - Original implementation: parser, SQLite import/replay/backup/retention,
   shared analytics, scoped API, bounded model tools, local browser UI,
