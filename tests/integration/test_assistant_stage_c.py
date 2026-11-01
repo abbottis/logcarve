@@ -1210,7 +1210,7 @@ def test_client_verify_export_file_accepts_complete_bodies(tmp_path):
     complete_json.write_bytes(
         json.dumps(
             {
-                "metadata": {"row_count": 2},
+                "metadata": {"schema_version": "export/1", "row_count": 2},
                 "rows": [{"path": "/a"}, {"path": "/b"}],
                 "complete": True,
             }
@@ -1240,7 +1240,11 @@ def test_client_verify_export_file_rejects_truncated_bodies(tmp_path):
     wrong_count = tmp_path / "wrong.json"
     wrong_count.write_bytes(
         json.dumps(
-            {"metadata": {"row_count": 1}, "rows": [{"path": "/a"}], "complete": True}
+            {
+                "metadata": {"schema_version": "export/1", "row_count": 1},
+                "rows": [{"path": "/a"}],
+                "complete": True,
+            }
         ).encode()
     )
     with pytest.raises(SystemExit):

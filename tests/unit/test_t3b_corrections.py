@@ -438,20 +438,43 @@ def test_verify_refuses_unbounded_reads_and_counts_streamed_csv(tmp_path, monkey
 
     real_open = builtins.open
 
+    class _GuardedHandle:
+        """Proxy: only bounded read/readline; iteration always raises."""
+
+        def __init__(self, raw):
+            self._raw = raw
+
+        def read(self, size: int = -1):
+            assert size is not None and size >= 0, "unbounded read() is forbidden"
+            return self._raw.read(size)
+
+        def readline(self, size: int = -1):
+            assert size is not None and size >= 0, "unbounded readline() is forbidden"
+            assert size <= client_mod._CSV_READLINE_CHARS, "oversized readline() bound"
+            return self._raw.readline(size)
+
+        def __iter__(self):
+            raise AssertionError("bare handle iteration is forbidden")
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *exc):
+            return self._raw.__exit__(*exc)
+
+        def close(self):
+            return self._raw.close()
+
     def refusing_open(path, mode="r", *args, **kwargs):
         handle = real_open(path, mode, *args, **kwargs)
         if "r" in mode:
-            raw_read = handle.read
-
-            def checked(size: int = -1):
-                assert size is not None and size >= 0, "unbounded read() is forbidden"
-                return raw_read(size)
-
-            handle.read = checked  # type: ignore[method-assign]
+            return _GuardedHandle(handle)
         return handle
 
-    # Any unbounded file read inside verification raises here instead
-    # of silently buffering: success below proves bounded access.
+    # Any unbounded file read (or bare iteration, which hides an
+    # unbounded physical-line read behind the iterator protocol)
+    # inside verification raises here instead of silently buffering:
+    # success below proves bounded access.
     monkeypatch.setattr("builtins.open", refusing_open)
     dest = tmp_path / "ok.csv"
     # Quoted newline plus multibyte text: one logical record, split
@@ -465,7 +488,7 @@ def test_verify_json_incremental_across_chunk_boundaries(tmp_path, monkeypatch):
     monkeypatch.setattr(client_mod, "VERIFY_CHUNK_BYTES", 7)
     body = json.dumps(
         {
-            "metadata": {"row_count": 3},
+            "metadata": {"schema_version": "export/1", "row_count": 3},
             "rows": [
                 {"n": 5, "z": None, "formula": "'=1+1"},
                 {"n": 0, "z": None, "text": "✓ multibyte ✓"},
@@ -489,26 +512,46 @@ def test_verify_json_incremental_across_chunk_boundaries(tmp_path, monkeypatch):
 @pytest.mark.parametrize(
     ("ext", "body", "expected"),
     [
-        ("json", b'{"metadata": {"row_count": 2}, "rows": [{"n": 1}]', 2),  # truncated
-        ("json", b'{"metadata": {"row_count": 2}, "rows": [', 2),  # malformed
+        (
+            "json",
+            b'{"metadata": {"schema_version": "export/1", "row_count": 2}, "rows": [{"n": 1}]',
+            2,
+        ),  # truncated
+        (
+            "json",
+            b'{"metadata": {"schema_version": "export/1", "row_count": 2}, "rows": [',
+            2,
+        ),  # malformed
         (
             "json",
             json.dumps(
-                {"metadata": {"row_count": 2}, "rows": [{"n": 1}], "complete": False}
+                {
+                    "metadata": {"schema_version": "export/1", "row_count": 2},
+                    "rows": [{"n": 1}],
+                    "complete": False,
+                }
             ).encode(),
             1,
         ),  # incomplete marker
         (
             "json",
             json.dumps(
-                {"metadata": {"row_count": 9}, "rows": [{"n": 1}], "complete": True}
+                {
+                    "metadata": {"schema_version": "export/1", "row_count": 9},
+                    "rows": [{"n": 1}],
+                    "complete": True,
+                }
             ).encode(),
             1,
         ),  # metadata mismatch
         (
             "json",
             json.dumps(
-                {"metadata": {"row_count": 2}, "rows": [{"n": 1}], "complete": True}
+                {
+                    "metadata": {"schema_version": "export/1", "row_count": 2},
+                    "rows": [{"n": 1}],
+                    "complete": True,
+                }
             ).encode(),
             1,
         ),  # row-count mismatch
@@ -563,7 +606,11 @@ def test_download_refuses_existing_and_symlink_targets(tmp_path):
 
 def test_download_creates_owned_0600_and_cleans_midstream_failure(tmp_path):
     dest = tmp_path / "fresh.json"
-    envelope = {"metadata": {"row_count": 1}, "rows": [{"n": 1}], "complete": True}
+    envelope = {
+        "metadata": {"schema_version": "export/1", "row_count": 1},
+        "rows": [{"n": 1}],
+        "complete": True,
+    }
     opener = _FakeOpener(_FakeResponse(json.dumps(envelope).encode(), _export_headers(1)))
     summary = client_mod.download_export(
         "http://127.0.0.1:9",
@@ -635,7 +682,11 @@ def test_fetch_and_download_use_safe_opener(tmp_path):
     assert out == {"summary": True}
     assert opener.requests[0].get_header("Authorization") == "Bearer SYNTHETIC_TOKEN"
 
-    envelope = {"metadata": {"row_count": 1}, "rows": [{"n": 1}], "complete": True}
+    envelope = {
+        "metadata": {"schema_version": "export/1", "row_count": 1},
+        "rows": [{"n": 1}],
+        "complete": True,
+    }
     dest = tmp_path / "dl.json"
     opener2 = _FakeOpener(_FakeResponse(json.dumps(envelope).encode(), _export_headers(1)))
     summary = client_mod.download_export(

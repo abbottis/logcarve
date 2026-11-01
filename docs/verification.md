@@ -1,9 +1,118 @@
 # Verification record
 
+## 2026-11-01 — Parity pre-T4a export-client strictness follow-up
+
+Owner-authorized bounded follow-up BEFORE T4a on
+`feature/logwerk-parity-2026-11-01` (prior HEAD `7c0aee2`
+preserved, no amend), exact model `muse-spark-1.3-contributor` /
+medium / Contributor ON; sandbox + approval ON, sole writer, no
+subagents, no extra approval loop, no parent files/keys/private
+history/real logs, no Docker/product/provider calls/push/main/
+deployment. All application/test changes by the implementer.
+Public/synthetic data only; the 120 fixtures, 77 bot rules,
+HMAC/auth/usage and all previous commits preserved (no fixture,
+rule or config changes). No browser import, no translations.
+Independent review stays required before T4a.
+
+Reproduced first on the frozen anchor `7c0aee2` (clean tree):
+`_verify_export_file` ACCEPTED JSON with missing metadata,
+missing rows, missing `metadata.row_count`, a trailing envelope
+comma, a trailing rows comma and scalar row `42` (plus nested
+duplicate keys and `NaN`, probed the same way); ACCEPTED CSV
+header `path,status,bytes` with short row `/x,200`, header
+`path,status` with long row `/x,200,extra`, and an unterminated
+quoted final row; `_SafeRedirectHandler` forwarded synthetic
+`Authorization` on `http://example.invalid:80/source` ->
+`ftp://example.invalid:80/target` with no network used; an
+injected COMMIT sqlite error rolled back yet `execute_tool`
+still returned success; the CLI default (`--endpoint all`)
+included `comparison` without baseline flags (live-loopback
+`test_external_client_summary_crawlers_findings` failed HTTP 400
+outside the sandbox). Normal owned snapshots, inside-halves
+comparison, the 12-case ASGI export cleanup, 0600/exclusive
+output ownership, partial cleanup and existing+symlink refusal
+were retained (re-verified, not re-fixed).
+
+Corrections (each re-probed before fixing, then covered by
+controlled tests):
+
+1. Strict JSON streaming validation
+   (`clients/logcarve_api_client.py`): the exact `export/1`
+   envelope is now mandatory — `metadata` object with
+   `schema_version == "export/1"` and a non-bool integer
+   `row_count` in `[0, 250000]` matching the header count,
+   `rows` array of objects of matching length, `complete`
+   exactly `true` — with strict grammar at every depth (no
+   trailing commas, no duplicate keys, no `NaN`/`Infinity`,
+   no unknown components, no trailing junk). Whitespace, key
+   order, UTF-8, escaped quotes/newlines, chunk splits and
+   large counts stay accepted; consumed input is dropped so
+   the whole file is never held.
+2. Strict CSV validation (`clients/logcarve_api_client.py`):
+   valid nonempty unique header and exact header width on
+   EVERY data row under `strict=True` quoting. A bounded
+   `readline()`-only record iterator (never handle iteration,
+   never unbounded `read()`) enforces the 1 MiB record bound
+   BEFORE `csv.reader` can preallocate, while quoted
+   multiline fields stay one record. Wide (3 MiB, many
+   columns) and tall (quoted multiline past 1 MiB) hostile
+   records fail after ~1 MiB + slice granularity, never the
+   whole file. Documented limit: a same-count shortening
+   inside one valid final cell is not cryptographically
+   detectable; row drops, grammar breaks and network aborts
+   (`IncompleteRead`/timeouts) are caught.
+3. Redirects (`clients/logcarve_api_client.py`): only
+   `http`/`https` targets, no credential-bearing userinfo, no
+   malformed ports, same hostname (case-insensitive), same
+   effective port except the canonical same-host `http`->`https`
+   default-port (80->443) upgrade; every scheme change, host
+   change, other port change and downgrade raises a safe
+   error before forwarding. Proven for BOTH `fetch` and
+   `download_export` (default opener carries the handler;
+   synthetic Request/fake transports only, no real network).
+4. Snapshot finalization (`app/ai/tools/definitions.py`): an
+   owned COMMIT failure now rolls back and raises
+   `ToolError(store_unavailable)` instead of returning
+   success; caller-owned transactions stay untouched (even
+   when COMMIT would fail). The trusted equal-halves
+   comparison, evidence, ranking, 65 KiB wire and 1600-char
+   bounds fixes are intact.
+5. External CLI (`clients/logcarve_api_client.py`): the
+   default again fetches only the three standalone documents
+   (`summary`, `crawlers`, `findings`), preserving the
+   historical success assertion. `comparison` is explicit
+   opt-in with validated `--baseline-from`/`--baseline-to`
+   (ISO, tz-aware, ordered, required together, comparison
+   only); `--source`/`--limit`/`--offset` selectors are
+   validated and forwarded to the endpoints that accept
+   them. Fake-transport CLI/parser tests catch the old
+   default-comparison failure without sockets.
+6. Old client fixture bodies now carry the honest
+   `export/1` schema (`schema_version` added in
+   `test_t3b_corrections.py`, `test_assistant_stage_c.py`);
+   no production check was weakened for a fixture.
+
+| Check | Result | Evidence |
+| --- | --- | --- |
+| New `tests/unit/test_client_strictness.py` | PASS | 84 passed: 10 malformed/redirect probes as regressions (missing components, trailing commas, scalar rows, nested dup keys, non-finite constants, bad metadata/markers, short/long/unclosed/dup-header CSV, ftp/userinfo/port/scheme matrix, COMMIT injection, CLI default/baseline/selector matrix); JSON empty/3000-row streamed with 7/13-byte chunks; CSV multiline/escapes/empty with 5-char readline slices; wide+tall oversized fail with bounded consumption proofs; safe-opener proof for fetch+download; caller-owned survival; real `ExportStream`->file CSV+JSON compat incl empty window, null timing, Unicode, verbatim hostile path, no original IPs |
+| Full `tests/unit tests/integration` clean | PASS | 927 passed, 2 skipped (exit status read directly, no masking pipes) |
+| Full suites conflicting env (`AI_ENABLED=true LLM_WARN_AT_USD=999`) | PASS | 927 passed, 2 skipped |
+| Live-loopback `test_external_client.py` (2 tests) | SKIPPED here | Both skip in this sandbox (`loopback sockets are unavailable`); NOT executed, so no live-HTTP proof is inferred from the suite. Fake-transport CLI/parser regressions above executed and PASS. Root coordinator reruns the live-loopback test after the freeze |
+| `ruff check` + `ruff format --check` | PASS | Both clean repo-wide (190 files formatted) |
+| `uv lock --check --offline` | PASS | Resolved 42 packages, no manifest/lock delta (stdlib only) |
+| 120 fixtures / HMAC / 77 rules / usage | PASS | Untouched: tree shows only 2 modified app/client files + 2 updated tests + 1 new test; no fixture/rule/config changes |
+| Real AI / real acceptance / release | NOT RUN | No production transport, key, account or paid call; no native Linux/release claim; no full parity/T4 claim; stopping for independent review before T4a |
+
+Correction: the prior T3b entry above labels its prior HEAD
+`fbc1433`; the actual T3a application commit is `fbc1439`
+(fixed below). The two live-loopback tests were SKIPPED by the
+sandbox in every run on this page (recorded as skips, never as
+executed proof).
+
 ## 2026-11-01 — Parity T3b assistant/client corrections (4 findings)
 
 Owner-authorized bounded continuation on
-`feature/logwerk-parity-2026-11-01` (prior HEAD `fbc1433`
+`feature/logwerk-parity-2026-11-01` (prior HEAD `fbc1439`
 preserved, no amend), exact model `muse-spark-1.3-contributor` /
 medium / Contributor ON; sandbox + approval ON, sole writer, no
 subagents, no extra approval loop, no parent files/keys/private
@@ -79,7 +188,7 @@ controlled tests):
 | AI/egress/native-wire fake tests, outbound sockets denied | PASS | 206 passed, 2 skipped (loopback-only socket guard plugin in `/tmp`, not committed) |
 | Full `tests/unit tests/integration` clean | PASS | 843 passed, 2 skipped |
 | Full suites conflicting env (`AI_ENABLED=true LLM_WARN_AT_USD=999`) | PASS | 843 passed, 2 skipped |
-| External client regressions | PASS | Covered in full clean suite (`test_external_client.py` live-loopback) |
+| External client regressions | PASS (suites) / SKIPPED (live-loopback here) | Fake-transport and TestClient coverage executed in the full clean suite; the 2 `test_external_client.py` live-loopback tests SKIP in this sandbox (`loopback sockets are unavailable`) and were never executed proof here — see the pre-T4a follow-up entry above |
 | `ruff check` + `ruff format --check` | PASS | Both clean repo-wide (189 files formatted) |
 | `uv lock --check --offline` | PASS | Resolved 42 packages, no manifest/lock delta (stdlib only) |
 | 120 fixtures / HMAC / 77 rules / usage | PASS | Untouched: tree shows only 4 modified app/client files + 1 updated test + 1 new test; no fixture/rule/config changes |

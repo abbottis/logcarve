@@ -57,18 +57,33 @@ EXPORT_MAX_BYTES = 512 * 1024 * 1024
 EXPORT_SCHEMA_VERSION = "export/1"
 #: Bounded local verification (stdlib only, documented here): files
 #: stream in 64 KiB chunks and no verification step calls ``read()``
-#: without an explicit bound. One CSV record or one JSON envelope
-#: prefix/row may not exceed 1 MiB; anything larger fails closed as
-#: oversized instead of buffering unboundedly. Numeric, null and
-#: formula-prefix cell semantics are preserved by parsing (numbers
-#: stay numbers, ``null`` stays null, quoted formula text stays
-#: quoted text) — verification counts and completes, never rewrites.
+#: without an explicit bound; CSV intake uses only bounded
+#: ``readline()`` (never handle iteration or unbounded reads). One
+#: CSV record, one JSON envelope prefix/row or the metadata object
+#: may not exceed 1 MiB; anything larger fails closed as oversized
+#: BEFORE the ``csv`` reader or JSON decoder can preallocate it,
+#: instead of buffering unboundedly. JSON must carry exactly the
+#: ``export/1`` envelope (``metadata`` object with a compatible
+#: ``schema_version`` and a non-bool integer ``row_count`` in
+#: ``[0, 250000]`` matching the header count, ``rows`` array of
+#: objects of matching length, ``complete`` exactly ``true``) with
+#: strict grammar (no trailing commas, duplicate keys, non-finite
+#: constants or trailing junk). CSV needs a valid nonempty unique
+#: header and exact header width on EVERY data row under strict
+#: quoting. Numeric, null and formula-prefix cell semantics are
+#: preserved by parsing (numbers stay numbers, ``null`` stays null,
+#: quoted formula text stays quoted text) — verification counts and
+#: completes, never rewrites.
 VERIFY_CHUNK_BYTES = 65536
 VERIFY_MAX_RECORD_BYTES = 1024 * 1024
 
 
 class _SafeRedirectHandler(urllib.request.HTTPRedirectHandler):
-    """Refuse credential-bearing redirects across origins/downgrades.
+    """Refuse credential-bearing redirects outside one validated http(s) origin.
+
+    Non-http(s) schemes, credential-bearing userinfo, malformed ports,
+    host or port changes, downgrades and off-default upgrades are
+    refused before forwarding (see the checks below).
 
     Same-origin redirects with a preserved or upgraded scheme keep
     the stdlib behavior (the ``Authorization`` header travels only
@@ -84,17 +99,28 @@ class _SafeRedirectHandler(urllib.request.HTTPRedirectHandler):
             new = urllib.parse.urlsplit(urllib.parse.urljoin(req.full_url, newurl))
         except ValueError:
             raise urllib.error.HTTPError(req.full_url, code, "redirect refused", headers, fp)
-        same_host = old.hostname == new.hostname
-        same_port = (old.port or _default_port(old.scheme)) == (
-            new.port or _default_port(new.scheme)
-        )
-        upgrade = old.scheme == "http" and new.scheme == "https"
-        default_ports = (old.port or _default_port(old.scheme)) in (80, 443) and (
-            new.port or _default_port(new.scheme)
-        ) in (80, 443)
-        same_origin = same_host and (same_port or (upgrade and default_ports))
-        downgrade = old.scheme == "https" and new.scheme != "https"
-        if not same_origin or downgrade:
+        if old.scheme not in ("http", "https") or new.scheme not in ("http", "https"):
+            raise urllib.error.HTTPError(req.full_url, code, "redirect refused", headers, fp)
+        try:
+            new_userinfo = new.username is not None or new.password is not None
+            old_port = old.port if old.port is not None else _default_port(old.scheme)
+            new_port = new.port if new.port is not None else _default_port(new.scheme)
+        except ValueError:
+            raise urllib.error.HTTPError(req.full_url, code, "redirect refused", headers, fp)
+        if new_userinfo:
+            raise urllib.error.HTTPError(req.full_url, code, "redirect refused", headers, fp)
+        if not old.hostname or not new.hostname:
+            raise urllib.error.HTTPError(req.full_url, code, "redirect refused", headers, fp)
+        if old.hostname.lower() != new.hostname.lower():
+            raise urllib.error.HTTPError(req.full_url, code, "redirect refused", headers, fp)
+        if new.scheme == old.scheme:
+            if old_port != new_port:
+                raise urllib.error.HTTPError(req.full_url, code, "redirect refused", headers, fp)
+        elif old.scheme == "http" and new.scheme == "https":
+            # Canonical upgrade only: effective default ports 80 -> 443.
+            if old_port != 80 or new_port != 443:
+                raise urllib.error.HTTPError(req.full_url, code, "redirect refused", headers, fp)
+        else:
             raise urllib.error.HTTPError(req.full_url, code, "redirect refused", headers, fp)
         return super().redirect_request(req, fp, code, msg, headers, newurl)
 
@@ -170,7 +196,8 @@ def download_export(
     carry the header row plus exactly the header row count (counted
     with the stdlib ``csv`` reader so quoted newlines never split
     rows). Verification streams from disk; it never calls ``read()``
-    without a bound and never rereads the whole result into memory.
+    without a bound, never iterates a handle line-by-line, and never
+    rereads the whole result into memory.
 
     Output ownership: a pre-existing ``dest`` (including a symlink)
     is refused without truncation; the new file is created
@@ -290,14 +317,18 @@ def _verify_export_file(dest: str, ext: str, expected: int) -> dict:
     """Check a downloaded export for completeness; fail loudly if short.
 
     Streams from disk in bounded chunks (never ``read()`` without a
-    size): CSV rows stream through the stdlib ``csv`` reader directly
-    from the file (header plus exactly ``expected`` records; quoted
-    newlines and chunk-boundary escapes stay inside their record),
-    and JSON validates incrementally with a bounded decoder buffer
-    and per-row state — exact ``metadata.row_count`` (when present),
-    row count and ``complete: true`` marker, with ``null``/numbers/
-    quoted formula text preserved by parsing, never rewritten. Any
-    truncation, malformed JSON/CSV, missing marker, count mismatch
+    size, never bare handle iteration): CSV records stream through a
+    bounded ``readline()`` record iterator into the strict stdlib
+    ``csv`` reader (valid nonempty unique header plus exactly
+    ``expected`` records at exact header width; quoted newlines and
+    chunk-boundary escapes stay inside their record), and JSON
+    validates incrementally with a bounded decoder buffer and
+    per-row state — mandatory ``metadata`` object (compatible
+    ``schema_version``, non-bool integer ``row_count`` matching the
+    header count), ``rows`` array of objects of matching length and
+    ``complete`` exactly ``true``, with ``null``/numbers/quoted
+    formula text preserved by parsing, never rewritten. Any
+    truncation, malformed JSON/CSV, missing component, count mismatch
     or oversized record removes the partial file and exits nonzero
     with a safe message (no token, no log content).
     """
@@ -317,40 +348,154 @@ def _verify_export_file(dest: str, ext: str, expected: int) -> dict:
         raise SystemExit(1)
 
 
+#: Bounded CSV intake: one ``readline()`` call never reads more
+#: than this many characters, and one record never spans more
+#: physical lines than this. Both bounds are far above genuine
+#: server rows (tens of short ``\r\n`` lines) while keeping hostile
+#: input bounded.
+_CSV_READLINE_CHARS = 65536
+_CSV_MAX_LINES_PER_RECORD = 65536
+
+
+class _CsvRecordReader:
+    """Yield one raw CSV record at a time from a text handle.
+
+    Only ``handle.readline(size)`` with an explicit bound is ever
+    used — the handle is never iterated line-by-line and ``read()``
+    is never called — so an unbounded physical line cannot hide
+    behind the iterator protocol. Quote tracking is streaming: a
+    record ends at the first newline outside quotes, so legitimate
+    quoted multiline fields stay one record, while an unclosed quote
+    at EOF fails closed instead of silently merging the tail. A
+    record (measured in UTF-8 bytes) larger than
+    ``VERIFY_MAX_RECORD_BYTES`` fails closed BEFORE the ``csv``
+    reader ever sees it, so the reader cannot be handed an
+    arbitrarily large preallocated record. The per-record physical
+    line count is a work limit, not a row cap: ordinary rows use a
+    handful of lines.
+    """
+
+    def __init__(self, handle) -> None:
+        self._handle = handle
+
+    def records(self) -> object:
+        parts: list[str] = []
+        record_bytes = 0
+        lines = 0
+        in_quotes = False
+        prev_quote = False
+        while True:
+            line = self._handle.readline(_CSV_READLINE_CHARS)
+            if line == "":
+                if in_quotes:
+                    raise csv.Error("unclosed quotation at end of file")
+                # A trailing newline leaves no pending record: only a
+                # truly unterminated tail (no closing newline) yields.
+                if parts:
+                    yield "".join(parts)
+                return
+            lines += 1
+            if lines > _CSV_MAX_LINES_PER_RECORD:
+                raise csv.Error("record spans too many physical lines")
+            record_bytes += len(line.encode("utf-8"))
+            if record_bytes > VERIFY_MAX_RECORD_BYTES:
+                raise csv.Error("oversized record")
+            for char in line:
+                if char == '"':
+                    # A quote following a quote while outside quotes is
+                    # the second half of an escaped pair (``""``):
+                    # re-enter quotes instead of toggling twice.
+                    if prev_quote and not in_quotes:
+                        in_quotes = True
+                        prev_quote = False
+                    else:
+                        in_quotes = not in_quotes
+                        prev_quote = True
+                elif char == "\n" and not in_quotes:
+                    prev_quote = False
+                    text = "".join(parts).removesuffix("\r")
+                    parts = []
+                    record_bytes = 0
+                    lines = 0
+                    yield text
+                    break
+                else:
+                    prev_quote = False
+                parts.append(char)
+            else:
+                continue
+            continue
+
+
 def _verify_csv_stream(dest: str, expected: int) -> dict:
-    """Count CSV records by streaming rows; fail closed on mismatch."""
+    """Count CSV records by streaming bounded records; fail closed on mismatch.
+
+    The header must be valid (every cell nonempty, all cells unique)
+    and EVERY data row must decode under strict quoting with exactly
+    the header width: extra/missing columns, malformed or unclosed
+    quoting and oversized records all fail closed before an
+    unbounded allocation. Quoted multiline fields and multibyte text
+    stay one record. Completeness is the header row plus exactly
+    ``expected`` records.
+
+    Honest limits: this proves the body is well-formed CSV with the
+    promised row count — it cannot cryptographically detect a
+    same-count shortening inside one valid final cell (e.g. bytes
+    missing from the last field while the row/grammar stays valid).
+    Truncation that drops rows, breaks grammar or aborts the stream
+    is caught here; a mid-stream network abort is additionally caught
+    by the ``IncompleteRead``/timeout cleanup in
+    :func:`download_export`.
+    """
     try:
         with open(dest, "r", encoding="utf-8", errors="strict", newline="") as handle:
-            reader = csv.reader(handle)
+            reader = _CsvRecordReader(handle)
             try:
-                header = next(reader)
-            except StopIteration:
-                _remove_partial(dest)
-                print(
-                    "error: export body is incomplete (missing header); partial file removed",
-                    file=sys.stderr,
-                )
-                raise SystemExit(1)
-            if not header:
-                _remove_partial(dest)
-                print(
-                    "error: export body is incomplete (missing header); partial file removed",
-                    file=sys.stderr,
-                )
-                raise SystemExit(1)
-            count = 0
-            for row in reader:
-                count += 1
-                if count > expected:
-                    break
-                record_bytes = sum(len(cell.encode("utf-8")) for cell in row)
-                if record_bytes > VERIFY_MAX_RECORD_BYTES:
+                records = reader.records()
+                try:
+                    header_text = next(records)  # type: ignore[call-overload]
+                except StopIteration:
                     _remove_partial(dest)
                     print(
-                        "error: export body holds an oversized record; partial file removed",
+                        "error: export body is incomplete (missing header); partial file removed",
                         file=sys.stderr,
                     )
                     raise SystemExit(1)
+                parsed = list(csv.reader([header_text], strict=True))
+                header = parsed[0] if parsed else []
+                if (
+                    not header
+                    or any(not cell.strip() for cell in header)
+                    or len(set(header)) != len(header)
+                ):
+                    _remove_partial(dest)
+                    print(
+                        "error: export body carries an invalid header; partial file removed",
+                        file=sys.stderr,
+                    )
+                    raise SystemExit(1)
+                width = len(header)
+                count = 0
+                for record_text in records:
+                    rows = list(csv.reader([record_text], strict=True))
+                    row = rows[0] if rows else []
+                    if len(row) != width:
+                        _remove_partial(dest)
+                        print(
+                            "error: export body holds a malformed row; partial file removed",
+                            file=sys.stderr,
+                        )
+                        raise SystemExit(1)
+                    count += 1
+                    if count > expected:
+                        break
+            except csv.Error:
+                _remove_partial(dest)
+                print(
+                    "error: export body is truncated or malformed; partial file removed",
+                    file=sys.stderr,
+                )
+                raise SystemExit(1)
             if count != expected:
                 _remove_partial(dest)
                 print(
@@ -365,20 +510,54 @@ def _verify_csv_stream(dest: str, expected: int) -> dict:
         raise SystemExit(1)
 
 
+#: Exact mandatory envelope of a real ``export/1`` JSON body: no
+#: component may be missing and no unknown component is accepted.
+_JSON_ENVELOPE_KEYS = frozenset({"metadata", "rows", "complete"})
+
+
+def _checked_object(pairs: list[tuple[str, object]]) -> dict:
+    """Build one JSON object, failing closed on duplicate keys.
+
+    Used as ``object_pairs_hook`` so EVERY object (envelope,
+    metadata, each row, nested values) rejects duplicate keys
+    instead of silently keeping the last occurrence.
+    """
+    obj: dict = {}
+    for key, value in pairs:
+        if key in obj:
+            raise ValueError("duplicate key")
+        obj[key] = value
+    return obj
+
+
+def _reject_constant(text: str) -> object:
+    """Fail closed on non-finite JSON constants (``NaN``/``Infinity``)."""
+    raise ValueError(f"non-finite constant {text!r}")
+
+
 def _verify_json_stream(dest: str, expected: int) -> dict:
     """Validate the JSON export envelope incrementally from disk.
 
-    Envelope shape: ``{"metadata": {...}, "rows": [...], "complete":
-    true}``. Bytes stream from disk in bounded chunks through an
-    incremental UTF-8 decoder (multibyte characters and escapes split
-    across chunks stay intact) into a bounded text buffer; the
-    ``metadata`` object and each row decode one at a time from that
-    buffer and consumed input is dropped, so the whole file is never
-    held at once and no call uses ``read()`` without a bound. Only
-    the row count is retained — never the full row list. Checks: the
-    body parses, ``complete`` is exactly ``true``, the decoded rows
-    count equals ``expected``, and ``metadata.row_count`` — when
-    present — equals ``expected`` too. Numbers, ``null`` and quoted
+    Envelope shape is exactly ``{"metadata": {...}, "rows": [{...},
+    ...], "complete": true}``: all three components are mandatory,
+    unknown top-level keys are rejected, ``metadata`` must be an
+    object carrying ``schema_version == "export/1"`` and a non-bool
+    integer ``row_count`` in ``[0, 250000]`` equal to the header
+    count, ``rows`` must be an array of objects (scalars, arrays and
+    ``null`` are rejected) whose length equals the header count, and
+    ``complete`` must be exactly ``true``. Grammar is strict: no
+    trailing commas (envelope or rows), no duplicate keys at any
+    depth, no ``NaN``/``Infinity`` constants, no trailing junk.
+
+    Bytes stream from disk in bounded chunks through an incremental
+    UTF-8 decoder (multibyte characters and escapes split across
+    chunks stay intact) into a bounded text buffer; the ``metadata``
+    object and each row decode one at a time from that buffer and
+    consumed input is dropped, so the whole file is never held at
+    once and no call uses ``read()`` without a bound. Only the row
+    count is retained — never the full row list. Arbitrary legitimate
+    whitespace, UTF-8, escaped quotes/newlines, chunk boundaries and
+    large row counts stay accepted. Numbers, ``null`` and quoted
     formula text survive parsing untouched; verification counts and
     completes, never rewrites.
     """
@@ -386,9 +565,9 @@ def _verify_json_stream(dest: str, expected: int) -> dict:
     try:
         try:
             stream.expect_char("{")
-            metadata: dict = {}
-            row_count = 0
-            complete = False
+            metadata: dict | None = None
+            row_count: int | None = None
+            complete: object = None
             seen_keys: set[str] = set()
             while True:
                 char = stream.peek_non_ws()
@@ -400,6 +579,8 @@ def _verify_json_stream(dest: str, expected: int) -> dict:
                     raise TypeError("bad key")
                 if key in seen_keys:
                     raise ValueError("duplicate key")
+                if key not in _JSON_ENVELOPE_KEYS:
+                    raise ValueError("unknown envelope key")
                 seen_keys.add(key)
                 stream.expect_char(":")
                 if key == "metadata":
@@ -409,14 +590,13 @@ def _verify_json_stream(dest: str, expected: int) -> dict:
                     metadata = value
                 elif key == "rows":
                     row_count = stream.decode_rows(expected)
-                elif key == "complete":
-                    value = stream.decode_value()
-                    complete = value is True
                 else:
-                    stream.decode_value()
+                    complete = stream.decode_value()
                 char = stream.peek_non_ws()
                 if char == ",":
                     stream.expect_char(",")
+                    if stream.peek_non_ws() == "}":
+                        raise ValueError("trailing comma")
                     continue
                 if char == "}":
                     stream.expect_char("}")
@@ -432,6 +612,14 @@ def _verify_json_stream(dest: str, expected: int) -> dict:
             raise SystemExit(1)
     finally:
         stream.close()
+    if seen_keys != set(_JSON_ENVELOPE_KEYS):
+        _remove_partial(dest)
+        print(
+            "error: export body is incomplete (missing envelope component); partial file removed",
+            file=sys.stderr,
+        )
+        raise SystemExit(1)
+    assert metadata is not None and row_count is not None
     if complete is not True:
         _remove_partial(dest)
         print(
@@ -439,15 +627,27 @@ def _verify_json_stream(dest: str, expected: int) -> dict:
             file=sys.stderr,
         )
         raise SystemExit(1)
-    meta_count = metadata.get("row_count") if isinstance(metadata, dict) else None
-    if isinstance(meta_count, bool) or (meta_count is not None and not isinstance(meta_count, int)):
+    if metadata.get("schema_version") != EXPORT_SCHEMA_VERSION:
         _remove_partial(dest)
         print(
-            "error: export body is incomplete (bad metadata); partial file removed",
+            "error: export body carries an incompatible schema version; partial file removed",
             file=sys.stderr,
         )
         raise SystemExit(1)
-    if row_count != expected or (meta_count is not None and meta_count != expected):
+    meta_count = metadata.get("row_count")
+    if (
+        not isinstance(meta_count, int)
+        or isinstance(meta_count, bool)
+        or meta_count < 0
+        or meta_count > 250_000
+    ):
+        _remove_partial(dest)
+        print(
+            "error: export body is incomplete (bad metadata row count); partial file removed",
+            file=sys.stderr,
+        )
+        raise SystemExit(1)
+    if row_count != expected or meta_count != expected:
         _remove_partial(dest)
         print(
             f"error: export body holds {row_count} rows, expected {expected}; partial file removed",
@@ -477,7 +677,12 @@ class _JsonStream:
         self._text = ""
         self._pos = 0
         self._eof = False
-        self._decoder = json.JSONDecoder()
+        # Strict grammar everywhere: duplicate keys rejected at any
+        # depth, non-finite constants rejected (``allow_nan`` only
+        # governs encoding; decoding needs ``parse_constant``).
+        self._decoder = json.JSONDecoder(
+            object_pairs_hook=_checked_object, parse_constant=_reject_constant
+        )
 
     def close(self) -> None:
         try:
@@ -549,7 +754,12 @@ class _JsonStream:
             return value
 
     def decode_rows(self, expected: int) -> int:
-        """Decode the ``rows`` array, returning its length only."""
+        """Decode the ``rows`` array, returning its length only.
+
+        Every element must be a JSON object within the per-record
+        byte bound; scalars, arrays and ``null`` fail closed. A comma
+        must always be followed by another row — never ``]``.
+        """
         self.expect_char("[")
         count = 0
         first = True
@@ -564,7 +774,7 @@ class _JsonStream:
             start = self._pos
             while True:
                 try:
-                    _, end = self._decoder.raw_decode(self._text, self._pos)
+                    row, end = self._decoder.raw_decode(self._text, self._pos)
                 except json.JSONDecodeError:
                     if self._eof:
                         raise ValueError("truncated rows")
@@ -573,6 +783,8 @@ class _JsonStream:
                 break
             if end - start > VERIFY_MAX_RECORD_BYTES:
                 raise ValueError("oversized record")
+            if not isinstance(row, dict):
+                raise TypeError("row is not an object")
             self._pos = end
             count += 1
             if count > expected:
@@ -580,6 +792,8 @@ class _JsonStream:
             char = self.peek_non_ws()
             if char == ",":
                 self.expect_char(",")
+                if self.peek_non_ws() == "]":
+                    raise ValueError("trailing comma")
                 first = True
                 # Keep the buffer bounded as rows accumulate.
                 if self._pos > VERIFY_CHUNK_BYTES:
@@ -630,7 +844,79 @@ def build_parser() -> argparse.ArgumentParser:
         default=None,
         help="Destination file for export-csv/export-json downloads.",
     )
+    parser.add_argument(
+        "--source",
+        default=None,
+        help="Optional source id narrowing every request (server scope-checked).",
+    )
+    parser.add_argument(
+        "--limit",
+        type=int,
+        default=None,
+        help="Page size for report endpoints that page (1..1000).",
+    )
+    parser.add_argument(
+        "--offset",
+        type=int,
+        default=None,
+        help="Page offset for report endpoints that page (>= 0).",
+    )
+    parser.add_argument(
+        "--baseline-from",
+        default=None,
+        help="Baseline window start for --endpoint comparison (ISO datetime; needs --baseline-to).",
+    )
+    parser.add_argument(
+        "--baseline-to",
+        default=None,
+        help="Baseline window end for --endpoint comparison (ISO datetime; needs --baseline-from).",
+    )
     return parser
+
+
+def _report_params(args: argparse.Namespace) -> dict[str, str]:
+    """Validated selectors for report fetches; unknown scope fails locally."""
+    params: dict[str, str] = {}
+    if args.source is not None:
+        if not args.source or len(args.source) > 128:
+            print("error: --source must be 1..128 characters", file=sys.stderr)
+            raise SystemExit(2)
+        params["source_id"] = args.source
+    if args.limit is not None:
+        if args.limit < 1 or args.limit > 1000:
+            print("error: --limit must be 1..1000", file=sys.stderr)
+            raise SystemExit(2)
+        params["limit"] = str(args.limit)
+    if args.offset is not None:
+        if args.offset < 0:
+            print("error: --offset must be >= 0", file=sys.stderr)
+            raise SystemExit(2)
+        params["offset"] = str(args.offset)
+    return params
+
+
+def _baseline_params(args: argparse.Namespace) -> dict[str, str]:
+    """Validated explicit baseline window for comparison requests."""
+    if (args.baseline_from is None) != (args.baseline_to is None):
+        print("error: --baseline-from and --baseline-to are required together", file=sys.stderr)
+        raise SystemExit(2)
+    if args.baseline_from is None:
+        return {}
+    from datetime import datetime
+
+    try:
+        start = datetime.fromisoformat(args.baseline_from)
+        end = datetime.fromisoformat(args.baseline_to)
+    except ValueError:
+        print("error: baseline window must hold ISO datetimes", file=sys.stderr)
+        raise SystemExit(2)
+    if start.tzinfo is None or end.tzinfo is None:
+        print("error: baseline window must carry a timezone offset", file=sys.stderr)
+        raise SystemExit(2)
+    if not start < end:
+        print("error: --baseline-from must precede --baseline-to", file=sys.stderr)
+        raise SystemExit(2)
+    return {"baseline_from": args.baseline_from, "baseline_to": args.baseline_to}
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -645,11 +931,39 @@ def main(argv: list[str] | None = None) -> int:
         json.dump(summary, sys.stdout, indent=2)
         sys.stdout.write("\n")
         return 0
+    wants_baseline = args.baseline_from is not None or args.baseline_to is not None
     if args.endpoint == "all":
-        wanted = (*ENDPOINTS, *REPORT_ENDPOINTS)
+        if wants_baseline:
+            print("error: baseline flags apply to --endpoint comparison only", file=sys.stderr)
+            raise SystemExit(2)
+        # Historical default: the three standalone baseline
+        # documents. Derived reports (typed aggregates, comparison)
+        # are explicit opt-in: comparison needs an authorized
+        # baseline window and must never run on a silent default.
+        wanted = ENDPOINTS
     else:
         wanted = (args.endpoint,)
-    documents = {name: fetch(args.base_url, token, name, params) for name in wanted}
+    if args.endpoint == "comparison":
+        baseline = _baseline_params(args)
+        if not baseline:
+            print(
+                "error: --endpoint comparison needs --baseline-from and --baseline-to",
+                file=sys.stderr,
+            )
+            raise SystemExit(2)
+        params.update(baseline)
+    elif wants_baseline:
+        print("error: baseline flags apply to --endpoint comparison only", file=sys.stderr)
+        raise SystemExit(2)
+    selector_params = _report_params(args)
+    documents = {}
+    for name in wanted:
+        request_params = dict(params)
+        if name in REPORT_ENDPOINTS:
+            request_params.update(selector_params)
+        elif selector_params and name in ENDPOINTS and "source_id" in selector_params:
+            request_params["source_id"] = selector_params["source_id"]
+        documents[name] = fetch(args.base_url, token, name, request_params)
     output = documents if len(documents) > 1 else documents[wanted[0]]
     json.dump(output, sys.stdout, indent=2)
     sys.stdout.write("\n")

@@ -317,13 +317,18 @@ def execute_tool(
                 pass
         raise ToolError("store_unavailable", "The data store is unavailable.") from exc
     if held:
+        # An owned COMMIT failure is a store failure, never a silent
+        # success: roll back and surface StoreUnavailable so no caller
+        # can mistake the envelope for a committed snapshot read.
+        # The envelope below is reached only after a COMMIT that held.
         try:
             conn.execute("COMMIT")
-        except sqlite3.Error:
+        except sqlite3.Error as exc:
             try:
                 conn.execute("ROLLBACK")
             except sqlite3.Error:
                 pass
+            raise ToolError("store_unavailable", "The data store is unavailable.") from exc
     return envelope
 
 
