@@ -82,6 +82,11 @@ _DOCUMENTATION_NETWORKS: tuple[Any, ...] = (
 #: showing country results.
 GEO_ATTRIBUTION_URL = "https://db-ip.com"
 GEO_ATTRIBUTION_TEXT = "IP Geolocation by DB-IP"
+#: Human-readable database name and license traveling with country
+#: data (UI credit, API/export metadata, client summaries): safe
+#: display strings only, never a filesystem path or key.
+GEO_DATABASE_NAME = "DB-IP Country Lite"
+GEO_DATABASE_LICENSE = "CC BY 4.0"
 
 #: Fixed failure when a required database is missing or unusable. The
 #: import fails before any write; the code carries no path or reason

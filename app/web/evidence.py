@@ -47,6 +47,16 @@ REPORT_PAGE_MAP = {
     "journeys": "/journeys",
     "journey_entries": "/journeys",
     "comparison": "/comparison",
+    "countries": "/",
+}
+
+#: In-page anchors for reports that reproduce inside a larger page.
+#: The countries report replays on the Overview page with the same
+#: filters/window/client/country, scrolled to the actual country
+#: section (``country-h`` exists on every Overview render) — never
+#: an invented page.
+REPORT_PAGE_ANCHOR = {
+    "countries": "country-h",
 }
 
 #: Page-local selectors per report, applied on top of the shared global
@@ -203,4 +213,9 @@ def envelope_href(tool_name: object, envelope_filters: dict, tz_name: str = "UTC
             # Tool-level default: the envelope always carries a valid
             # report, but the tool itself stays linkable without one.
             page_path = TOOL_PAGE_MAP["get_report"]
+        url = evidence_url(page_path, envelope_filters, tz_name)
+        anchor = REPORT_PAGE_ANCHOR.get(report) if isinstance(report, str) else None
+        if anchor:
+            url += "#" + anchor
+        return url
     return evidence_url(page_path, envelope_filters, tz_name)

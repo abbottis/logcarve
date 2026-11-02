@@ -48,6 +48,7 @@ REPORT_ENDPOINTS = {
     "resources": "traffic/resources",
     "browsers": "traffic/browsers",
     "heatmap": "traffic/heatmap",
+    "countries": "countries",
 }
 EXPORT_FORMATS = ("export-csv", "export-json")
 TIMEOUT_S = 30
@@ -176,6 +177,33 @@ def fetch(
         raise SystemExit(1)
 
 
+def _csv_geo_provenance(headers) -> tuple[dict | None, dict | None]:
+    """Header-carried lookup coverage and DB-IP credit for a CSV download.
+
+    The CSV body stays plain interoperable rows, so provenance
+    travels in ``X-Logcarve-Export-Geo`` only. A present-but-broken
+    header raises :class:`ValueError` (the caller fails closed and
+    drops its partial, never silently unattributed); an absent
+    header carries nothing (older servers). Only the safe coverage
+    counts, observed sources/releases and the display credit travel —
+    never an original address, key or filesystem path.
+    """
+    raw = headers.get("X-Logcarve-Export-Geo", "") if headers is not None else ""
+    if not raw:
+        return None, None
+    try:
+        payload = json.loads(raw)
+    except ValueError as exc:
+        raise ValueError("bad provenance header") from exc
+    if not isinstance(payload, dict):
+        raise TypeError("bad provenance header")
+    credit = payload.pop("attribution", None)
+    geo = payload or None
+    if credit is not None and not isinstance(credit, dict):
+        raise TypeError("bad provenance header")
+    return geo, credit
+
+
 def download_export(
     base_url: str,
     token: str,
@@ -218,11 +246,13 @@ def download_export(
     active = opener or _build_opener()
     owned = False
     expected = 0
+    geo_headers = None
     try:
         with active.open(request, timeout=TIMEOUT_S) as response:
             headers = response.headers
             schema = headers.get("X-Logcarve-Export-Schema", "")
             expected_rows = headers.get("X-Logcarve-Export-Rows", "")
+            geo_headers = headers
             if schema != EXPORT_SCHEMA_VERSION:
                 print("error: unexpected export schema; refusing download", file=sys.stderr)
                 raise SystemExit(1)
@@ -278,7 +308,26 @@ def download_export(
         _remove_owned(dest, owned)
         print("error: request failed for export", file=sys.stderr)
         raise SystemExit(1)
-    return _verify_export_file(dest, ext, expected)
+    summary = _verify_export_file(dest, ext, expected)
+    if ext == "csv":
+        # The CSV body carries no metadata object, so the
+        # header-carried lookup coverage and DB-IP credit join the
+        # returned summary here; a broken provenance header drops the
+        # verified file rather than returning unattributed data.
+        try:
+            geo, credit = _csv_geo_provenance(geo_headers)
+        except (ValueError, TypeError):
+            _remove_partial(dest)
+            print(
+                "error: export provenance header is malformed; partial file removed",
+                file=sys.stderr,
+            )
+            raise SystemExit(1)
+        if geo is not None:
+            summary["geo"] = geo
+        if credit is not None:
+            summary["attribution"] = credit
+    return summary
 
 
 class _DownloadTooLarge(Exception):
@@ -655,7 +704,19 @@ def _verify_json_stream(dest: str, expected: int) -> dict:
             file=sys.stderr,
         )
         raise SystemExit(1)
-    return {"path": dest, "format": "json", "rows": row_count, "complete": True}
+    # Source attribution travels with the data: export rows always
+    # carry the safe country columns, so the server envelope carries
+    # the lookup coverage and DB-IP credit — surface both in the
+    # returned summary whenever the envelope holds them (never an
+    # original address, key or filesystem path).
+    summary: dict = {"path": dest, "format": "json", "rows": row_count, "complete": True}
+    geo = metadata.get("geo")
+    if isinstance(geo, dict):
+        summary["geo"] = geo
+    credit = metadata.get("attribution")
+    if isinstance(credit, dict):
+        summary["attribution"] = credit
+    return summary
 
 
 class _JsonStream:
@@ -872,7 +933,32 @@ def build_parser() -> argparse.ArgumentParser:
         default=None,
         help="Baseline window end for --endpoint comparison (ISO datetime; needs --baseline-from).",
     )
+    parser.add_argument(
+        "--country",
+        default=None,
+        help=(
+            "Country selector for report fetches and export downloads: "
+            "one ISO 3166-1 alpha-2 code (any case) or UNKNOWN for rows "
+            "with no known country. Anything else fails locally."
+        ),
+    )
     return parser
+
+
+def _normalize_country(value: str) -> str:
+    """Validate one ``--country`` selector; unknown scope fails locally.
+
+    Mirrors the shared server contract (T5a / PAR-09): exactly two
+    ASCII letters (stored uppercase) or the explicit ``UNKNOWN``
+    selector for rows with no known country. Blank and anything else
+    fail before any request, so the server never sees it.
+    """
+    if value == "UNKNOWN":
+        return value
+    if len(value) == 2 and value.isascii() and value.isalpha():
+        return value.upper()
+    print("error: --country must be a 2-letter ISO code or UNKNOWN", file=sys.stderr)
+    raise SystemExit(2)
 
 
 def _report_params(args: argparse.Namespace) -> dict[str, str]:
@@ -883,6 +969,8 @@ def _report_params(args: argparse.Namespace) -> dict[str, str]:
             print("error: --source must be 1..128 characters", file=sys.stderr)
             raise SystemExit(2)
         params["source_id"] = args.source
+    if args.country is not None:
+        params["country"] = _normalize_country(args.country)
     if args.limit is not None:
         if args.limit < 1 or args.limit > 1000:
             print("error: --limit must be 1..1000", file=sys.stderr)
@@ -928,7 +1016,10 @@ def main(argv: list[str] | None = None) -> int:
         if not args.out:
             print("error: provide --out for export downloads", file=sys.stderr)
             raise SystemExit(2)
-        summary = download_export(args.base_url, token, params, args.endpoint, args.out)
+        export_params = dict(params)
+        if args.country is not None:
+            export_params["country"] = _normalize_country(args.country)
+        summary = download_export(args.base_url, token, export_params, args.endpoint, args.out)
         json.dump(summary, sys.stdout, indent=2)
         sys.stdout.write("\n")
         return 0

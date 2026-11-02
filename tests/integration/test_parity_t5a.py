@@ -227,7 +227,12 @@ def test_api_country_filter_export_and_attribution(t5a):
     body = countries.json()
     assert body["filters"]["country"] is None
     assert body["geo"]["with_country"] == 4
-    assert body["attribution"] == {"text": "IP Geolocation by DB-IP", "url": "https://db-ip.com"}
+    assert body["attribution"] == {
+        "text": "IP Geolocation by DB-IP",
+        "url": "https://db-ip.com",
+        "database": "DB-IP Country Lite",
+        "license": "CC BY 4.0",
+    }
     us_only = client.get("/api/v1/countries", params={**params, "country": "us"}, headers=headers)
     assert us_only.status_code == 200, us_only.text[:300]
     assert us_only.json()["filters"]["country"] == "US"
@@ -497,3 +502,254 @@ def test_cli_geoip_source_precedence_and_env(tmp_path, monkeypatch):
     monkeypatch.setenv("GEOIP_DB_PATH", "")
     with db_cli._country_lookup(argparse.Namespace(geoip_db=None)) as lookup:
         assert lookup.available is False
+
+
+def _web_login(t5a):
+    client = t5a["client"]
+    login = client.post("/api/v1/admin/login", json={"username": "admin", "password": "s3cret-pw"})
+    assert login.status_code == 200, login.text[:300]
+    return client
+
+
+_WINDOW = (
+    "site=default&range=custom&from=2026-10-27T00:00:00%2B00:00"
+    "&to=2026-10-28T00:00:00%2B00:00&tz=UTC"
+)
+
+
+def test_country_pages_all_show_dbip_credit(t5a):
+    client = _web_login(t5a)
+    for path in (
+        "/",
+        "/requests",
+        "/performance",
+        "/seo",
+        "/referrers",
+        "/journeys",
+        "/security",
+        "/crawlers",
+        "/errors",
+        "/comparison",
+    ):
+        response = client.get(f"{path}?{_WINDOW}")
+        assert response.status_code == 200, (path, response.text[:300])
+        html = response.text
+        # The shared filter-bar credit is the single plain-anchor
+        # attribution on every country-filtered page.
+        assert html.count('href="https://db-ip.com"') == 1, path
+        assert "IP Geolocation by DB-IP" in html, path
+
+
+def test_overview_country_chart_table_and_oob_country(t5a):
+    client = _web_login(t5a)
+    html = client.get(f"/?{_WINDOW}").text
+    # Local Chart.js plot alongside the accessible country table.
+    assert 'id="overview-countries-chart"' in html
+    assert 'id="overview-countries-chart-data"' in html
+    assert 'id="country-h"' in html
+    assert "Lookup source:" in html
+    assert "dbip-country-lite" in html and "2026-11" in html
+    partial = client.get(f"/partials/overview?{_WINDOW}")
+    assert partial.status_code == 200, partial.text[:300]
+    # The country selector refreshes out-of-band with every Apply.
+    assert 'id="f-country"' in partial.text
+    assert 'hx-swap-oob="true"' in partial.text
+    assert 'value="UNKNOWN"' in partial.text
+
+
+def test_unknown_selection_copy_is_honest(t5a):
+    client = _web_login(t5a)
+    html = client.get(f"/?{_WINDOW}&country=UNKNOWN").text
+    # An Unknown-only selection over a working database carries no
+    # per-row source: the copy says exactly that instead of claiming
+    # the server has no database configured.
+    assert "carry no recorded country source" in html
+    assert "No country database is configured" not in html
+    assert "Coverage:" in html
+    assert "legacy" in html
+
+
+def test_unavailable_selection_copy_names_stored_rows(tmp_path, monkeypatch):
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setenv("SESSION_SECRET", "t5a-unavailable-secret")
+    monkeypatch.setenv("HMAC_KEY", "t5a-integration-hmac-key")
+    root = tmp_path / "logs"
+    root.mkdir()
+    (root / "t5a.log").write_text("\n".join(LINES) + "\n", encoding="utf-8")
+    db = tmp_path / "t5a_unavailable.sqlite3"
+    migrate(db)
+    run_import(
+        db,
+        source=SourceConfig(
+            source_id="t5a",
+            format_id="nginx_combined",
+            allowed_root=root,
+            relative_path="t5a.log",
+        ),
+        site_id="default",
+        site_name="T5a",
+        site_hostname="example.org",
+        server_type="nginx",
+        path_alias="t5a.log",
+        hmac_key=HMAC_KEY,
+    )
+    with writer_transaction(db) as conn:
+        create_admin_user(conn, username="admin", password_hash=hash_password("s3cret-pw"))
+    from app.main import create_app
+
+    client = TestClient(create_app(db_path=db, secure_cookies=False), raise_server_exceptions=False)
+    assert (
+        client.post(
+            "/api/v1/admin/login", json={"username": "admin", "password": "s3cret-pw"}
+        ).status_code
+        == 200
+    )
+    html = client.get(f"/?{_WINDOW}").text
+    # Rows stored while no database could be read say exactly that
+    # (past storage fact with counts) — never a present-tense claim
+    # about the configured server.
+    assert "stored while no country database could be read" in html
+    assert "No country database is configured" not in html
+
+
+def test_export_envelope_and_csv_header_carry_geo_credit(t5a):
+    import json as jsonlib
+
+    client, token = t5a["client"], t5a["token"]
+    headers = {"Authorization": f"Bearer {token}"}
+    params = {
+        "site_id": "default",
+        "from": "2026-10-27T00:00:00+00:00",
+        "to": "2026-10-28T00:00:00+00:00",
+    }
+    envelope = client.get(
+        "/api/v1/exports/requests", params={**params, "export_format": "json"}, headers=headers
+    )
+    assert envelope.status_code == 200, envelope.text[:300]
+    metadata = envelope.json()["metadata"]
+    assert metadata["geo"]["with_country"] == 4
+    assert metadata["geo"]["unknown"] == 2
+    assert metadata["geo"]["sources"] == ["dbip-country-lite"]
+    assert metadata["geo"]["releases"] == ["2026-11"]
+    assert metadata["attribution"]["license"] == "CC BY 4.0"
+    assert metadata["attribution"]["url"] == "https://db-ip.com"
+    assert "8.8.8.8" not in envelope.text
+    download = client.get(
+        "/api/v1/exports/requests", params={**params, "export_format": "csv"}, headers=headers
+    )
+    assert download.status_code == 200, download.text[:300]
+    geo_header = download.headers.get("X-Logcarve-Export-Geo", "")
+    assert geo_header, "CSV download must carry the geo provenance header"
+    assert geo_header.isascii()
+    provenance = jsonlib.loads(geo_header)
+    assert provenance["sources"] == ["dbip-country-lite"]
+    assert provenance["releases"] == ["2026-11"]
+    assert provenance["with_country"] == 4
+    assert provenance["attribution"]["license"] == "CC BY 4.0"
+
+
+def test_ai_get_report_countries_is_typed_bounded_and_linked(t5a):
+    from app.ai import egress as egress_mod
+    from app.ai.tools import definitions as tool_defs
+    from app.web import evidence as evidence_mod
+
+    assert "countries" in tool_defs.REPORT_NAMES
+    db, rules = t5a["db"], t5a["rules"]
+    with writer_transaction(db) as conn:
+        envelope = tool_defs.execute_tool(
+            conn,
+            rules,
+            name="get_report",
+            arguments={
+                "site_id": "default",
+                "time_from": FROM.isoformat(),
+                "time_to": TO.isoformat(),
+                "report": "countries",
+                "limit": 100,
+                "offset": 0,
+                "bucket": "day",
+            },
+            tool_call_id="tc-countries",
+            observation_time=datetime(2026, 10, 28, tzinfo=UTC),
+        )
+    result = envelope["result"]
+    by_country = {item["country"]: item for item in result["items"]}
+    assert by_country["US"]["requests"] == 3
+    assert by_country["AU"]["requests"] == 1
+    assert by_country["Unknown"]["requests"] == 2
+    assert result["geo"]["with_country"] == 4
+    assert result["geo"]["sources"] == ["dbip-country-lite"]
+    assert result["attribution"]["license"] == "CC BY 4.0"
+    assert "8.8.8.8" not in str(result)
+    # Hostile model narrowing cannot widen the trusted scope: an
+    # unknown country fails closed at the typed contract.
+    from app.db.database import connect
+
+    hostile_conn = connect(db, read_only=True)
+    try:
+        with pytest.raises(tool_defs.ToolError):
+            tool_defs.execute_tool(
+                hostile_conn,
+                rules,
+                name="get_report",
+                arguments={
+                    "site_id": "default",
+                    "time_from": FROM.isoformat(),
+                    "time_to": TO.isoformat(),
+                    "report": "countries",
+                    "country": "XX1",
+                    "limit": 100,
+                    "offset": 0,
+                    "bucket": "day",
+                },
+                tool_call_id="tc-hostile",
+                observation_time=datetime(2026, 10, 28, tzinfo=UTC),
+            )
+    finally:
+        hostile_conn.close()
+    minimized = egress_mod.serialize_evidence("get_report", result)
+    line = egress_mod.project_evidence_summary(
+        tool_name="get_report",
+        tool_call_id="tc-countries",
+        minimized=minimized,
+        filters=envelope["filters"],
+        observation_time=envelope["observation_time"],
+        coverage=envelope["coverage"],
+        full_result=result,
+        quality={"limitations": ["country-test"]},
+    )
+    assert len(line) <= 1600, len(line)
+    assert '"countries":3' in line
+    assert "IP Geolocation by DB-IP" in line
+    # Evidence links to the actual Overview country section with the
+    # same filters — never an invented page.
+    href = evidence_mod.envelope_href("get_report", {**envelope["filters"], "country": "US"})
+    assert href is not None and href.startswith("/?")
+    assert "country=US" in href
+    assert href.endswith("#country-h"), href
+
+
+def test_ai_countries_report_scope_overrides_model_narrowing(t5a):
+    from app.ai import service as ai_service
+
+    scope_client = "a" * 64
+    outcome = ai_service._execute_bounded_tool(
+        t5a["db"],
+        t5a["rules"],
+        "get_report",
+        {"report": "countries", "country": "AU", "client": "b" * 64},
+        site_id="default",
+        source_id=None,
+        time_from=FROM,
+        time_to=TO,
+        country="US",
+        client=scope_client,
+        tool_index=0,
+        investigation_id="t5a-scope-override",
+        observation_time=datetime(2026, 10, 28, tzinfo=UTC),
+    )
+    # Trusted investigation scope wins over hostile model overrides.
+    assert outcome["arguments"]["country"] == "US"
+    assert outcome["arguments"]["client"] == scope_client
+    assert outcome["envelope"]["filters"]["country"] == "US"
+    assert len(outcome["history_line"]) <= 1600

@@ -61,6 +61,7 @@ from app.analytics.classification import build_classifier, resolve_selector_inde
 from app.analytics.contracts import TimeWindow
 from app.analytics.service import (
     LIMITATIONS_BOT,
+    LIMITATIONS_GEO,
     LIMITATIONS_LOGS,
     LIMITATIONS_PERFORMANCE,
     LIMITATIONS_SECURITY,
@@ -1467,6 +1468,8 @@ def _projection_quality(tool_name: str, envelope: dict) -> dict:
             ]
         elif report == "comparison":
             quality["limitations"] = [*LIMITATIONS_BOT, *LIMITATIONS_LOGS]
+        elif report == "countries":
+            quality["limitations"] = [*LIMITATIONS_GEO, *LIMITATIONS_LOGS]
         else:
             quality["limitations"] = list(LIMITATIONS_LOGS)
     else:

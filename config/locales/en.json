@@ -93,10 +93,11 @@
   "overview.resources": "Requests by resource kind",
   "overview.browsers": "Claimed browsers",
   "overview.countries": "Countries",
-  "geo.estimate_note": "Server-country estimate from a genuine offline lookup; never visitor identity, residence or proof of bot origin.",
+  "geo.estimate_note": "Client-address country estimate computed locally from a genuine offline lookup; never visitor identity, residence or proof of bot origin.",
   "geo.source_line": "Lookup source: {source} · release {release}.",
-  "geo.no_database": "No country database is configured or readable, so every row shows Unknown while ordinary analytics keep working.",
-  "geo.coverage_line": "Coverage: {with} with country · {unknown} unknown · {unavailable} unavailable.",
+  "geo.stored_without_database": "Provenance note: {unavailable} selected rows were stored while no country database could be read and {legacy} predate country lookup; neither says anything about the currently configured database.",
+  "geo.no_source_in_selection": "The selected rows carry no recorded country source: every lookup in this selection yielded Unknown. That says nothing about the configured database.",
+  "geo.coverage_line": "Coverage: {with} with country · {unknown} unknown · {unavailable} unavailable · {legacy} legacy.",
   "geo.attribution": "IP Geolocation by DB-IP",
   "overview.os": "Operating systems",
   "overview.heatmap": "Requests by weekday and hour",
@@ -636,7 +637,7 @@
   "help.api_n8n": "API clients and automation",
   "help.api_n8n_body": "The authenticated read-only API serves the same deterministic analytics as the dashboard, with chat disabled, no model key and no Internet. The curl and Python examples on this page use placeholder credentials; replace the host, site and UTC window, and keep real tokens out of shared notes. Automation tools such as n8n can poll the JSON endpoints with a scoped analytics:read token and the same explicit from/to UTC parameters; imports, chat and browser sessions stay separate operations with their own authorization.",
   "help.geoip": "Countries and GeoIP readiness",
-  "help.geoip_body": "Country comes from a genuine offline lookup over a locally mounted database file (DB-IP Country Lite, CC BY 4.0, credited wherever countries appear): no network request, no paid service and no country ever inferred from addresses, documentation ranges or pseudonyms. Only a safe ISO country code plus the lookup source, release and status is stored. Private, reserved, loopback, documentation and invalid addresses always read as Unknown, even if a database returns a value for them. A server-country estimate describes where an observed address is registered, never visitor identity, residence or proof of bot origin. Without a readable database every report honestly shows Unknown and ordinary analytics keep working.",
+  "help.geoip_body": "Country comes from a genuine offline lookup over a locally mounted database file (DB-IP Country Lite, CC BY 4.0, credited wherever countries appear): no network request, no paid service and no country ever inferred from addresses, documentation ranges or pseudonyms. Only a safe ISO country code plus the lookup source, release and status is stored. Private, reserved, loopback, documentation and invalid addresses always read as Unknown, even if a database returns a value for them. A client-address country estimate computed locally describes where an observed address is registered, never visitor identity, residence or proof of bot origin. A selection whose rows were stored without a readable database, or whose lookups yielded no country, honestly shows Unknown while ordinary analytics keep working.",
   "help.follow": "Follow mode and continuous ingestion",
   "help.follow_body": "Continuous follow of growing log files is not enabled in this release: the dashboard only ever shows already imported data, and the optional refresh only re-reads imports. Log rotation handling and incremental follow arrive as an explicit command-line operation in a later stage; nothing in the browser starts, watches or tails a file."
 }

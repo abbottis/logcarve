@@ -31,7 +31,29 @@ from app.analytics.contracts import (
 )
 from app.analytics.rules import Rule
 from app.ingestion.combined import _REJECTION_REASONS
-from app.ingestion.geoip import GEO_ATTRIBUTION_TEXT, GEO_ATTRIBUTION_URL
+from app.ingestion.geoip import (
+    GEO_ATTRIBUTION_TEXT,
+    GEO_ATTRIBUTION_URL,
+    GEO_DATABASE_LICENSE,
+    GEO_DATABASE_NAME,
+)
+
+
+def geo_attribution() -> dict[str, object]:
+    """Portable DB-IP credit traveling with every country payload.
+
+    Safe display strings only (text, URL, database name, license):
+    never an original address, key or source filesystem path. The
+    UI credit link, the countries API envelope, export metadata/CSV
+    headers and client summaries all share this one shape.
+    """
+    return {
+        "text": GEO_ATTRIBUTION_TEXT,
+        "url": GEO_ATTRIBUTION_URL,
+        "database": GEO_DATABASE_NAME,
+        "license": GEO_DATABASE_LICENSE,
+    }
+
 
 LIMITATIONS_LOGS = [
     "access logs alone cannot prove traffic completeness: coverage describes observed events, not proven source coverage",
@@ -43,7 +65,7 @@ LIMITATIONS_BOT = [
 ]
 
 LIMITATIONS_GEO = [
-    "a server-country estimate describes where the observed address is registered, never visitor identity, residence or proof of bot origin",
+    "a client-address country estimate computed locally describes where the observed address is registered, never visitor identity, residence or proof of bot origin",
     "Unknown means the lookup yielded no country (unroutable address, no database record or no database), never a hidden default",
 ]
 
@@ -804,7 +826,12 @@ def export_metadata(
     allowlisted row order. The row payload itself comes from the
     allowlisted :data:`queries.EXPORT_COLUMNS` under the SAME read
     snapshot. No paging limit/offset leaks in: exports always cover
-    the full filtered result.
+    the full filtered result. Export rows always carry the safe
+    country columns (ISO code plus lookup source/release/status),
+    so the envelope always carries the lookup ``geo`` coverage and
+    the DB-IP ``attribution`` credit alongside: source attribution
+    travels with the data, never an original address, key or
+    filesystem path.
     """
     clf = _classifier_for(filt, rules)
     observed = datetime.now(UTC) if observation_time is None else observation_time
@@ -842,6 +869,8 @@ def export_metadata(
             ],
         },
         "privacy": EXPORT_PRIVACY_LABEL,
+        "geo": queries.geo_coverage(conn, filt, clf),
+        "attribution": geo_attribution(),
         "limitations": LIMITATIONS_LOGS,
     }
 
@@ -1307,7 +1336,7 @@ def country_breakdown(
         "filters": _filter_dict(filt),
         "items": items,
         "geo": queries.geo_coverage(conn, filt, clf),
-        "attribution": {"text": GEO_ATTRIBUTION_TEXT, "url": GEO_ATTRIBUTION_URL},
+        "attribution": geo_attribution(),
         "coverage": coverage_summary(conn, filt, rules),
         "limitations": [*LIMITATIONS_GEO, *LIMITATIONS_LOGS],
     }

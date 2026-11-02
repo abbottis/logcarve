@@ -18,7 +18,7 @@ analytics as the dashboard and internal assistant.
 | `GET /api/v1/traffic/heatmap` | Weekday/hour matrix for a display timezone (`tz`) |
 | `GET /api/v1/traffic/clients` | Top pseudonymized clients, aggregates only |
 | `GET /api/v1/crawlers` | Claimed crawler families, counts, paths and statuses |
-| `GET /api/v1/countries` | Exact per-country request/error/byte totals with `Unknown` row, lookup coverage (`with_country`/`unknown`/`unavailable`, observed sources/releases) and the CC BY 4.0 `attribution` (T5a / PAR-09) |
+| `GET /api/v1/countries` | Exact per-country request/error/byte totals with `Unknown` row, lookup coverage (`with_country`/`unknown`/`unavailable`/`legacy`, observed sources/releases) and the portable CC BY 4.0 `attribution` (`text`/`url`/`database`/`license`) (T5a / PAR-09) |
 | `GET /api/v1/bots` | Named-bot table with allowlisted sort and paging |
 | `GET /api/v1/bots/{rule_id}` | One named bot: totals, top paths/404s, robots/sitemap, samples |
 | `GET /api/v1/requests` | Sanitized paginated request explorer (allowlisted sorts incl. legacy `newest`/`oldest` plus `time/client/method/path/status/bytes` ascending/descending with timestamp/id tie-breaks and NULL-bytes-last, bounded `search`); rows carry the 200-char agent sample with an explicit `ua_truncated` flag and a derived `conflict` boolean for the conflicting-bot-identity candidate |
@@ -36,8 +36,9 @@ stored path, user agent, referrer host and client pseudonym),
 with a safe structured error), plus the existing method/status/path/referrer
 matchers and `limit`/`offset` paging. Unknown or contradictory selectors
 reject with a safe structured error; token site/source enforcement is
-unchanged. A server-country estimate describes where an observed address
-is registered, never visitor identity, residence or proof of bot origin.
+unchanged. A client-address country estimate computed locally describes
+where an observed address is registered, never visitor identity, residence
+or proof of bot origin.
 | `GET /healthz` | Minimal liveness |
 | `GET /readyz` | Restricted/internal DB readiness |
 
@@ -82,7 +83,22 @@ LOGCARVE_API_TOKEN="lc_..." python clients/logcarve_api_client.py \
   --base-url http://127.0.0.1:8080 --site default \
   --from 2026-10-27T00:00:00+00:00 --to 2026-10-28T00:00:00+00:00 \
   --endpoint slow-endpoints
+LOGCARVE_API_TOKEN="lc_..." python clients/logcarve_api_client.py \
+  --base-url http://127.0.0.1:8080 --site default \
+  --from 2026-10-27T00:00:00+00:00 --to 2026-10-28T00:00:00+00:00 \
+  --endpoint countries --country us
 ```
+
+`--endpoint all` (the default) still fetches only the three baseline
+documents (`summary`, `crawlers`, `findings`); every typed report —
+`performance`, `slow-endpoints`, `seo-*`, `referrer-*`, `journeys`,
+`journey-entries`, `comparison`, `countries` — plus the
+`export-csv`/`export-json` downloads are explicit opt-in.
+`--country` (one ISO 3166-1 alpha-2 code, any case, or `UNKNOWN`)
+narrows report fetches and export downloads through the same shared
+selector contract; anything else fails locally before any request.
+Returned export summaries carry the header/envelope `geo` coverage
+and DB-IP `attribution` alongside the completeness proof.
 
 ### n8n sketch
 
@@ -143,6 +159,7 @@ headers (no preamble lines in the body):
 | `X-Logcarve-Export-Generated-At` | Generation instant |
 | `X-Logcarve-Export-Filters` | Compact JSON of the non-default validated filters (bounded by the contract maxima; defaults omitted) |
 | `X-Logcarve-Export-Coverage` | Compact JSON: unique events, observed min/max, sources, line totals, import count plus per-import `id`/`status` capped at 50 with an explicit `imports_truncated` flag (never silent, never `error_summary`) |
+| `X-Logcarve-Export-Geo` | Compact JSON: observed lookup sources/releases, honest selected-scope counts (`with_country`/`unknown`/`unavailable`/`legacy`) and the portable DB-IP credit (`text`/`url`/`database`/`license`); never an original address, key or filesystem path |
 | `X-Logcarve-Privacy` | Pseudonymization label |
 
 JSON transport: `{"metadata": {...}, "rows": [...], "complete": true}`
@@ -150,7 +167,9 @@ with the same reproducibility set (`schema_version`, `site_id`,
 `source_id`, UTC `time_range`, `display_timezone`, `sort`,
 `generated_at`, full validated `filters`, exact `row_count`,
 `coverage`, `data_quality` with line totals plus per-import
-`id`/`status`, `privacy`, `limitations`).
+`id`/`status`, lookup `geo` coverage plus DB-IP `attribution`
+credit (source attribution travels with the data), `privacy`,
+`limitations`).
 
 Spreadsheet safety: string cells whose first meaningful character
 (after Unicode whitespace, control and format bytes such as NUL,

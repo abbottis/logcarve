@@ -299,6 +299,8 @@ class CountryItemOut(BaseModel):
 class GeoAttributionOut(BaseModel):
     text: str
     url: str
+    database: str
+    license: str
 
 
 class CountryBreakdownResponse(BaseModel):

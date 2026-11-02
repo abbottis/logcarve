@@ -521,6 +521,51 @@ def _project_report(report: object, minimized: dict, full: dict | None) -> str:
             if isinstance(row, dict)
         ]
         return _compact_json({"groups": total, "more": max(0, total - len(shown)), "top": shown})
+    if report == "countries":
+        # Aggregate-only country evidence: exact per-country counts
+        # with top/remainder bounds, honest lookup coverage and the
+        # portable DB-IP credit. Country codes and the credit strings
+        # are server-generated labels — never original addresses, raw
+        # rows, keys or paths. Hostile client/country scope narrowing
+        # is enforced before execution (scope wins); the projection
+        # only renders the executed read.
+        items = minimized.get("items")
+        rows = list(items) if isinstance(items, (list, tuple)) else []
+        full_items = source.get("items")
+        full_rows = list(full_items) if isinstance(full_items, (list, tuple)) else rows
+        geo = source.get("geo")
+        geo = geo if isinstance(geo, dict) else {}
+        credit = source.get("attribution")
+        credit = credit if isinstance(credit, dict) else {}
+        shown = [
+            {
+                "country": row.get("country", "?"),
+                "requests": _int_or(row.get("requests")),
+                "errors_4xx": _int_or(row.get("errors_4xx")),
+                "errors_5xx": _int_or(row.get("errors_5xx")),
+                "bytes": _int_or(row.get("bytes_total")),
+            }
+            for row in rows[:EVIDENCE_PROJECTION_ITEMS]
+            if isinstance(row, dict)
+        ]
+        return _compact_json(
+            {
+                "countries": len(full_rows),
+                "more": max(0, len(full_rows) - len(shown)),
+                "top": shown,
+                "with_country": _int_or(geo.get("with_country")),
+                "unknown": _int_or(geo.get("unknown")),
+                "unavailable": _int_or(geo.get("unavailable")),
+                "legacy": _int_or(geo.get("legacy")),
+                "sources": [
+                    value for value in (geo.get("sources") or []) if isinstance(value, str)
+                ],
+                "releases": [
+                    value for value in (geo.get("releases") or []) if isinstance(value, str)
+                ],
+                "credit": credit.get("text", "?") if isinstance(credit, dict) else "?",
+            }
+        )
     if report == "comparison":
         metrics = source.get("metrics")
         rows = list(metrics) if isinstance(metrics, (list, tuple)) else []

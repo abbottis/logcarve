@@ -56,6 +56,7 @@ REPORT_NAMES = (
     "journeys",
     "journey_entries",
     "comparison",
+    "countries",
 )
 
 _SEO_STATUS_CLASS = {
@@ -149,7 +150,7 @@ class ReportArguments(ToolArguments):
     """
 
     report: str = Field(
-        pattern="^(performance|slow_endpoints|seo_redirects|seo_client_errors|seo_server_errors|seo_ai_only|referrer_404s|referrer_urls|journeys|journey_entries|comparison)$",
+        pattern="^(performance|slow_endpoints|seo_redirects|seo_client_errors|seo_server_errors|seo_ai_only|referrer_404s|referrer_urls|journeys|journey_entries|comparison|countries)$",
         description=(
             "Aggregate report selector. comparison compares equal halves "
             "INSIDE the selected window (baseline first half, current "
@@ -421,6 +422,8 @@ def _execute_report(conn, rules, *, report: str, filt, observed) -> dict:
         return service.journeys(conn, JourneyQuery(filt=filt), rules, observation_time=observed)
     if report == "journey_entries":
         return service.journey_entry_paths(conn, filt, rules, observation_time=observed)
+    if report == "countries":
+        return service.country_breakdown(conn, filt, rules)
     if report == "comparison":
         current, previous = service.split_trusted_window_filter(filt)
         compared = service.compare_windows(

@@ -192,8 +192,10 @@
         options: baseOptions(false),
       }));
     }
-    // Parity report charts (performance, SEO, referrers): server-provided
-    // JSON only, same theme handling; every chart has a table alternative.
+    // Parity report charts (performance, SEO, referrers, countries):
+    // server-provided JSON only, same theme handling; every chart has
+    // a table alternative.
+    renderBar("overview-countries-chart", "overview-countries-chart-data", "country", null);
     renderBar("perf-slow-chart", "perf-slow-chart-data", "path", null);
     renderBar("perf-cache-chart", "perf-cache-chart-data", "value", null);
     renderBar("perf-mime-chart", "perf-mime-chart-data", "mime", null);

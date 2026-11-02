@@ -250,6 +250,31 @@ def _coverage_header(metadata: dict[str, object]) -> dict[str, object]:
     }
 
 
+def _geo_header(metadata: dict[str, object]) -> str:
+    """Lookup coverage plus DB-IP credit for the CSV header (bounded, ASCII-safe).
+
+    Export rows always carry the safe country columns, so the CSV
+    path carries the same source attribution as the JSON envelope:
+    observed lookup sources/releases, honest selected-scope counts
+    and the portable credit (text, URL, database, license) — never
+    an original address, key or filesystem path.
+    """
+    geo = metadata.get("geo")
+    assert isinstance(geo, dict)
+    attribution = metadata.get("attribution")
+    assert isinstance(attribution, dict)
+    payload = {
+        "sources": geo.get("sources"),
+        "releases": geo.get("releases"),
+        "with_country": geo.get("with_country"),
+        "unknown": geo.get("unknown"),
+        "unavailable": geo.get("unavailable"),
+        "legacy": geo.get("legacy"),
+        "attribution": attribution,
+    }
+    return json.dumps(payload, ensure_ascii=True, sort_keys=True)
+
+
 def metadata_headers(metadata: dict[str, object], filename: str) -> dict[str, str]:
     """ASCII-safe export metadata headers (JSON adds the full envelope).
 
@@ -259,13 +284,15 @@ def metadata_headers(metadata: dict[str, object], filename: str) -> dict[str, st
     free text and controls — never a raw CR/LF), bounded by the
     validated contract maxima plus the explicitly flagged imports
     cap. Carries schema, site/source, UTC window, display timezone,
-    sort, generation time, exact count, coverage/quality and
-    privacy on the CSV path exactly as the JSON envelope does.
+    sort, generation time, exact count, coverage/quality, lookup
+    provenance/credit and privacy on the CSV path exactly as the
+    JSON envelope does.
     """
     window = metadata["time_range"]
     assert isinstance(window, dict)
     filters_ascii = json.dumps(_compact_filters(metadata), ensure_ascii=True, sort_keys=True)
     coverage_ascii = json.dumps(_coverage_header(metadata), ensure_ascii=True, sort_keys=True)
+    geo_ascii = _geo_header(metadata)
     source = metadata.get("source_id")
     return {
         "Content-Disposition": f'attachment; filename="{filename}"',
@@ -281,6 +308,7 @@ def metadata_headers(metadata: dict[str, object], filename: str) -> dict[str, st
         "X-Logcarve-Export-Generated-At": str(metadata["generated_at"]),
         "X-Logcarve-Export-Filters": filters_ascii,
         "X-Logcarve-Export-Coverage": coverage_ascii,
+        "X-Logcarve-Export-Geo": geo_ascii,
         "X-Logcarve-Privacy": "pseudonymized; no original IPs, raw lines, query values or keys",
     }
 

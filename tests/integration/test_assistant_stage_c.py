@@ -519,6 +519,7 @@ def test_report_names_are_allowlisted_and_bounded():
         "journeys",
         "journey_entries",
         "comparison",
+        "countries",
     }
     assert "get_report" in definitions.TOOL_NAMES
     assert len(definitions.TOOL_NAMES) == 8

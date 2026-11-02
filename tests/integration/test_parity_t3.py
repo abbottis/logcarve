@@ -1363,6 +1363,21 @@ def test_t3_export_header_imports_truncation_flagged():
                 },
                 "imports": [{"import_id": i, "status": "completed"} for i in range(n)],
             },
+            "geo": {
+                "requests": n,
+                "with_country": n,
+                "unknown": 0,
+                "unavailable": 0,
+                "legacy": 0,
+                "sources": ["dbip-country-lite"],
+                "releases": ["2026-11"],
+            },
+            "attribution": {
+                "text": "IP Geolocation by DB-IP",
+                "url": "https://db-ip.com",
+                "database": "DB-IP Country Lite",
+                "license": "CC BY 4.0",
+            },
         }
 
     few = json.loads(metadata_headers(meta_with(3), "f.csv")["X-Logcarve-Export-Coverage"])

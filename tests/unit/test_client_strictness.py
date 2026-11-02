@@ -778,6 +778,136 @@ def test_cli_report_selectors_forwarded_and_validated(monkeypatch):
         assert exc_info.value.code == 2
 
 
+def test_cli_countries_endpoint_and_country_selector(monkeypatch, capsys):
+    calls = _stub_fetch(monkeypatch)
+    assert client_mod.main([*_CLI_BASE, "--endpoint", "countries", "--country", "us"]) == 0
+    name, params = calls[0]
+    assert name == "countries"
+    assert params["country"] == "US"
+    documents = json.loads(capsys.readouterr().out)
+    assert documents["endpoint"] == "countries"
+    calls.clear()
+    assert client_mod.main([*_CLI_BASE, "--endpoint", "countries", "--country", "UNKNOWN"]) == 0
+    _, params = calls[0]
+    assert params["country"] == "UNKNOWN"
+    capsys.readouterr()
+    sent_before = len(calls)
+    for bad in ("XX1", "USA", "U", "U1", "us1", ""):
+        with pytest.raises(SystemExit) as exc_info:
+            client_mod.main([*_CLI_BASE, "--endpoint", "countries", "--country", bad])
+        assert exc_info.value.code == 2
+    # Rejected selectors fail locally before any request is sent.
+    assert len(calls) == sent_before
+
+
+def test_cli_export_forwards_country(monkeypatch, tmp_path):
+    seen = {}
+
+    def fake_download(base_url, token, params, export_format, dest, **kwargs):
+        seen.update(params)
+        seen["export_format"] = export_format
+        return {"path": dest, "format": "csv", "rows": 0, "complete": True}
+
+    monkeypatch.setattr(client_mod, "download_export", fake_download)
+    out = tmp_path / "out.csv"
+    assert (
+        client_mod.main(
+            [*_CLI_BASE, "--endpoint", "export-csv", "--country", "de", "--out", str(out)]
+        )
+        == 0
+    )
+    assert seen["country"] == "DE"
+    assert seen["export_format"] == "export-csv"
+    with pytest.raises(SystemExit) as exc_info:
+        client_mod.main(
+            [*_CLI_BASE, "--endpoint", "export-csv", "--country", "XX1", "--out", str(out)]
+        )
+    assert exc_info.value.code == 2
+
+
+def test_json_summary_carries_geo_credit_when_present(tmp_path):
+    envelope = {
+        "metadata": {
+            "schema_version": "export/1",
+            "row_count": 1,
+            "geo": {"sources": ["dbip-country-lite"], "with_country": 1, "unknown": 0},
+            "attribution": {"text": "IP Geolocation by DB-IP", "url": "https://db-ip.com"},
+        },
+        "rows": [{"a": 1}],
+        "complete": True,
+    }
+    dest = tmp_path / "geo.json"
+    dest.write_bytes(json.dumps(envelope).encode())
+    summary = client_mod._verify_json_stream(str(dest), 1)
+    assert summary["rows"] == 1 and summary["complete"] is True
+    assert summary["geo"]["sources"] == ["dbip-country-lite"]
+    assert summary["attribution"]["url"] == "https://db-ip.com"
+
+
+def test_csv_provenance_header_carried_and_malformed_fails(tmp_path, monkeypatch):
+    import io as _io
+
+    assert client_mod._csv_geo_provenance({}) == (None, None)
+    geo, credit = client_mod._csv_geo_provenance(
+        {
+            "X-Logcarve-Export-Geo": '{"sources": ["dbip-country-lite"], "attribution": {"text": "t"}}'
+        }
+    )
+    assert geo == {"sources": ["dbip-country-lite"]}
+    assert credit == {"text": "t"}
+    with pytest.raises(ValueError):
+        client_mod._csv_geo_provenance({"X-Logcarve-Export-Geo": "not-json{"})
+    with pytest.raises(TypeError):
+        client_mod._csv_geo_provenance({"X-Logcarve-Export-Geo": "[1, 2]"})
+    with pytest.raises(TypeError):
+        client_mod._csv_geo_provenance(
+            {"X-Logcarve-Export-Geo": '{"sources": [], "attribution": "not-a-dict"}'}
+        )
+
+    class _Canned:
+        def __init__(self, payload, headers):
+            self._payload = _io.BytesIO(payload)
+            self.headers = headers
+
+        def read(self, size=-1):
+            return self._payload.read(size)
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *exc):
+            return False
+
+    class _CannedOpener:
+        def __init__(self, canned):
+            self.canned = canned
+
+        def open(self, request, timeout=None):
+            return self.canned
+
+    body = b"a,b\r\n1,2\r\n"
+    geo_header = (
+        '{"attribution": {"license": "CC BY 4.0", "text": "IP Geolocation by DB-IP",'
+        ' "url": "https://db-ip.com"}, "sources": ["dbip-country-lite"]}'
+    )
+    canned = _Canned(
+        body,
+        {
+            "X-Logcarve-Export-Schema": "export/1",
+            "X-Logcarve-Export-Rows": "1",
+            "X-Logcarve-Export-Geo": geo_header,
+        },
+    )
+    monkeypatch.setattr(client_mod, "_build_opener", lambda: _CannedOpener(canned))
+    dest = tmp_path / "prov.csv"
+    summary = client_mod.download_export(
+        "http://127.0.0.1:9", "SYNTHETIC", {"site_id": "x"}, "export-csv", str(dest)
+    )
+    assert summary["rows"] == 1 and summary["complete"] is True
+    assert summary["geo"] == {"sources": ["dbip-country-lite"]}
+    assert summary["attribution"]["license"] == "CC BY 4.0"
+
+
 # ---------------------------------------------------------------------------
 # Real ExportStream bodies verify end to end (CSV + JSON)
 # ---------------------------------------------------------------------------
@@ -854,7 +984,17 @@ def test_real_export_stream_bodies_verify_csv_and_json(tmp_path, monkeypatch):
         metadata = _export_body_to_file(db, rules, fmt, dest, filt)
         assert metadata["row_count"] == 3
         summary = client_mod._verify_export_file(str(dest), fmt, 3)
-        assert summary == {"path": str(dest), "format": fmt, "rows": 3, "complete": True}
+        assert summary["path"] == str(dest)
+        assert summary["format"] == fmt
+        assert summary["rows"] == 3 and summary["complete"] is True
+        if fmt == "json":
+            # Source attribution travels with the data even when no
+            # database was readable at import (honest zero coverage);
+            # the CSV body carries no metadata object, so its credit
+            # joins in download_export from the response header.
+            assert summary["geo"]["with_country"] == 0
+            assert summary["geo"]["unknown"] == 3
+            assert summary["attribution"]["license"] == "CC BY 4.0"
     blob = (tmp_path / "real.json").read_text(encoding="utf-8")
     envelope = json.loads(blob)
     assert envelope["metadata"]["schema_version"] == "export/1"

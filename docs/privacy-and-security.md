@@ -58,9 +58,16 @@ any write with the fixed `geoip_unavailable:database_required` code
 (never paths, addresses or exception text). Original addresses never
 reach routine rows, the external API, exports, errors, model tools or
 public Git; the database file itself stays outside Git and outside
-the Contributor context. Every page showing country results carries
-the required CC BY 4.0 credit link `https://db-ip.com`
-("IP Geolocation by DB-IP").
+the Contributor context. Every page with country-derived results or
+filters carries the required CC BY 4.0 credit link
+`https://db-ip.com` ("IP Geolocation by DB-IP") via one shared
+partial. Export rows always carry the safe country columns, so the
+JSON envelope and the CSV `X-Logcarve-Export-Geo` header carry the
+same lookup coverage and portable credit with the data — safe
+counts, observed sources/releases and display strings only, never
+an original address, key or filesystem path. Unknown-only
+selections report their own missing per-row source honestly and
+never claim the server has no database configured.
 
 ## Outbound model boundary
 

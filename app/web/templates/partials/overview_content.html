@@ -181,6 +181,8 @@
   <div class="card-body">
     <h2 id="country-h" class="card-title text-base">{{ t("overview.countries") }}</h2>
     <p class="text-sm text-base-content/70">{{ t("geo.estimate_note") }}</p>
+    <div class="chart-frame"><canvas id="overview-countries-chart" aria-label="{{ t("overview.countries") }}" role="img"></canvas></div>
+    <script id="overview-countries-chart-data" type="application/json">{{ {"rows": countries["items"], "labelKey": "country", "requestsLabel": t("table.requests")} | tojson }}</script>
     <div class="table-scroll overflow-x-auto">
       <table class="table table-sm">
         <caption class="sr-only">{{ t("overview.countries") }}</caption>
@@ -194,11 +196,12 @@
     </div>
     {% if countries["geo"]["sources"] %}
     <p class="mt-2 text-sm text-base-content/70">{{ t("geo.source_line", source=countries["geo"]["sources"] | join(", "), release=countries["geo"]["releases"] | join(", ")) }}</p>
+    {% elif countries["geo"]["unavailable"] or countries["geo"]["legacy"] %}
+    <p class="mt-2 text-sm text-base-content/70" role="note">{{ t("geo.stored_without_database", unavailable=countries["geo"]["unavailable"], legacy=countries["geo"]["legacy"]) }}</p>
     {% else %}
-    <p class="mt-2 text-sm text-base-content/70" role="note">{{ t("geo.no_database") }}</p>
+    <p class="mt-2 text-sm text-base-content/70" role="note">{{ t("geo.no_source_in_selection") }}</p>
     {% endif %}
-    <p class="text-sm text-base-content/70">{{ t("geo.coverage_line", with=countries["geo"]["with_country"], unknown=countries["geo"]["unknown"], unavailable=countries["geo"]["unavailable"]) }}</p>
-    <p class="mt-2 text-sm"><a class="link" href="https://db-ip.com">{{ t("geo.attribution") }}</a></p>
+    <p class="text-sm text-base-content/70">{{ t("geo.coverage_line", with=countries["geo"]["with_country"], unknown=countries["geo"]["unknown"], unavailable=countries["geo"]["unavailable"], legacy=countries["geo"]["legacy"]) }}</p>
   </div>
 </section>
 
