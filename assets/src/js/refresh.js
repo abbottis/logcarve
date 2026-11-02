@@ -23,6 +23,14 @@
   // every tick: any difference means unapplied draft edits, and the
   // tick pauses instead of sending them.
   var lastApplied = null;
+  // Property name holding the state one dispatched request sent,
+  // stored on its own XHR at htmx:beforeRequest. A response that lands
+  // after the user typed a draft never adopts that draft as applied:
+  // the swap adopts exactly the state its originating request sent,
+  // however many requests are in flight and in whatever order their
+  // responses arrive. Errors swap nothing, so failed requests change
+  // nothing on their own.
+  var SENT_STATE_KEY = "_logcarveSentState";
   var initialStatusText = "";
 
   function controls() {
@@ -150,16 +158,48 @@
         }
       });
     }
+    // Capture the dispatched state on the request's own XHR before it
+    // leaves: the live form at dispatch is exactly what this request
+    // carries (a tick only sends when it matches, and script runs to
+    // completion before the next keystroke can land). htmx exposes the
+    // same XHR object on the later swap/error events, so the swap
+    // adopts its originating state no matter how many requests are in
+    // flight or in what order their responses arrive. Tick requests
+    // carry their state in the URL, but the dispatch-time form
+    // snapshot covers both uniformly.
+    document.addEventListener("htmx:beforeRequest", function (event) {
+      var target =
+        event.detail && event.detail.target ? event.detail.target : null;
+      if (!target || target.id !== "page-content") return;
+      var xhr = event.detail && event.detail.xhr ? event.detail.xhr : null;
+      if (!xhr) return;
+      try {
+        xhr[SENT_STATE_KEY] = snapshot();
+      } catch (err) {
+        // An XHR that refuses the expando keeps no state: its swap is
+        // then ignored below rather than adopting the live form.
+      }
+    });
     document.addEventListener("htmx:afterSwap", function (event) {
-      // A successful fragment Apply is the new applied state: snapshot
-      // the (out-of-band refreshed) form and restart the interval so a
-      // manual Apply also clears a dirty pause with the honest ON text.
-      if (event.target && event.target.id === "page-content") {
-        lastApplied = snapshot();
-        if (ctl.toggle.checked) {
-          setStatus(message("on"));
-          start();
-        }
+      // A successful fragment Apply is the new applied state: adopt
+      // the state this response's own originating request dispatched,
+      // never a draft typed while it was in flight and never the live
+      // unsent form. Errors swap nothing and so leave the applied
+      // state alone; a manual Apply whose dispatch snapshot its swap
+      // consumes is what clears a dirty pause, with the honest ON
+      // text, and the interval restarts from the swap.
+      if (!event.target || event.target.id !== "page-content") return;
+      var xhr = event.detail && event.detail.xhr ? event.detail.xhr : null;
+      var sent =
+        xhr && Object.prototype.hasOwnProperty.call(xhr, SENT_STATE_KEY)
+          ? xhr[SENT_STATE_KEY]
+          : undefined;
+      if (sent !== undefined) {
+        lastApplied = sent;
+      }
+      if (ctl.toggle.checked) {
+        setStatus(message("on"));
+        start();
       }
     });
   });

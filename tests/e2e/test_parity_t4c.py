@@ -273,9 +273,20 @@ def test_save_current_replays_applied_state(page, c4_base):
         page.locator('a:has-text("/journeys?")').first.click()
     assert "search=%2Flogin" in page.url
 
+    # The deliberate invalid-window Apply above must surface exactly its
+    # expected negative-flow diagnostics (visible banner plus the browser
+    # resource 400 and the htmx response error in the console) and
+    # nothing else: full negative coverage with zero unexpected errors.
+    def _is_expected_400(text):
+        return "400" in text and (
+            "Failed to load resource" in text or "Response Status Error Code" in text
+        )
+
+    expected = [text for text in errors if _is_expected_400(text)]
+    assert expected != [], errors
+    assert len(errors) == len(expected), errors
     assert failed == [], failed
     assert outside == [], outside
-    assert errors == [], errors
 
 
 def test_comparison_baseline_survives_apply_and_controls(page, c4_base):
@@ -341,6 +352,9 @@ def test_refresh_clock_behavior(page, c4_base):
         # Checking shows the ON state immediately, before any tick.
         toggle.check()
         expect(page.locator("body")).to_contain_text("Auto-refresh is on;")
+        # Checking leaves INPUT focus on the checkbox, which correctly
+        # pauses ticks: blur to a non-input first, then the tick sends.
+        page.locator("h1").click()
         # Advancing past 30s re-reads with the applied state via GET.
         page.clock.fast_forward(31000)
         page.wait_for_timeout(500)
@@ -421,6 +435,236 @@ def test_refresh_clock_behavior(page, c4_base):
     assert failed == [], failed
     assert outside == [], outside
     assert errors == [], errors
+
+
+def test_refresh_ignores_inflight_draft(page, c4_base):
+    errors, failed, outside = _watch(page)
+    base = c4_base
+    _login(page, base)
+    page.clock.install()
+    try:
+        page.goto(f"{base}/journeys?{STATE}")
+        partials: list[str] = []
+        page.on(
+            "request",
+            lambda req: partials.append(req.url) if "/partials/journeys" in req.url else None,
+        )
+        page.select_option("#refresh-interval", "30")
+        page.locator("#refresh-toggle").check()
+        expect(page.locator("body")).to_contain_text("Auto-refresh is on;")
+        page.locator("h1").click()
+
+        # Hold the first automatic GET response at the network layer so
+        # drafts can be typed while it is in flight.
+        held = []
+        seen = {"n": 0}
+
+        def _hold(route):
+            seen["n"] += 1
+            if seen["n"] == 1:
+                held.append((route, route.fetch()))
+            else:
+                route.continue_()
+
+        page.route("**/partials/journeys*", _hold)
+        try:
+            # The first tick dispatches with no search; it stays held.
+            page.clock.fast_forward(31000)
+            deadline = time.monotonic() + 15
+            while not held:
+                assert time.monotonic() < deadline, "first refresh GET was never held"
+                page.wait_for_timeout(200)
+            assert len(partials) == 1, partials
+            assert "search=%2Flogin" not in partials[0], partials[0]
+            # While the stale response is held, edit search, method and
+            # status, then blur: only draft detection may pause ticks.
+            page.fill("#f-search", "/login")
+            page.select_option("#f-method", "POST")
+            page.select_option("#f-status", "401")
+            page.locator("h1").click()
+            # Releasing the stale response must not adopt the draft: the
+            # search draft stays in the input, and scope selects refresh
+            # from the server as usual.
+            route, response = held[0]
+            route.fulfill(response=response)
+            page.wait_for_timeout(500)
+            assert page.input_value("#f-search") == "/login", page.input_value("#f-search")
+            # Re-assert the select drafts on the server-refreshed form,
+            # then the next tick must not implicitly Apply any of them.
+            page.select_option("#f-method", "POST")
+            page.select_option("#f-status", "401")
+            page.locator("h1").click()
+            page.clock.fast_forward(31000)
+            page.wait_for_timeout(500)
+            assert len(partials) == 1, partials
+            expect(page.locator("body")).to_contain_text("paused while unsaved")
+            # A deliberate manual Apply clears the pause and replays the
+            # full draft; the following tick then carries it.
+            page.click("#filter-bar button[type=submit]")
+            page.wait_for_function(
+                "() => window.location.href.includes('search=%2Flogin')",
+                timeout=10000,
+            )
+            page.clock.fast_forward(31000)
+            page.wait_for_timeout(500)
+            assert len(partials) > 1, partials
+            assert "search=%2Flogin" in partials[-1], partials
+            assert "method=POST" in partials[-1], partials
+            assert "status=401" in partials[-1], partials
+            expect(page.locator("body")).to_contain_text("Auto-refresh is on;")
+        finally:
+            page.unroute("**/partials/journeys*")
+    finally:
+        page.clock.resume()
+
+    assert failed == [], failed
+    assert outside == [], outside
+    assert errors == [], errors
+
+
+def test_refresh_inflight_reversal_and_error(page, c4_base):
+    errors, failed, outside = _watch(page)
+    base = c4_base
+    _login(page, base)
+    page.clock.install()
+    try:
+        page.goto(f"{base}/journeys?{STATE}")
+        partials: list[str] = []
+        page.on(
+            "request",
+            lambda req: partials.append(req.url) if "/partials/journeys" in req.url else None,
+        )
+        page.select_option("#refresh-interval", "30")
+        page.locator("#refresh-toggle").check()
+        expect(page.locator("body")).to_contain_text("Auto-refresh is on;")
+        page.locator("h1").click()
+
+        # Hold the first two fragment GETs at the network layer: the
+        # automatic tick (clean applied state) and the deliberate
+        # manual Apply (search/method/status draft) that follows it.
+        held: list = []
+
+        def _hold(route):
+            if len(held) < 2:
+                held.append((route, route.fetch()))
+            else:
+                route.continue_()
+
+        page.route("**/partials/journeys*", _hold)
+        try:
+            page.clock.fast_forward(31000)
+            deadline = time.monotonic() + 15
+            while len(held) < 1:
+                assert time.monotonic() < deadline, "tick GET was never held"
+                page.wait_for_timeout(200)
+            assert len(partials) == 1, partials
+            assert "search=%2Flogin" not in partials[0], partials[0]
+
+            # Draft while the tick is in flight, then Apply: the Apply
+            # dispatches its own request carrying the draft.
+            page.fill("#f-search", "/login")
+            page.select_option("#f-method", "POST")
+            page.select_option("#f-status", "401")
+            page.locator("h1").click()
+            page.click("#filter-bar button[type=submit]")
+            deadline = time.monotonic() + 15
+            while len(held) < 2:
+                assert time.monotonic() < deadline, "Apply GET was never held"
+                page.wait_for_timeout(200)
+            assert len(partials) == 2, partials
+            assert "search=%2Flogin" in partials[1], partials
+            assert "method=POST" in partials[1], partials
+            assert "status=401" in partials[1], partials
+
+            # Fulfill out of order: the Apply first, then the stale
+            # tick. Each swap must adopt its own originating request,
+            # so the stale tick wins last-write and the draft is not
+            # silently adopted as applied.
+            apply_route, apply_response = held[1]
+            tick_route, tick_response = held[0]
+            apply_route.fulfill(response=apply_response)
+            page.wait_for_timeout(500)
+            tick_route.fulfill(response=tick_response)
+            page.wait_for_timeout(500)
+
+            # The form still shows the typed draft but the last swapped
+            # (stale) state is the clean one, so the next tick pauses
+            # instead of implicitly applying the draft.
+            page.clock.fast_forward(31000)
+            page.wait_for_timeout(500)
+            assert len(partials) == 2, partials
+            expect(page.locator("body")).to_contain_text("paused while unsaved")
+
+            # A deliberate manual Apply clears the pause and replays
+            # the full draft; the following tick then carries it.
+            page.click("#filter-bar button[type=submit]")
+            page.wait_for_function(
+                "() => window.location.href.includes('search=%2Flogin')",
+                timeout=10000,
+            )
+            page.clock.fast_forward(31000)
+            page.wait_for_timeout(500)
+            assert len(partials) > 2, partials
+            assert "search=%2Flogin" in partials[-1], partials
+            assert "method=POST" in partials[-1], partials
+            assert "status=401" in partials[-1], partials
+            expect(page.locator("body")).to_contain_text("Auto-refresh is on;")
+
+            # Error leg: hold the next clean tick, draft a new search,
+            # fail the Apply with a 500, then release the tick. The
+            # failed Apply must adopt nothing; the tick adopts its own
+            # clean state and the following tick pauses on the draft.
+            saved = page.evaluate("() => document.querySelector('#save-view-target').value")
+            assert "search=%2Flogin" in saved, saved
+            held.clear()
+            page.fill("#f-search", "/admin")
+            page.locator("h1").click()
+            page.clock.fast_forward(31000)
+            page.wait_for_timeout(500)
+            assert len(held) == 1, partials
+            tick2_route, tick2_response = held[0]
+            # Answer only the failed Apply at the network layer; the
+            # held tick keeps its fetched clean response.
+            page.unroute("**/partials/journeys*")
+
+            def _fail_apply(route):
+                if "search=%2Fadmin" in route.request.url:
+                    route.fulfill(status=500, body="synthetic failure")
+                else:
+                    route.continue_()
+
+            page.route("**/partials/journeys*", _fail_apply)
+            page.click("#filter-bar button[type=submit]")
+            expect(page.locator("[data-filter-error]")).to_be_visible(timeout=10000)
+            assert "search=%2Fadmin" in partials[-1], partials
+            tick2_route.fulfill(response=tick2_response)
+            page.wait_for_timeout(500)
+            page.clock.fast_forward(31000)
+            page.wait_for_timeout(500)
+            assert all("search=%2Fadmin" not in url for url in partials), partials
+            expect(page.locator("body")).to_contain_text("paused while unsaved")
+            # The Save target still carries the last displayed state,
+            # never the failed draft.
+            assert page.evaluate("() => document.querySelector('#save-view-target').value") == saved
+        finally:
+            page.unroute("**/partials/journeys*")
+    finally:
+        page.clock.resume()
+
+    # The deliberate 500 Apply surfaces exactly its expected
+    # negative-flow diagnostics (visible banner plus the browser
+    # resource 500 and the htmx response error in the console) and
+    # nothing else.
+    def _is_expected_500(text):
+        return "500" in text and (
+            "Failed to load resource" in text or "Response Status Error Code" in text
+        )
+
+    expected = [text for text in errors if _is_expected_500(text)]
+    assert expected != [], errors
+    assert len(errors) == len(expected), errors
+    assert failed == [], failed
+    assert outside == [], outside
 
 
 def test_comparison_refresh_help_and_layout(page, c4_base):
