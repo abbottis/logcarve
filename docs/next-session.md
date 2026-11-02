@@ -1,6 +1,39 @@
-# Next session checkpoint (1 Nov 2026, owner-UX closeout)
+# Next session checkpoint (2 Nov 2026, parity final receipts)
 
 ## Where things stand
+
+- LogWerk-parity closeout 2 Nov 2026: all authorized implementation is
+  complete and ACTUAL local demo activation has occurred at clean code
+  anchor `84f440f2c593c9c32f4608e608c3530ad1cfed61` (canonical
+  equivalent `d62cb5a0929b5d2114924106dff30abfbc305fb4` on
+  `local/logwerk-parity-2026-11-02`; 33 local commits reconciled,
+  tracked trees IDENTICAL and clean; protected `main`/`origin/main`
+  unchanged; no push/merge/exposure/production deployment; ACTUAL local
+  demo activation already occurred — see above). Docs-only closeout —
+  no new build/retest. Consolidated full unit/integration 1263 PASS at
+  `7f0c20d`, protected browser 47+1-corrected plus 24 actual-image
+  checks, Ruff/format/lock/asset guards, redacted Gitleaks (two known
+  false positives only), native ARM64 offline internal-network smoke
+  24/0 at `84f440f`, genuine offline DB-IP Country Lite November 2026
+  MMDB pipeline PASS, 1M benchmark observed timings, live 8080 at
+  schema 8 with protected backup + image-only rollback retained (see
+  `docs/verification.md` final receipts). PAR-08/PAR-09 are
+  implemented, tested and activated — not planned. Product AI stays OFF;
+  historical real AI-02 stays INCOMPLETE 2 of 3. No active writer,
+  automation or product run after this docs closeout.
+- Current development working folder is canonical logcarve on its LOCAL
+  feature branch; the public/synthetic Muse coding workspace stays
+  separate from private history/secrets. Coding exception remains exact
+  Contributor/medium/protections-ON/fresh-context, with direct Muse CLI
+  fallback expressly allowed when macOS locks. Owner policy: minimum
+  interim checks, one final consolidated verification; no per-slice
+  global review loops or old MVP bootstrap restarts. Propose
+  logcarve-dev reconciliation/archival AFTER owner accepts the current
+  local checkout; do not move/delete it automatically.
+- Fixed recording window stays UTC 26 Oct → 1 Nov so the 120 rows do
+  not age out of the rolling 7d. English UI only; browser file import
+  and shipped translations deliberately excluded.
+- Earlier owner-UX status (preserved as history):
 
 - Owner-UX slice closed at public HEAD `f0182fb` on
   `feature/owner-ux-review-2026-11-01` (application anchor `ffaf737`;
@@ -46,7 +79,7 @@
 
 ## Precise next work (owner-led, no paid replay)
 
-1. Owner manual acceptance TODAY 1 Nov 2026 with
+1. Owner manual review/corrections with
    [acceptance checklist](acceptance-checklist.md): review
    Requests/Crawlers/Help, filter state + timezone labels,
    Security candidate (investigation lead only) and the Ask
@@ -66,9 +99,11 @@
 4. Platform gap: Linux x86-64 install verification (for a full
    install claim) plus current Official Rules/materials check when
    available.
-5. Deferred scope stays deferred: gzip, custom formats, live
-   ingestion, GeoIP/sessions, export/import UX, webhooks, MCP
-   product server.
+5. Deferred scope stays deferred: sessions,
+   webhooks, MCP product server, shipped translations, browser
+   file-import UI. (Parity gzip/custom formats, follow/rotation,
+   GeoIP, saved views, comparison windows and full-result export are
+   implemented and activated — see above.)
 
 ## Hard limits and fresh-workspace safety
 

@@ -2,14 +2,18 @@
 
 AI-assisted, self-hosted web access-log analytics for security, crawler activity and development.
 
-**Acceptance readiness — 1 November 2026.** The parser, SQLite storage,
+**Acceptance readiness — 2 November 2026.** The parser, SQLite storage,
 deterministic analytics, authenticated REST API, bounded Meta assistant,
 browser dashboard and local synthetic demo are implemented. Fundamental
 traffic graphs, traffic selection with a 77-rule bot catalog, bot sorting
 and drilldowns, and a sanitized request explorer are available from the
 clean application source `bb272a9` (reviewed public source branch
 `feature/acceptance-polish-2026-11-01`; canonical equivalent `ad6d74f`
-on `local/acceptance-readiness-2026-11-01`).
+on `local/acceptance-readiness-2026-11-01`). The LogWerk-parity slice
+T1–T5 is likewise implemented and locally activated at clean code anchor
+`84f440f2c593c9c32f4608e608c3530ad1cfed61` (see the
+[verification history](docs/verification.md) final receipts); live demo
+runs schema 8 at `http://127.0.0.1:8080`.
 
 The owner-UX review slice (Stage A labels/offsets/dropdowns/Crawlers/
 Help/starter/quick views + Stage B 8-column Requests explorer,
@@ -100,7 +104,7 @@ native Linux x86-64 installation and standalone Linux host install are
 **NOT RUN**, and no full release, hackathon or all-project QA approval
 is claimed.
 
-Deferred scope stays deferred: sessions, export/import UX, webhooks and the MCP product server. The LogWerk-parity branch additionally implements gzip ingest with presets and custom formats, genuine offline GeoIP and opt-in command-line follow/rotation (PAR-01–10); continuous ingestion beyond bounded opt-in follow, shipped translations and a browser file-import UI stay excluded.
+Deferred scope stays deferred: sessions, webhooks and the MCP product server. The LogWerk-parity slice implements gzip ingest with presets and custom formats, measured-timing analytics, SEO/journeys/security reports, full-result export, opt-in command-line follow/rotation, saved views, comparison windows and genuine offline GeoIP (PAR-01–10, locally activated at `84f440f`); continuous ingestion beyond bounded opt-in follow, shipped translations and a browser file-import UI stay excluded. Owner manual acceptance and video rehearsal remain open; native Linux x86-64 is NOT RUN.
 The product AI path stays off in the demo (AI disabled, empty model key,
 no Internet in offline proof); the separately authorized real Meta test
 completed two investigations with tool evidence while the third stopped at

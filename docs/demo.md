@@ -3,13 +3,23 @@
 Loopback-only persistent demo for the 3 November recording. No real logs,
 no model key, no provider contact, no public exposure.
 
-Owner-UX status 1 Nov 2026: the running demo at `127.0.0.1:8080` already
-serves the exact tested owner-UX image (from `a087c3e`; HEAD `f0182fb`
-is tests/docs only). Verified with an online 0600 backup + rollback
-image before activation, identical all-table/row hashes across
-activation, unchanged credentials, 120 rows / schema 4 retained. The
-loopback bridge demo is not air-gapped; offline behavior is proven by
-the separate internal-network run (see `docs/verification.md`).
+Parity status 2 Nov 2026: the running demo at `127.0.0.1:8080`
+serves the exact tested parity image `84f440f` (image ID
+`sha256:8fcdaa34312c6379817dad359fd93318b85257c2164f57d903470083c9b22abd`),
+non-root user 10001, loopback-only, AI off with empty model key.
+Reviewed `upgrade_demo.py` migrated the store 4 → 8 and reprocessed
+30 + 90 rows with all 120 legacy core tuples/IDs/HMAC plus
+auth/token/session/spend/allowance hashes preserved at the proof
+point; existing `demo.env` and `demo-token.txt` hashes/values
+unchanged; protected online DB backup retained separately outside Git
+plus image-only rollback TAG `logcarve-demo:before-parity-84f440f2`
+retained; 120 rows / schema 8 live.
+Subsequent intentional admin test logins/settings transitions occur
+after that preservation proof. The loopback bridge demo is not
+air-gapped; offline behavior is proven by the separate 24/0
+internal-network smoke on the same image (see `docs/verification.md`).
+Earlier owner-UX status (schema 4, image from `a087c3e`) is superseded
+history.
 
 ## Entry URL (use this on recording day)
 

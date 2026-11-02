@@ -1,13 +1,15 @@
-# Acceptance checklist — owner review (1 Nov 2026)
+# Acceptance checklist — owner review (2 Nov 2026, parity activated)
 
-Short practical checklist for today's owner review of the
-acceptance-ready demo at application anchor `bb272a9` (reviewed
-public source branch `feature/acceptance-polish-2026-11-01`;
-canonical equivalent `ad6d74f` on
-`local/acceptance-readiness-2026-11-01`). Inspect `git status`
-rather than assuming a branch name. Record expected, actual and
-issues per row; planned recording by Tue 3 Nov; nothing here
-auto-accepts on the owner's behalf.
+Short practical checklist for the owner review of the
+parity-activated demo at clean code anchor
+`84f440f2c593c9c32f4608e608c3530ad1cfed61` (canonical equivalent
+`d62cb5a0929b5d2114924106dff30abfbc305fb4`; live 8080 at schema 8,
+120 rows, see `docs/verification.md` final receipts). Earlier
+acceptance-readiness anchor `bb272a9` (reviewed public source branch
+`feature/acceptance-polish-2026-11-01`) remains the historical record.
+Inspect `git status` rather than assuming a branch name. Record
+expected, actual and issues per row; planned recording by Tue 3 Nov;
+nothing here auto-accepts on the owner's behalf.
 
 ## Demo access
 
@@ -67,8 +69,11 @@ is claimed.
 - [ ] Linux x86-64 verification for a full install claim.
 - [ ] Current Official Rules and materials check, then actual
   recording and publication.
-- Deferred P1 features (gzip, custom formats, live ingestion,
-  GeoIP/sessions, export/import UX, webhooks, MCP) stay out.
+- Deferred scope (sessions, webhooks, MCP, shipped
+  translations, browser file-import UI) stays out. Parity gzip/custom
+  formats, follow/rotation, GeoIP, saved views, comparison windows and
+  full-result export are implemented and locally activated (see
+  `docs/verification.md` final receipts), not deferred.
 - No merge to `main`, production deployment, GitHub push or public
   exposure without explicit owner approval. `main` is unchanged;
   never publish the canonical private graph blindly.

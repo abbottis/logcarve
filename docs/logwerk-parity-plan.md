@@ -1,6 +1,7 @@
 # LogWerk Parity Implementation Plan
 
-Status: proposed 2026-11-01. Plan only — no application code changed.
+Status: implemented and locally activated 2026-11-02 at clean code
+anchor `84f440f2c593c9c32f4608e608c3530ad1cfed61`.
 
 Implementation status 2026-11-02 (this branch; scope rows below are the
 frozen plan, not a duplicate claim): slices A–G plus genuine GeoIP (I),
@@ -8,11 +9,19 @@ locale preparation (J), timestamp compatibility/numeric domain (T5b1),
 the T5b1c replay private-association guard, opt-in CLI follow/rotation
 (H, `app/db/follow.py` + migration 0008), the supported-schema
 `/readyz` gate, the coordinator upgrade helper and the synthetic
-benchmark are implemented with focused tests green (see
-`docs/verification.md`). Consolidated full unit/integration, protected
-browser E2E, secret history scan, genuine-MMDB runtime proof and
-independent security/release review stay coordinator-owned and pending
-before activation; native Linux x86-64 stays NOT RUN.
+benchmark are implemented, verified and ACTUALLY locally activated
+(see `docs/verification.md` final receipts): consolidated full
+unit/integration 1263 PASS at `7f0c20d`, protected browser 47+1
+corrected plus 24 actual-image checks, Ruff/format/lock/asset guards,
+redacted Gitleaks with two known false positives only, fresh
+ARM64-container candidate 9/0, FINAL native Linux ARM64 offline
+internal-network smoke 24/0 on image
+`sha256:8fcdaa34312c6379817dad359fd93318b85257c2164f57d903470083c9b22abd`,
+genuine offline DB-IP Country Lite November 2026 MMDB pipeline PASS,
+1M benchmark observed timings, live 8080 at schema 8 with protected
+backup + image-only rollback. Earlier coordinator-pending lines above
+are superseded history. Native Linux x86-64 stays NOT RUN; owner
+manual acceptance and video rehearsal remain OPEN.
 Owner scope: `artifacts/task-inputs/logwerk-parity-owner-scope.md` (already authorized; no new approval loop).
 Baseline: public checkout HEAD `70aab80` on `feature/logwerk-parity-2026-11-01`; application anchor `ffaf737` (owner-UX source).
 Implementer for all later stages: Muse Spark 1.3 Contributor, medium effort, protections ON, sole writer, no subagents.
