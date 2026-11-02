@@ -659,7 +659,9 @@ def test_help_covers_operators_and_declares_boundaries(t4c):
         "explicit baseline of exactly equal length",
         "placeholder credentials",
         "honestly shows Unknown",
-        "not enabled in this release",
+        "explicit opt-in command-line operation",
+        "logcarve-import follow",
+        "no live watcher",
     ):
         assert section in html, section
     lowered = html.lower()

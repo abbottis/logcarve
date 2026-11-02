@@ -10,8 +10,8 @@ from pathlib import Path
 
 from starlette.testclient import TestClient
 
-from app.analytics.contracts import AnalyticsFilter, TimeWindow, TopPathsQuery
 from app.analytics import service as analytics_service
+from app.analytics.contracts import AnalyticsFilter, TimeWindow, TopPathsQuery
 from app.auth.passwords import hash_password
 from app.auth.tokens import create_admin_user, issue_token
 from app.db.database import writer_transaction
@@ -87,14 +87,9 @@ def test_carry_ranking_through_import_and_paths_api(tmp_path, monkeypatch):
     root = tmp_path / "logs"
     root.mkdir()
     (root / "carry.log").write_text(
-        "\n".join(
-            [
-                '203.0.113.11 [2026-10-27T09:00:00Z] "GET /carry-a HTTP/1.1" 200 4294967296',
-                '203.0.113.12 [2026-10-27T09:01:00Z] "GET /carry-b HTTP/1.1" 200 2147483649',
-                '203.0.113.13 [2026-10-27T09:02:00Z] "GET /carry-b HTTP/1.1" 200 2147483649',
-            ]
-        )
-        + "\n",
+        '203.0.113.11 [2026-10-27T09:00:00Z] "GET /carry-a HTTP/1.1" 200 4294967296\n'
+        '203.0.113.12 [2026-10-27T09:01:00Z] "GET /carry-b HTTP/1.1" 200 2147483649\n'
+        '203.0.113.13 [2026-10-27T09:02:00Z] "GET /carry-b HTTP/1.1" 200 2147483649\n',
         encoding="utf-8",
     )
     pattern = (
@@ -197,9 +192,7 @@ def test_empty_bytes_rejects_and_continues_for_both_aliases(tmp_path, monkeypatc
     good = "203.0.113.30|2026-10-27T09:15:32Z|GET /safe HTTP/1.1|200|128"
     bad = "203.0.113.30|2026-10-27T09:15:32Z|GET /safe HTTP/1.1|200|"
     for pattern in (PIPE_SIZE, PIPE_BYTES):
-        target, before, records, report = _stream_case(
-            tmp_path, monkeypatch, [bad, good], pattern
-        )
+        target, before, records, report = _stream_case(tmp_path, monkeypatch, [bad, good], pattern)
         assert [record.line_number for record in records] == [2]
         assert records[0].bytes_sent == 128
         assert report.accepted == 1 and report.rejected == 1

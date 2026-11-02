@@ -2,11 +2,21 @@
 
 A bounded ``follow`` run tails one approved read-only source file across a
 finite number of polls and commits each batch atomically with its
-checkpoint progress: event rows, the ``follow_batches`` accounting row
-and the generation checkpoint land in ONE writer transaction, so a
-cancel/restart can never meet a commit-before-checkpoint duplicate
-window. Empty polls write nothing: no import/job rows are created per
-idle tick, so a long-lived follow never grows history.
+checkpoint progress: event rows, the ``follow_batches`` accounting row,
+the generation checkpoint AND the running attempt counters land in ONE
+writer transaction, so a cancel/restart can never meet a
+commit-before-checkpoint duplicate window and a long active generation
+reports real imported lines while it runs. Empty polls write nothing:
+no import/job rows are created per idle tick, so a long-lived follow
+never grows history.
+
+Within a run the read cursor (pulled bytes) is separate from the
+durable complete-line checkpoint: partial lines are carried in memory
+once and never re-fed, so offsets and the running digest cover every
+pulled byte exactly once with bounded per-poll memory. Concurrent
+followers serialize on a checkpoint compare-and-swap inside the writer
+transaction: stale work refuses with ``follow:stale_generation``
+before any write, never rewinding progress.
 
 Generations: every rotation, copytruncate shrink or replacement starts
 a new generation with its own identity. A generation fingerprint
@@ -78,7 +88,13 @@ from app.ingestion.gzipio import (
     has_gzip_magic,
     iter_decompressed_chunks,
 )
-from app.ingestion.sources import FileIdentity, HostFilter, SourceConfig, resolve_source_path
+from app.ingestion.sources import (
+    FileIdentity,
+    HostFilter,
+    SourceConfig,
+    SourceError,
+    resolve_source_path,
+)
 
 # Deliberate reuse of the streaming parser internals: follow must parse,
 # account and bound custom-timeout abuse EXACTLY like batch import, so
@@ -107,6 +123,7 @@ AMBIGUOUS_PREFIX_ADOPTION = "follow:ambiguous_prefix_adoption"
 ARCHIVE_PREFIX_MISMATCH = "follow:archive_prefix_mismatch"
 PREFIX_TAINTED = "follow:prefix_mismatch"
 ROTATION_TARGET_MISSING = "follow:rotation_target_missing"
+STALE_GENERATION_CODE = "follow:stale_generation"
 WRITER_BUSY_CODE = "interrupted:writer_busy"
 IO_ERROR_CODE = "interrupted:io_error"
 
@@ -117,6 +134,7 @@ _FOLLOW_DETAIL_CODES = frozenset(
         ARCHIVE_PREFIX_MISMATCH,
         PREFIX_TAINTED,
         ROTATION_TARGET_MISSING,
+        STALE_GENERATION_CODE,
         WRITER_BUSY_CODE,
         IO_ERROR_CODE,
     )
@@ -414,24 +432,35 @@ class _LineFollower:
         self.skipping = False
         self.skip_start = 0
 
-    def feed(self, data: bytes, base_offset: int) -> list[tuple[int, bytes | None, int]]:
-        """Consume new bytes; return ``(offset, line|None, end)`` completes.
+    def feed(
+        self, data: bytes, base_offset: int
+    ) -> tuple[list[tuple[int, bytes | None, int]], list[tuple[int, int]]]:
+        """Consume new bytes; return completed lines plus dropped spans.
 
-        ``None`` data marks one oversized line; ``end`` is the absolute
-        offset just past the terminating newline. The trailing partial
-        (if any) remains pending.
+        Returns ``(items, dropped)`` where ``items`` are
+        ``(offset, line|None, end)`` completes (``None`` data marks one
+        oversized line; ``end`` is just past the newline) and
+        ``dropped`` lists absolute ``(start, end)`` spans of oversized
+        bytes that left memory without becoming an item: skip-mode
+        bytes before a newline, a whole still-skipping chunk, or the
+        tail that newly trips skip mode. The caller hashes ``dropped``
+        in offset order at commit time; the trailing partial (if any)
+        stays pending and unhashed until it completes.
         """
         out: list[tuple[int, bytes | None, int]] = []
+        dropped: list[tuple[int, int]] = []
         if self.skipping:
             newline = data.find(b"\n")
             if newline == -1:
-                return out
+                dropped.append((base_offset, base_offset + len(data)))
+                return out, dropped
+            dropped.append((base_offset, base_offset + newline + 1))
             out.append((self.skip_start, None, base_offset + newline + 1))
             self.skipping = False
             base_offset += newline + 1
             data = data[newline + 1 :]
             if not data:
-                return out
+                return out, dropped
         if self.pending:
             start = self.pending_start
             buf = bytes(self.pending) + data
@@ -462,22 +491,26 @@ class _LineFollower:
             if len(rest) > self._max:
                 self.skipping = True
                 self.skip_start = line_start
+                dropped.append((line_start, base_offset + len(buf)))
             else:
                 self.pending = bytearray(rest)
                 self.pending_start = line_start
-        return out
+        return out, dropped
 
-    def seal(self) -> list[tuple[int, bytes | None, int]]:
+    def seal(self, pulled_end: int) -> list[tuple[int, bytes | None, int]]:
         """Close a sealed generation: exactly one item per leftover.
 
-        A skipping tail yields its oversized marker (``None``, zero
-        span, digest unchanged). A non-empty pending partial is a real
-        final line — the sealed file is complete, so batch EOF
+        A skipping tail yields its oversized marker (``None``) spanning
+        to ``pulled_end``: every skipped byte was already hashed (and
+        checkpointed) by per-feed dropped-span commits, so the marker
+        batch hash covers nothing new while the checkpoint honestly
+        lands past the consumed tail. A non-empty pending partial is a
+        real final line — the sealed file is complete, so batch EOF
         semantics apply and the bytes are consumed, never discarded.
         """
         out: list[tuple[int, bytes | None, int]] = []
         if self.skipping:
-            out.append((self.skip_start, None, self.skip_start))
+            out.append((self.skip_start, None, max(pulled_end, self.skip_start)))
             self.skipping = False
         elif self.pending:
             data = bytes(self.pending)
@@ -711,6 +744,30 @@ def _adopt_or_begin(
     return row, False
 
 
+def _check_fresh_for_write(conn: sqlite3.Connection, gen: dict) -> None:
+    """Compare-and-swap guard: refuse a batch/seal on a stale generation.
+
+    The caller runs inside the writer transaction; the persisted
+    identity, status and ``next_offset`` must still equal the in-memory
+    checkpoint this batch started from. A concurrent follower that
+    already advanced, sealed or replaced the generation makes this work
+    stale: raise :class:`FollowFailed` with the fixed stale code before
+    any event, batch or checkpoint write, so no progress is rewound and
+    no duplicate accounting is recorded. Never retried: the loser of
+    the race aborts exactly once.
+    """
+    current = _load_generation(
+        conn, source_id=str(gen["source_id"]), seq=int(gen["generation_seq"])
+    )
+    if (
+        current is None
+        or str(current["generation_id"]) != str(gen["generation_id"])
+        or str(current["status"]) != str(gen["status"])
+        or int(current["next_offset"]) != int(gen["next_offset"])
+    ):
+        raise FollowFailed(STALE_GENERATION_CODE)
+
+
 def _commit_follow_batch(
     conn: sqlite3.Connection,
     ctx: _RunContext,
@@ -729,10 +786,16 @@ def _commit_follow_batch(
 ) -> tuple[int, int, int, int]:
     """Atomically commit one follow batch with its checkpoint progress.
 
-    Event rows, the ``follow_batches`` accounting row and the generation
-    checkpoint commit in ONE writer transaction: a crash between commit
-    and checkpoint is impossible by construction.
+    Event rows, the ``follow_batches`` accounting row, the generation
+    checkpoint AND the running attempt counters commit in ONE writer
+    transaction: a crash between commit and checkpoint is impossible by
+    construction, and a long active generation reports its durable
+    attempt totals (not zero) while it is still running. The generation
+    keeps exactly one attempt row; idle polls write nothing. A stale
+    in-memory checkpoint (another follower moved the generation first)
+    is refused before any write via :func:`_check_fresh_for_write`.
     """
+    _check_fresh_for_write(conn, gen)
     fingerprint = generation_fingerprint(ctx.source.source_id, int(gen["generation_seq"]))
     mismatched: set[int] = set()
     if ctx.capture_originals and batch_private:
@@ -792,6 +855,28 @@ def _commit_follow_batch(
     gen["file_mtime_ns"] = file_mtime_ns
     gen["updated_at"] = _now()
     _store_generation(conn, row=gen)
+    # Durable attempt counters advance in the SAME transaction: a long
+    # active generation reports real imported lines from coverage (not
+    # zero until seal), while idle polls still write nothing. Exactly
+    # one attempt row per generation; replay attempts update their own
+    # attempt row honestly through the same path.
+    accepted_total, rejected_total, _skip_t, inserted_total, replayed_total = _gen_totals(
+        conn,
+        source_id=ctx.source.source_id,
+        seq=int(gen["generation_seq"]),
+    )
+    conn.execute(
+        "UPDATE imports SET lines_total = ?, lines_accepted = ?, lines_rejected = ?,"
+        " records_inserted = ?, records_replayed = ? WHERE id = ?",
+        (
+            accepted_total + rejected_total,
+            accepted_total,
+            rejected_total,
+            inserted_total,
+            replayed_total,
+            int(gen["import_id"]),
+        ),
+    )
     return inserted, len(batch) - inserted, originals_captured, originals_skipped
 
 
@@ -823,6 +908,15 @@ class _GenState:
     line_number: int
     # Read source for bounded tail re-validation (live path or archive).
     path: Path | None = None
+    # Offsets below ``hash_floor`` already feed the running digest
+    # (replay: the validated sealed prefix, hashed once during the
+    # prefix check and never re-hashed by tail commits). Live runs keep
+    # ``0``: every pulled byte is hashed exactly once, in order.
+    hash_floor: int = 0
+    # Furthest pulled offset (read cursor, not the durable checkpoint).
+    # Only complete-line bytes advance the checkpoint; the cursor also
+    # covers pending tails so a skipping seal can land past them.
+    read_end: int = 0
     # Latest committed window: ``(start, digest)`` over at most
     # TAIL_WINDOW_BYTES. In-memory only, refreshed at every commit from
     # a bounded re-read; empty (``""`` digest) until the first commit.
@@ -849,6 +943,11 @@ class _Accum:
     rejected: int = 0
     skipped_foreign: int = 0
     reasons: dict = field(default_factory=dict)
+    # Oversized spans dropped from memory by this feed (absolute
+    # ``(start, end)``). Committed in offset order with the lines by
+    # the same flush; bytes already hashed by earlier commits (before
+    # the view start or below the replay floor) are clamped out.
+    dropped: list = field(default_factory=list)
 
 
 def _with_writer_retry(ctx: _RunContext, work: Callable[[], object]) -> object:
@@ -875,12 +974,31 @@ def _flush_accum(
     batch_end: int,
     result: FollowResult | ArchiveResult,
 ) -> None:
-    """Commit one full batch (or seal batch) with digest and accounting."""
-    if not accum.rows and accum.accepted + accum.rejected + accum.skipped_foreign == 0:
+    """Commit one full batch (or seal batch) with digest and accounting.
+
+    The running digest advances in strict offset order over the
+    committed span ``[max(start, view_start, floor), batch_end)``: in
+    one bounded slice, never retaining raw bytes and never re-hashing
+    the floor prefix (replay) or already-committed earlier views.
+    Dropped oversized spans inside the view hash as part of the same
+    ordered slice; earlier-chunk portions were committed by their own
+    per-feed flushes, so clamping keeps every pulled byte at exactly
+    one hash.
+    """
+    if (
+        not accum.rows
+        and accum.accepted + accum.rejected + accum.skipped_foreign == 0
+        and not accum.dropped
+    ):
         return
     assert accum.start is not None
+    lo = max(int(accum.start), view_start, int(state.hash_floor))
     piece_hasher = state.hasher.copy()  # type: ignore[attr-defined]
-    piece_hasher.update(view[accum.start - view_start : batch_end - view_start])
+    if batch_end > lo:
+        # Python slicing truncates past the view end (seal marker over
+        # an empty view): only in-view bytes hash here, earlier-chunk
+        # bytes were committed by their own per-feed flushes.
+        piece_hasher.update(view[lo - view_start : batch_end - view_start])
     span_digest = piece_hasher.hexdigest()
     stat_size = state.identity.size
     stat_mtime = state.identity.mtime_ns
@@ -907,7 +1025,12 @@ def _flush_accum(
         inserted, replayed, captured, skipped = _with_writer_retry(ctx, _work)
     except WriterBusy:
         raise FollowFailed(WRITER_BUSY_CODE)
-    state.hasher.update(view[accum.start - view_start : batch_end - view_start])
+    except FollowFailed:
+        # Stale checkpoints refuse before any write: the running digest
+        # stays exactly at the last committed span, never rewound.
+        raise
+    if batch_end > lo:
+        state.hasher.update(view[lo - view_start : batch_end - view_start])
     if state.path is not None:
         # Refresh the re-validation window from a bounded re-read of the
         # just-committed tail (page-cache hot: these bytes were read
@@ -938,6 +1061,15 @@ def _flush_accum(
     accum.start = None
     accum.accepted = accum.rejected = accum.skipped_foreign = 0
     accum.reasons.clear()
+    # Keep the not-yet-covered tail of dropped oversized spans (a
+    # trailing skip-rest past this batch end): the final flush of the
+    # same feed extends over it in offset order. Fully covered spans
+    # are gone; nothing is ever hashed twice.
+    kept = [(max(start, batch_end), end) for start, end in accum.dropped if end > batch_end]
+    accum.dropped.clear()
+    accum.dropped.extend(kept)
+    if accum.start is None and kept:
+        accum.start = min(start for start, _end in kept)
 
 
 class FollowFailed(Exception):
@@ -956,13 +1088,30 @@ def _process_items(
     *,
     view: bytes,
     view_start: int,
+    dropped: list[tuple[int, int]] | None = None,
     result: FollowResult | ArchiveResult,
 ) -> None:
-    """Parse complete lines and commit full batches incrementally."""
+    """Parse complete lines and commit full batches incrementally.
+
+    ``dropped`` oversized spans from the same feed commit with the
+    lines in offset order (the final flush extends past the last item
+    when the feed's dropped tail runs further); a dropped-only feed
+    still commits its span so every pulled byte is checkpointed and
+    hashed exactly once.
+    """
     from app.ingestion.combined import LineRejection
 
     accum = _Accum()
+    if dropped:
+        accum.dropped.extend(dropped)
+        accum.start = min(start for start, _end in dropped)
     for offset, data, end in items:
+        if accum.start is None or offset < accum.start:
+            # Items can precede the feed's dropped spans (a complete
+            # line before a tail that newly trips skip mode): the
+            # committed span always starts at the true minimum so no
+            # byte escapes the ordered digest slice.
+            accum.start = offset
         line_number = state.line_number
         state.line_number += 1
         if data is None:
@@ -1057,7 +1206,14 @@ def _process_items(
                 batch_end=end,
                 result=result,
             )
-    if accum.rows or accum.accepted or accum.rejected or accum.skipped_foreign:
+    if accum.rows or accum.accepted or accum.rejected or accum.skipped_foreign or accum.dropped:
+        batch_end = items[-1][2] if items else int(accum.start or view_start)
+        for _start, _end in accum.dropped:
+            if _end > batch_end and _start < view_start + len(view):
+                # A dropped oversized tail past the last complete line
+                # (same view): the checkpoint honestly advances past
+                # the consumed bytes it already hashed in order.
+                batch_end = max(batch_end, min(_end, view_start + len(view)))
         _flush_accum(
             db_path,
             ctx,
@@ -1065,7 +1221,7 @@ def _process_items(
             accum,
             view=view,
             view_start=view_start,
-            batch_end=items[-1][2],
+            batch_end=batch_end,
             result=result,
         )
 
@@ -1078,21 +1234,27 @@ def _row_dict(row) -> dict | None:
 
 
 def _feed_view(
-    splitter: _LineFollower, piece: bytes, piece_start: int
-) -> tuple[list[tuple[int, bytes | None, int]], bytes, int]:
-    """Feed one contiguous piece; return ``(items, view, view_start)``.
+    state: _GenState, piece: bytes, piece_start: int
+) -> tuple[list[tuple[int, bytes | None, int]], bytes, int, list[tuple[int, int]]]:
+    """Feed one contiguous NEW piece; return ``(items, view, view_start, dropped)``.
 
-    The digest view prepends the carried pending bytes so every batch
-    span slices exactly the consumed file bytes: the pending start
-    always equals the piece start (the checkpoint never advances past
-    an uncompleted line).
+    The caller passes only bytes never fed before (a separate read
+    cursor tracks pulled bytes; the durable checkpoint still trails at
+    the last complete line). The digest view prepends the carried
+    pending bytes so every batch span slices exactly the consumed file
+    bytes once: contiguity (``piece_start`` meets the pending tail) is
+    required, re-reads never happen inside a run.
     """
-    assert splitter.pending_start == piece_start or not splitter.pending
+    splitter = state.splitter
+    if splitter.pending:
+        assert piece_start == splitter.pending_start + len(splitter.pending), (
+            "follow must feed only contiguous new bytes"
+        )
     carry = bytes(splitter.pending)
     view = carry + piece
     view_start = splitter.pending_start if carry else piece_start
-    items = splitter.feed(piece, piece_start)
-    return items, view, view_start
+    items, dropped = splitter.feed(piece, piece_start)
+    return items, view, view_start, dropped
 
 
 def _gen_totals(
@@ -1124,12 +1286,15 @@ def _seal_state(
 
     Seal leftovers (a final unterminated line or one oversized marker)
     commit through the same atomic batch path before the status flips.
+    A skipping marker spans to the furthest pulled offset so the
+    checkpoint lands past the consumed tail it already hashed.
     """
-    markers = state.splitter.seal()
+    markers = state.splitter.seal(int(state.read_end))
     if markers:
         # A final line carries its bytes as the digest view (the sealed
         # file is complete, so the span must cover them exactly); an
-        # oversized marker consumes no bytes and leaves it unchanged.
+        # oversized marker spans to the pulled end over an empty view
+        # (its bytes were committed per-feed) and changes nothing.
         offset, data, _end = markers[0]
         if data is None:
             seal_view, seal_start = b"", offset
@@ -1147,6 +1312,7 @@ def _seal_state(
 
     def _work():
         with writer_transaction(db_path, lock_timeout_s=ctx.lock_timeout_s) as conn:
+            _check_fresh_for_write(conn, state.gen)
             # Attempt totals come from the bounded SQL aggregate, never
             # from run-local memory: generations span many runs.
             accepted, rejected, _skipped, inserted, replayed = _gen_totals(
@@ -1197,11 +1363,16 @@ def _begin_next_gen(
     The previous file is gone or truncated away, so no prefix can be
     adopted; the operator contract is that rotated-in content never
     repeats already-ingested bytes (a repeated-content replacement is
-    an operator error, documented, not a silent rule).
+    an operator error, documented, not a silent rule). A concurrent
+    follower that already registered this sequence refuses the loser
+    with the fixed stale code instead of silently replacing state.
     """
 
     def _work():
         with writer_transaction(db_path, lock_timeout_s=ctx.lock_timeout_s) as conn:
+            latest = _row_dict(_latest_generation(conn, source_id=ctx.source.source_id))
+            if latest is not None and int(latest["generation_seq"]) >= seq:
+                raise FollowFailed(STALE_GENERATION_CODE)
             return _start_generation(
                 conn,
                 ctx,
@@ -1386,6 +1557,11 @@ def _resume_or_begin(
 
         def _init():
             with writer_transaction(db_path, lock_timeout_s=ctx.lock_timeout_s) as conn:
+                # A concurrent first registration wins; the loser
+                # refuses with the fixed stale code, never silently
+                # replacing fresh state.
+                if _latest_generation(conn, source_id=ctx.source.source_id) is not None:
+                    raise FollowFailed(STALE_GENERATION_CODE)
                 gen_row, _adopted = _adopt_or_begin(
                     conn, ctx, resolved=resolved, fresh_start=fresh_start
                 )
@@ -1418,6 +1594,7 @@ def _resume_or_begin(
                 path=resolved,
                 tail_start=adopted_span,
                 tail_sha="",
+                read_end=int(gen["next_offset"]),
             ),
             True,
         )
@@ -1452,6 +1629,7 @@ def _resume_or_begin(
                 path=resolved,
                 tail_start=0,
                 tail_sha="",
+                read_end=0,
             ),
             True,
         )
@@ -1532,6 +1710,7 @@ def _resume_or_begin(
         path=resolved,
         tail_start=tail_start,
         tail_sha=tail_sha,
+        read_end=next_offset,
     )
 
     def _touch():
@@ -1575,8 +1754,11 @@ def _drain_fd(
     ``max_rounds`` bounded reads and the seal records what was drained.
     """
     # The drained descriptor may no longer match the path (rotation):
-    # digest views stay in memory while the tail window pauses.
+    # digest views stay in memory while the tail window pauses. A
+    # dedicated drain cursor (not the durable checkpoint) feeds only
+    # contiguous new bytes, mirroring the main poll loop.
     saved_path, state.path = state.path, None
+    dpos = int(state.read_end)
     try:
         for _round in range(max_rounds):
             try:
@@ -1585,8 +1767,9 @@ def _drain_fd(
                 raise FollowFailed(IO_ERROR_CODE)
             if not chunk:
                 return
-            position = int(state.gen["next_offset"])
-            items, view, view_start = _feed_view(state.splitter, chunk, position)
+            items, view, view_start, dropped = _feed_view(state, chunk, dpos)
+            dpos += len(chunk)
+            state.read_end = dpos
             try:
                 stat = os.fstat(fd)
             except OSError:
@@ -1597,7 +1780,7 @@ def _drain_fd(
                 size=stat.st_size,
                 mtime_ns=stat.st_mtime_ns,
             )
-            if items:
+            if items or dropped:
                 _process_items(
                     db_path,
                     ctx,
@@ -1605,6 +1788,7 @@ def _drain_fd(
                     items,
                     view=view,
                     view_start=view_start,
+                    dropped=dropped,
                     result=result,
                 )
         result.drain_truncated = True
@@ -1751,8 +1935,14 @@ def run_follow(
         fd = _open_live(resolved)
     except OSError:
         raise FollowFailed(IO_ERROR_CODE)
+    # In-run read cursor, separate from the durable complete-line
+    # checkpoint: partial-line bytes stay in splitter memory and are
+    # NEVER re-read inside a run (a restart re-reads from the
+    # checkpoint). Feeding already-read bytes again would duplicate
+    # the partial prefix and corrupt the offset/digest chain.
+    read_offset = int(state.gen["next_offset"])
     try:
-        os.lseek(fd, int(state.gen["next_offset"]), os.SEEK_SET)
+        os.lseek(fd, read_offset, os.SEEK_SET)
         for poll in range(1, max_polls + 1):
             result.polls += 1
             try:
@@ -1784,12 +1974,20 @@ def run_follow(
                         " is sealed. Re-run follow once the path exists again."
                     )
                     break
+                # Revalidate the approved root/symlink boundary on every
+                # rotation: the replacement must still resolve inside
+                # the configured root, never an escaped symlink target.
+                try:
+                    resolved = resolve_source_path(ctx.source)
+                except (SourceError, OSError):
+                    raise FollowFailed(IO_ERROR_CODE)
                 if has_gzip_magic(resolved):
                     raise FollowRefused(
                         FOLLOW_GZIP_UNSUPPORTED,
                         "the rotated-in file is gzip-compressed: replay it"
                         " via replay-archive instead of tailing it.",
                     )
+                cur = resolved.stat()
                 identity = FileIdentity(
                     dev=cur.st_dev,
                     ino=cur.st_ino,
@@ -1813,11 +2011,13 @@ def run_follow(
                     path=resolved,
                     tail_start=0,
                     tail_sha="",
+                    read_end=0,
                 )
                 result.generations_started += 1
                 result.active_generation = int(current["generation_seq"])
                 fd = _open_live(resolved)
                 os.lseek(fd, 0, os.SEEK_SET)
+                read_offset = 0
             elif cur.st_size < int(state.gen["next_offset"]):
                 _seal_state(
                     db_path,
@@ -1829,6 +2029,13 @@ def run_follow(
                     error_summary=None,
                     result=result,
                 )
+                # Same-inode truncation: revalidate the boundary before
+                # reopening at zero (a swapped symlink must not escape).
+                try:
+                    resolved = resolve_source_path(ctx.source)
+                except (SourceError, OSError):
+                    raise FollowFailed(IO_ERROR_CODE)
+                cur = resolved.stat()
                 identity = FileIdentity(
                     dev=cur.st_dev,
                     ino=cur.st_ino,
@@ -1852,10 +2059,12 @@ def run_follow(
                     path=resolved,
                     tail_start=0,
                     tail_sha="",
+                    read_end=0,
                 )
                 result.generations_started += 1
                 result.active_generation = int(current["generation_seq"])
                 os.lseek(fd, 0, os.SEEK_SET)
+                read_offset = 0
             else:
                 if (
                     state.tail_sha
@@ -1903,11 +2112,16 @@ def run_follow(
                         path=resolved,
                         tail_start=0,
                         tail_sha="",
+                        read_end=0,
                     )
                     result.generations_started += 1
                     result.active_generation = int(current["generation_seq"])
                     os.lseek(fd, 0, os.SEEK_SET)
-                os.lseek(fd, int(state.gen["next_offset"]), os.SEEK_SET)
+                    read_offset = 0
+                # Normal poll: read only NEW bytes from the read cursor.
+                # The durable checkpoint trails at the last complete
+                # line; seeking back to it here would re-feed the
+                # retained partial prefix and duplicate it.
                 try:
                     chunk = os.read(fd, max_bytes_per_poll)
                 except OSError:
@@ -1915,8 +2129,10 @@ def run_follow(
                 if not chunk:
                     result.empty_polls += 1
                 else:
-                    position = int(state.gen["next_offset"])
-                    items, view, view_start = _feed_view(state.splitter, chunk, position)
+                    position = read_offset
+                    items, view, view_start, dropped = _feed_view(state, chunk, position)
+                    read_offset += len(chunk)
+                    state.read_end = read_offset
                     try:
                         fresh = os.fstat(fd)
                     except OSError:
@@ -1927,7 +2143,7 @@ def run_follow(
                         size=max(fresh.st_size, view_start + len(view)),
                         mtime_ns=fresh.st_mtime_ns,
                     )
-                    if items:
+                    if items or dropped:
                         try:
                             _process_items(
                                 db_path,
@@ -1936,6 +2152,7 @@ def run_follow(
                                 items,
                                 view=view,
                                 view_start=view_start,
+                                dropped=dropped,
                                 result=result,
                             )
                         except (CustomFormatError, AmbiguousFormat, UnmatchedFormat) as exc:
@@ -1984,10 +2201,15 @@ def run_follow(
 
 
 def _fail_active_import(db_path: Path, ctx: _RunContext, state: _GenState, code: str) -> None:
-    """Finish the active generation attempt as failed; it stays resumable."""
+    """Finish the active generation attempt as failed; it stays resumable.
+
+    A stale checkpoint refuses instead of overwriting a generation a
+    concurrent follower already moved.
+    """
 
     def _work():
         with writer_transaction(db_path, lock_timeout_s=ctx.lock_timeout_s) as conn:
+            _check_fresh_for_write(conn, state.gen)
             accepted, rejected, _skipped, inserted, replayed = _gen_totals(
                 conn,
                 source_id=ctx.source.source_id,
@@ -2177,6 +2399,13 @@ def replay_archive(
         path=resolved,
         tail_start=tail_start,
         tail_sha=tail_sha,
+        # The sealed prefix is already in the digest (seeded by the
+        # validation read above): the replay loop must hash only the
+        # NEW tail, never the consumed bytes again. Without this floor
+        # a second identical replay would hash the prefix twice and
+        # refuse its own committed state as a mismatch.
+        hash_floor=sealed_end,
+        read_end=sealed_end,
     )
 
     new_end = sealed_end
@@ -2185,8 +2414,9 @@ def replay_archive(
             resolved, gen_start, gzip_limits=ctx.gzip_limits
         ):
             new_end = max(new_end, piece_offset + len(piece))
-            items, view, view_start = _feed_view(state.splitter, piece, piece_offset)
-            if items:
+            state.read_end = max(int(state.read_end), piece_offset + len(piece))
+            items, view, view_start, dropped = _feed_view(state, piece, piece_offset)
+            if items or dropped:
                 _process_items(
                     db_path,
                     ctx,
@@ -2194,11 +2424,12 @@ def replay_archive(
                     items,
                     view=view,
                     view_start=view_start,
+                    dropped=dropped,
                     result=result,
                 )
         # Archive EOF terminates the stream (batch parity): a trailing
         # partial is a real final line, a skipping tail one rejection.
-        tail = state.splitter.seal()
+        tail = state.splitter.seal(int(state.read_end))
         if tail:
             offset, data, _end = tail[0]
             if data is None:

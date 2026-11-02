@@ -19,7 +19,7 @@ def _tables(conn: sqlite3.Connection) -> set[str]:
 def test_fresh_migrate_applies_initial_schema(tmp_path):
     db = tmp_path / "fresh.sqlite3"
     result = migrate(db)
-    assert result.applied == (1, 2, 3, 4, 5, 6, 7)
+    assert result.applied == (1, 2, 3, 4, 5, 6, 7, 8)
     assert result.backup_path is None
     conn = connect(db, read_only=True)
     try:
@@ -60,7 +60,7 @@ def test_fresh_migrate_applies_initial_schema(tmp_path):
 
 def test_migrate_is_idempotent(tmp_path):
     db = tmp_path / "fresh.sqlite3"
-    assert migrate(db).applied == (1, 2, 3, 4, 5, 6, 7)
+    assert migrate(db).applied == (1, 2, 3, 4, 5, 6, 7, 8)
     assert migrate(db).applied == ()
     assert migrate(db, backup_dir=tmp_path / "backups").backup_path is None
 

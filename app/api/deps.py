@@ -41,8 +41,37 @@ _READINESS_TABLES = frozenset(
         "follow_batches",
     }
 )
+#: Per-table columns the current query/export paths actually require. A
+#: store that reports migration MAX 8 but misses any of these (a
+#: spoofed MAX row or a partially applied upgrade) is still not ready:
+#: without the check it would report ready and then fail analytic
+#: queries. This stays a cheap explicit read-only schema check (table
+#: list plus these column sets), never a per-request integrity scan.
 _READINESS_COLUMNS = {
-    "requests": frozenset({"country_code", "geo_status"}),
+    "requests": frozenset(
+        {
+            # Explorer/export projection and content filters.
+            "format_id",
+            "http_version",
+            "server_host",
+            "referer_scheme",
+            "referer_path",
+            "cache_status",
+            "mime_type",
+            "tls_protocol",
+            "request_time_ms",
+            "upstream_time_ms",
+            "upstream_count",
+            "policy_version",
+            # Offline-country outcome consumed by coverage/breakdowns.
+            "country_code",
+            "geo_source",
+            "geo_release",
+            "geo_status",
+        }
+    ),
+    # Stored host aliases feeding internal/external referrer classification.
+    "log_sources": frozenset({"allowed_hosts"}),
     "follow_generations": frozenset({"import_id", "consumed_sha256"}),
 }
 

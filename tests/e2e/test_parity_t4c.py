@@ -732,7 +732,8 @@ def test_comparison_refresh_help_and_layout(page, c4_base):
     expect(page.locator("body")).to_contain_text("command line")
     expect(page.locator("body")).to_contain_text("never uploads")
     expect(page.locator("body")).to_contain_text("honestly shows Unknown")
-    expect(page.locator("body")).to_contain_text("not enabled in this release")
+    expect(page.locator("body")).to_contain_text("explicit opt-in command-line operation")
+    expect(page.locator("body")).to_contain_text("no live watcher")
 
     # Narrow viewport with dark theme: content stays, no overflow.
     page.set_viewport_size({"width": 390, "height": 844})

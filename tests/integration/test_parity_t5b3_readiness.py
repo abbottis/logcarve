@@ -78,6 +78,33 @@ def test_readyz_rejects_structurally_incomplete_store(tmp_path):
     assert body["request_id"] == response.headers["X-Request-ID"]
 
 
+def test_readyz_rejects_forged_max_missing_query_columns(tmp_path):
+    """A forged MAX-8 missing cache/timing/version columns stays not ready."""
+    db = tmp_path / "t.db"
+    _seeded_db(db)
+    conn = sqlite3.connect(db)
+    try:
+        conn.execute("ALTER TABLE requests DROP COLUMN cache_status")
+        conn.execute("ALTER TABLE requests DROP COLUMN request_time_ms")
+        conn.execute("ALTER TABLE requests DROP COLUMN policy_version")
+        conn.commit()
+        max_version = conn.execute("SELECT MAX(version) FROM schema_migrations").fetchone()[0]
+    finally:
+        conn.close()
+    assert max_version == SUPPORTED_SCHEMA_VERSION
+    conn = connect(db, read_only=True)
+    try:
+        supported, version = schema_supported(conn)
+    finally:
+        conn.close()
+    assert supported is False and version == SUPPORTED_SCHEMA_VERSION
+    client = TestClient(_app(db), raise_server_exceptions=False)
+    _login(client)
+    response = client.get("/readyz")
+    assert response.status_code == 503, response.text
+    assert response.json()["code"] == "not_ready"
+
+
 def test_readyz_rejects_outdated_migration_version(tmp_path):
     db = tmp_path / "t.db"
     _seeded_db(db)

@@ -42,9 +42,7 @@ def _mem_db(rows):
         " http_version TEXT, mime_type TEXT, cache_status TEXT, tls_protocol TEXT,"
         " request_time_ms REAL, upstream_time_ms REAL, country_code TEXT)"
     )
-    conn.executemany(
-        "INSERT INTO requests VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)", rows
-    )
+    conn.executemany("INSERT INTO requests VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)", rows)
     return conn
 
 

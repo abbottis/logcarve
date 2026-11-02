@@ -59,34 +59,41 @@ def _follow(db: Path, root: Path, relative: str, **kwargs):
 
 def test_splitter_partial_across_feeds():
     splitter = _LineFollower(64)
-    first = splitter.feed(b"abc", 0)
+    first, first_dropped = splitter.feed(b"abc", 0)
     assert first == []
-    second = splitter.feed(b"def\nGH\n", 3)
+    assert first_dropped == []
+    second, second_dropped = splitter.feed(b"def\nGH\n", 3)
     assert second == [(0, b"abcdef", 7), (7, b"GH", 10)]
+    assert second_dropped == []
 
 
 def test_splitter_oversized_exactly_once_across_feeds():
     splitter = _LineFollower(4)
-    assert splitter.feed(b"ab", 0) == []
-    assert splitter.feed(b"cdef", 2) == []
-    # Line "abcdef" (6 > 4) completes here: exactly one marker.
-    assert splitter.feed(b"ghi\nOK\n", 6) == [(0, None, 10), (10, b"OK", 13)]
+    assert splitter.feed(b"ab", 0) == ([], [])
+    # No newline and 6 bytes carried over the limit: the whole carried
+    # span leaves memory as one dropped report (hashed at commit).
+    assert splitter.feed(b"cdef", 2) == ([], [(0, 6)])
+    # Line "abcdef" (6 > 4) completes here: exactly one marker; the
+    # first two dropped bytes were reported by the earlier feed.
+    items, dropped = splitter.feed(b"ghi\nOK\n", 6)
+    assert items == [(0, None, 10), (10, b"OK", 13)]
+    assert dropped == [(6, 10)]
     assert splitter.pending == bytearray()
     assert not splitter.skipping
 
 
 def test_splitter_strips_carriage_return_and_seals_final():
     splitter = _LineFollower(64)
-    assert splitter.feed(b"A\r\npart", 0) == [(0, b"A", 3)]
-    sealed = splitter.seal()
+    assert splitter.feed(b"A\r\npart", 0) == ([(0, b"A", 3)], [])
+    sealed = splitter.seal(7)
     assert sealed == [(3, b"part", 7)]
 
 
 def test_splitter_seal_empty_is_quiet():
     splitter = _LineFollower(64)
-    assert splitter.seal() == []
+    assert splitter.seal(0) == []
     splitter.feed(b"X\n", 0)
-    assert splitter.seal() == []
+    assert splitter.seal(2) == []
 
 
 def test_generation_fingerprint_is_honest_label():

@@ -345,7 +345,7 @@ def test_store_is_keep_first_and_reader_needs_row(tmp_path):
     from app.db import repositories
 
     db = tmp_path / "priv.sqlite3"
-    assert migrate(db).applied == (1, 2, 3, 4, 5, 6, 7)
+    assert migrate(db).applied == (1, 2, 3, 4, 5, 6, 7, 8)
     conn = connect(db)
     try:
         with conn:
@@ -490,7 +490,7 @@ def test_transaction_control_scripts_rejected(tmp_path, monkeypatch):
 
 def test_ip_display_mode_defaults_full_and_validates(tmp_path):
     db = tmp_path / "mode.sqlite3"
-    assert migrate(db).applied == (1, 2, 3, 4, 5, 6, 7)
+    assert migrate(db).applied == (1, 2, 3, 4, 5, 6, 7, 8)
     conn = connect(db)
     try:
         assert private.get_ip_display_mode(conn) == "full"
@@ -682,7 +682,7 @@ def test_malformed_blobs_fail_closed_without_leak(tmp_path):
     from app.db import repositories
 
     db = tmp_path / "blob.sqlite3"
-    assert migrate(db).applied == (1, 2, 3, 4, 5, 6, 7)
+    assert migrate(db).applied == (1, 2, 3, 4, 5, 6, 7, 8)
     conn = connect(db)
     try:
         with conn:
@@ -868,7 +868,7 @@ def test_retention_fails_closed_without_enforced_fks(tmp_path):
     from app.db.retention import apply_retention
 
     db = tmp_path / "ret.sqlite3"
-    assert migrate(db).applied == (1, 2, 3, 4, 5, 6, 7)
+    assert migrate(db).applied == (1, 2, 3, 4, 5, 6, 7, 8)
     conn = connect(db)
     try:
         with conn:
