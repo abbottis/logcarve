@@ -31,9 +31,14 @@ Checkpoints persist offsets, digests, generation identity and aggregate
 counts ONLY: never pending raw line bytes, chunks, URLs, User-Agents,
 original addresses or keys. Unfinished partial lines stay in memory
 within a run and are re-read from the checkpointed offset after a
-restart. The live path refuses gzip sources (replay a gzip archive via
-``replay_archive`` instead); per-poll memory is bounded and an
-oversized partial line yields exactly one rejection at completion.
+restart. An unfinished OVERSIZED line additionally persists a minimal
+discard marker (a flag plus the physical line start offset, no bytes):
+the restart restores splitter drop mode from it so the completing
+suffix can never be mistaken for a fresh line, and the marker clears
+when the line ends or seals. The live path refuses gzip sources (replay
+a gzip archive via ``replay_archive`` instead); per-poll memory is
+bounded and an oversized partial line yields exactly one rejection at
+completion.
 
 Known polling limits (documented, not silently claimed): a rotation
 between polls can lose lines written after the last poll; a same-inode
@@ -246,7 +251,8 @@ def _load_generation(conn: sqlite3.Connection, *, source_id: str, seq: int):
         return conn.execute(
             "SELECT source_id, site_id, generation_seq, generation_id,"
             " file_dev, file_ino, gen_start_offset, next_offset,"
-            " next_line_number, consumed_sha256, file_size, file_mtime_ns,"
+            " next_line_number, oversized_active, oversized_start,"
+            " consumed_sha256, file_size, file_mtime_ns,"
             " adopted_prefix_sha, adopted_import_id, fresh_start, import_id,"
             " status, detail, updated_at FROM follow_generations"
             " WHERE source_id = ? AND generation_seq = ?",
@@ -262,7 +268,8 @@ def _latest_generation(conn: sqlite3.Connection, *, source_id: str):
         return conn.execute(
             "SELECT source_id, site_id, generation_seq, generation_id,"
             " file_dev, file_ino, gen_start_offset, next_offset,"
-            " next_line_number, consumed_sha256, file_size, file_mtime_ns,"
+            " next_line_number, oversized_active, oversized_start,"
+            " consumed_sha256, file_size, file_mtime_ns,"
             " adopted_prefix_sha, adopted_import_id, fresh_start, import_id,"
             " status, detail, updated_at FROM follow_generations"
             " WHERE source_id = ? ORDER BY generation_seq DESC LIMIT 1",
@@ -276,16 +283,46 @@ def _store_generation(conn: sqlite3.Connection, *, row: dict) -> None:
     conn.execute(
         "INSERT OR REPLACE INTO follow_generations (source_id, site_id,"
         " generation_seq, generation_id, file_dev, file_ino,"
-        " gen_start_offset, next_offset, next_line_number, consumed_sha256,"
+        " gen_start_offset, next_offset, next_line_number, oversized_active,"
+        " oversized_start, consumed_sha256,"
         " file_size, file_mtime_ns, adopted_prefix_sha, adopted_import_id,"
         " fresh_start, import_id, status, detail, updated_at)"
         " VALUES (:source_id, :site_id, :generation_seq, :generation_id,"
         " :file_dev, :file_ino, :gen_start_offset, :next_offset,"
-        " :next_line_number, :consumed_sha256, :file_size, :file_mtime_ns,"
+        " :next_line_number, :oversized_active, :oversized_start,"
+        " :consumed_sha256, :file_size, :file_mtime_ns,"
         " :adopted_prefix_sha, :adopted_import_id, :fresh_start, :import_id,"
         " :status, :detail, :updated_at)",
         row,
     )
+
+
+def _ensure_follow_progress_columns(db_path: Path) -> None:
+    """Backfill the discard-marker columns on pre-fix migration-8 stores.
+
+    Migration 0008 is unreleased (live stays schema 4, candidates torn
+    down), so its text now carries the columns for fresh stores; this
+    idempotent step only heals a store created by the earlier 0008 text.
+    Progress metadata only: a flag plus one integer offset, never bytes.
+    A concurrent backfill loses harmlessly (duplicate-column error).
+    """
+    conn = sqlite3.connect(db_path)
+    try:
+        have = {info[1] for info in conn.execute("PRAGMA table_info(follow_generations)")}
+        missing = {
+            "oversized_active": "ALTER TABLE follow_generations ADD COLUMN oversized_active INTEGER NOT NULL DEFAULT 0",
+            "oversized_start": "ALTER TABLE follow_generations ADD COLUMN oversized_start INTEGER",
+        }
+        for name, ddl in missing.items():
+            if name not in have:
+                try:
+                    conn.execute(ddl)
+                except sqlite3.OperationalError as exc:
+                    if "duplicate column" not in str(exc).lower():
+                        raise
+        conn.commit()
+    finally:
+        conn.close()
 
 
 def _record_follow_batch(
@@ -578,6 +615,8 @@ def _gen_row(
         "gen_start_offset": gen_start,
         "next_offset": gen_start,
         "next_line_number": next_line,
+        "oversized_active": 0,
+        "oversized_start": None,
         "consumed_sha256": digest,
         "file_size": identity.size,
         "file_mtime_ns": identity.mtime_ns,
@@ -1000,6 +1039,19 @@ def _flush_accum(
         # bytes were committed by their own per-feed flushes.
         piece_hasher.update(view[lo - view_start : batch_end - view_start])
     span_digest = piece_hasher.hexdigest()
+    # Durable discard marker for an unfinished oversized line: a flag
+    # plus the physical line start offset ONLY (never bytes). The same
+    # atomic commit that advances the checkpoint records whether the
+    # splitter is still dropping, so a restart restores drop mode and
+    # the completing suffix cannot be mistaken for a fresh line. A
+    # completed line already cleared splitter skipping in feed()/seal(),
+    # so the marker clears with it in the same commit.
+    if state.splitter.skipping:
+        state.gen["oversized_active"] = 1
+        state.gen["oversized_start"] = int(state.splitter.skip_start)
+    else:
+        state.gen["oversized_active"] = 0
+        state.gen["oversized_start"] = None
     stat_size = state.identity.size
     stat_mtime = state.identity.mtime_ns
 
@@ -1695,10 +1747,38 @@ def _resume_or_begin(
     tail_start, tail_sha = _tail_window(
         resolved, gen_start, next_offset, gzip_limits=ctx.gzip_limits
     )
+    # Restore an unfinished oversized line's drop mode from the durable
+    # discard marker (flag plus physical line start offset, never bytes).
+    # Without this the completing suffix would parse as a fresh line; a
+    # corrupt marker fails closed through the same taint path as a
+    # mutated consumed span, never through silent adoption.
+    oversized_active = int(gen.get("oversized_active", 0) or 0)
+    oversized_start = gen.get("oversized_start")
+    splitter = _LineFollower(ctx.limits.max_line_bytes)
+    if oversized_active:
+        if not (
+            isinstance(oversized_start, int) and gen_start <= int(oversized_start) < next_offset
+        ):
+            holding = _GenState(
+                gen=dict(latest),
+                hasher=hasher,
+                splitter=_LineFollower(ctx.limits.max_line_bytes),
+                identity=FileIdentity(
+                    dev=stat.st_dev,
+                    ino=stat.st_ino,
+                    size=stat.st_size,
+                    mtime_ns=stat.st_mtime_ns,
+                ),
+                effective_format=_resolve_effective(ctx, resolved),
+                line_number=int(latest["next_line_number"]),
+            )
+            raise _taint_and_refuse(db_path, ctx, holding)
+        splitter.skipping = True
+        splitter.skip_start = int(oversized_start)
     state = _GenState(
         gen=gen,
         hasher=hasher,
-        splitter=_LineFollower(ctx.limits.max_line_bytes),
+        splitter=splitter,
         identity=FileIdentity(
             dev=stat.st_dev,
             ino=stat.st_ino,
@@ -1870,6 +1950,7 @@ def run_follow(
     if geoip_required and not ctx.lookup.available:
         raise GeoipError()
     migrate(db_path)
+    _ensure_follow_progress_columns(db_path)
     _check_source_binding(db_path, source_id=source.source_id, site_id=site_id)
     resolved = resolve_source_path(source)
     if has_gzip_magic(resolved):
@@ -2286,6 +2367,7 @@ def replay_archive(
     if geoip_required and not ctx.lookup.available:
         raise GeoipError()
     migrate(db_path)
+    _ensure_follow_progress_columns(db_path)
     _check_source_binding(db_path, source_id=archive.source_id, site_id=site_id)
     resolved = resolve_source_path(archive)
     result.archive_path = str(archive.relative_path)
@@ -2305,7 +2387,8 @@ def replay_archive(
                 sealed = probe.execute(
                     "SELECT source_id, site_id, generation_seq, generation_id,"
                     " file_dev, file_ino, gen_start_offset, next_offset,"
-                    " next_line_number, consumed_sha256, file_size, file_mtime_ns,"
+                    " next_line_number, oversized_active, oversized_start,"
+                    " consumed_sha256, file_size, file_mtime_ns,"
                     " adopted_prefix_sha, adopted_import_id, fresh_start, import_id,"
                     " status, detail, updated_at FROM follow_generations"
                     " WHERE source_id = ? AND status = ?"

@@ -186,6 +186,157 @@ def test_stale_concurrent_follower_refuses_without_rewind(tmp_path):
         conn.close()
 
 
+def test_restart_inside_oversized_line_rejects_once_with_exact_digest(tmp_path):
+    """E: a restart mid-oversized-line restores drop mode (no decoy import).
+
+    One physical line of ``1024 + len(line)`` bytes (limit 100) is split
+    so the first run consumes only the 1024-byte prefix. The restart
+    must report zero requests and exactly one ``oversized_line``
+    rejection when the real line completes, with the exact raw consumed
+    digest/offset and no source writes; a following real line then
+    inserts only itself. The durable checkpoint carries the discard
+    marker (flag + start offset, never bytes) while the line is open
+    and clears it once the line seals.
+    """
+    root = tmp_path / "logs"
+    root.mkdir()
+    target = root / "a.log"
+    suffix = _line(path="/row1")
+    raw = b"x" * 1024 + suffix.encode()
+    target.write_bytes(raw)
+    db = tmp_path / "t.db"
+
+    first = _follow(
+        db,
+        root,
+        "a.log",
+        max_polls=1,
+        max_bytes_per_poll=1024,
+        limits=Limits(max_line_bytes=100),
+    )
+    assert first.status == "completed", first.error_summary
+    assert (first.lines_accepted, first.lines_rejected) == (0, 0)
+    assert first.records_inserted == 0
+    conn = sqlite3.connect(db)
+    try:
+        row = conn.execute(
+            "SELECT next_offset, consumed_sha256, status,"
+            " oversized_active, oversized_start FROM follow_generations"
+            " WHERE source_id = 't5b2c' AND generation_seq = 1"
+        ).fetchone()
+        assert row is not None
+        assert (row[0], row[2]) == (1024, "active")
+        assert row[1] == hashlib.sha256(b"x" * 1024).hexdigest()
+        assert (row[3], row[4]) == (1, 0)
+        assert conn.execute("SELECT COUNT(*) FROM requests").fetchone()[0] == 0
+        before = target.read_bytes()
+    finally:
+        conn.close()
+
+    second = _follow(
+        db,
+        root,
+        "a.log",
+        max_polls=2,
+        max_bytes_per_poll=1024,
+        limits=Limits(max_line_bytes=100),
+    )
+    assert second.status == "completed", second.error_summary
+    assert (second.lines_accepted, second.lines_rejected) == (0, 1)
+    assert second.rejected_by_reason == {"oversized_line": 1}
+    assert second.records_inserted == 0
+    assert target.read_bytes() == before
+    conn = sqlite3.connect(db)
+    try:
+        assert conn.execute("SELECT COUNT(*) FROM requests").fetchone()[0] == 0
+        row = conn.execute(
+            "SELECT next_offset, consumed_sha256, status,"
+            " oversized_active, oversized_start FROM follow_generations"
+            " WHERE source_id = 't5b2c' AND generation_seq = 1"
+        ).fetchone()
+        assert row is not None
+        assert (row[0], row[2]) == (len(raw), "active")
+        assert row[1] == hashlib.sha256(raw).hexdigest()
+        assert (row[3], row[4]) == (0, None)
+    finally:
+        conn.close()
+
+    with open(target, "ab") as stream:
+        stream.write(_line(path="/row2").encode())
+    third = _follow(
+        db,
+        root,
+        "a.log",
+        max_polls=2,
+        max_bytes_per_poll=1024,
+        limits=Limits(max_line_bytes=100),
+    )
+    assert third.status == "completed", third.error_summary
+    assert (third.lines_accepted, third.lines_rejected) == (1, 0)
+    assert third.records_inserted == 1
+    conn = sqlite3.connect(db)
+    try:
+        rows = conn.execute("SELECT path, byte_offset FROM requests ORDER BY id").fetchall()
+        assert rows == [("/row2", len(raw))]
+    finally:
+        conn.close()
+
+
+def test_oversized_marker_backfills_prefixed_store(tmp_path):
+    """E: a store built by the pre-marker 0008 text heals and then restores drop mode."""
+    root = tmp_path / "logs"
+    root.mkdir()
+    target = root / "a.log"
+    suffix = _line(path="/row1")
+    target.write_bytes(b"x" * 1024 + suffix.encode())
+    db = tmp_path / "t.db"
+    from app.db.migrations_runner import migrate
+
+    migrate(db)
+    conn = sqlite3.connect(db)
+    try:
+        conn.execute("ALTER TABLE follow_generations DROP COLUMN oversized_active")
+        conn.execute("ALTER TABLE follow_generations DROP COLUMN oversized_start")
+        conn.commit()
+        have = {row[1] for row in conn.execute("PRAGMA table_info(follow_generations)")}
+        assert "oversized_active" not in have and "oversized_start" not in have
+    finally:
+        conn.close()
+
+    first = _follow(
+        db,
+        root,
+        "a.log",
+        max_polls=1,
+        max_bytes_per_poll=1024,
+        limits=Limits(max_line_bytes=100),
+    )
+    assert first.status == "completed", first.error_summary
+    conn = sqlite3.connect(db)
+    try:
+        have = {row[1] for row in conn.execute("PRAGMA table_info(follow_generations)")}
+        assert {"oversized_active", "oversized_start"} <= have
+        row = conn.execute(
+            "SELECT next_offset, oversized_active, oversized_start"
+            " FROM follow_generations WHERE source_id = 't5b2c'"
+        ).fetchone()
+        assert (row[0], row[1], row[2]) == (1024, 1, 0)
+    finally:
+        conn.close()
+    second = _follow(
+        db,
+        root,
+        "a.log",
+        max_polls=2,
+        max_bytes_per_poll=1024,
+        limits=Limits(max_line_bytes=100),
+    )
+    assert second.status == "completed", second.error_summary
+    assert (second.lines_accepted, second.lines_rejected) == (0, 1)
+    assert second.rejected_by_reason == {"oversized_line": 1}
+    assert second.records_inserted == 0
+
+
 def test_active_generation_reports_running_attempt_counts(tmp_path):
     """D: a long active generation carries durable attempt totals before any seal."""
     root = tmp_path / "logs"

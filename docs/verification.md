@@ -2957,3 +2957,24 @@ the final consolidated rerun plus runtime/scale/activation proofs.
 | Readiness preflight columns (`app/api/deps.py`) | PASS (focused) | Now covers the explorer/export `requests` metadata (cache, timings, policy, country) plus `log_sources.allowed_hosts`; new `test_readyz_rejects_forged_max_missing_query_columns`: forged MAX-8 without `cache_status`/`request_time_ms`/`policy_version` → `schema_supported` false and `/readyz` 503 `not_ready` |
 | Focused rerun of all touched/previously-failed modules | PASS (focused) | 182 passed across 12 unit/integration files |
 | Full consolidated suite, protected browser E2E, Gitleaks, 100k/1M + runtime/activation proofs | NOT RUN | Coordinator-owned after freeze; no success claimed beyond the focused evidence above |
+
+## Bounded correction — 2026-11-02 (oversized-line discard marker, from clean `7f0c20d`)
+
+One bounded fix, sole writer, exact Muse Spark 1.3 Contributor /
+medium, protections ON, no agents. Only this concrete boundary fixed;
+prior commits, core/source/privacy/ledger/120 fixtures untouched. No
+parent private files, Docker/live, keys, MMDB, real logs, provider
+calls, resets, push, main, or prod changes. No full suite, browser
+loop, plan, grill, or new approval — root runs the final consolidated
+rerun. Live stays schema 4; migration 0008 is unreleased, so its text
+grew two progress-metadata columns in place (no version churn) with an
+idempotent backfill for pre-fix 0008 stores.
+
+| Check | Result | Evidence |
+| --- | --- | --- |
+| Oversized restart: no decoy import (`app/db/follow.py`, migration 0008) | PASS (focused + probe) | New `tests/unit/test_parity_t5b2_follow_corrections.py::test_restart_inside_oversized_line_rejects_once_with_exact_digest`: `b'x'*1024` + one valid Combined line (limit 100); run 1 (1 poll / 1024 B) consumes 0/0 with checkpoint 1024 and prefix digest; restart (2 polls) reports 0 requests and exactly one `oversized_line` rejection, exact raw digest/offset, source bytes unchanged, marker `(1, 0)` while open and `(0, NULL)` after seal; an appended real line then inserts only itself (`/row2` at 1111) |
+| Pre-marker 0008 store heals (`_ensure_follow_progress_columns`) | PASS (focused) | New `test_oversized_marker_backfills_prefixed_store`: 0008 store with both columns dropped regains them on first `run_follow`, checkpoints `(1024, 1, 0)` mid-line, and the restart still rejects exactly once with zero inserts |
+| Seal/rotation tails + corrupt marker (probes, `/tmp` only) | PASS (probe) | Within-run rotation over an unfinished oversized tail drains and seals with 2 accepted / 1 `oversized_line` (gen1 `rotated` at exact digest, marker cleared); restart-rotation keeps the 300-byte checkpoint with no rewind; a hand-corrupted marker (`1, 999999`) refuses `follow:prefix_mismatch` and taints instead of adopting |
+| Affected follow/migration checks | PASS (focused) | `test_parity_t5b2_follow.py` + `test_parity_t5b2_follow_corrections.py` (unit) + `test_parity_t5b2_follow_restart.py` + `test_db_migrations.py` + `test_parity_t5b3_readiness.py` + `test_parity_t5b3_helpers.py`: 48 passed |
+| Ruff on changed files | PASS | `ruff check` exit 0 (`All checks passed!`), `ruff format --check` exit 0 on `app/db/follow.py` + `tests/unit/test_parity_t5b2_follow_corrections.py` |
+| Full suite, browser loops, Gitleaks, image/runtime proofs | NOT RUN | Coordinator-owned (final consolidated rerun + image build); no success claimed beyond the focused evidence above |

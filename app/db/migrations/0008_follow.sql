@@ -2,10 +2,13 @@
 --
 -- Live-follow generations, durable checkpoints and per-batch accounting
 -- for the bounded CLI follow command. This state is LogCarve-owned
--- progress metadata only: offsets, digests, generation identity and
--- aggregate counts. Raw line bytes, pending chunks, URLs, User-Agents,
--- original addresses and keys are NEVER persisted here (partial lines
--- are re-read from the approved read-only source after a restart).
+-- progress metadata only: offsets, digests, generation identity,
+-- aggregate counts and the unfinished-oversized-line discard marker
+-- (a flag plus the physical line start offset). Raw line bytes, pending
+-- chunks, URLs, User-Agents, original addresses and keys are NEVER
+-- persisted here (partial lines are re-read from the approved read-only
+-- source after a restart; an unfinished oversized prefix re-enters drop
+-- mode through the persisted marker, never through stored bytes).
 --
 -- Follow event rows in `requests` carry a generation fingerprint label
 -- (`follow:v1:<source>:<seq>`, see app/db/follow.py), honestly
@@ -25,6 +28,8 @@ CREATE TABLE IF NOT EXISTS follow_generations (
   gen_start_offset INTEGER NOT NULL,
   next_offset INTEGER NOT NULL,
   next_line_number INTEGER NOT NULL,
+  oversized_active INTEGER NOT NULL DEFAULT 0,
+  oversized_start INTEGER,
   consumed_sha256 TEXT NOT NULL,
   file_size INTEGER NOT NULL,
   file_mtime_ns INTEGER NOT NULL,
