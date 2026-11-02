@@ -131,9 +131,9 @@ An internal assistant is available server-side from Meta, OpenAI, Google Gemini 
 | Provider | Model | Processing tier | Verification |
 |---|---|---|---|
 | Meta | `muse-spark-1.3` | Standard | Owner-authorized synthetic run PASS |
-| OpenAI | `gpt-6.1-terra` | Standard (`service_tier: "default"`) | Offline tests PASS; live runs pending coordinator (owner-supplied keys) |
-| Google Gemini | `gemini-3.8-flash` | Paid API (Standard by omission) | Offline tests PASS; live runs pending coordinator (owner-supplied keys) |
-| Anthropic Claude | `claude-sonnet-5-5` | API (`service_tier: "standard_only"`) | Offline tests PASS; live runs pending coordinator (owner-supplied keys) |
+| OpenAI | `gpt-6.1-terra` | Standard (`service_tier: "default"`) | Offline tests PASS and model metadata access 200; real generation BLOCKED by account quota (429), not validated successful — see [verification history](docs/verification.md) |
+| Google Gemini | `gemini-3.8-flash` | Paid API (Standard by omission) | Owner-authorized synthetic tool-to-evidence tests PASS on 2026-11-02 — see [verification history](docs/verification.md) |
+| Anthropic Claude | `claude-sonnet-5-5` | API (`service_tier: "standard_only"`) | Owner-authorized synthetic tool-to-evidence tests PASS on 2026-11-02 — see [verification history](docs/verification.md) |
 
 See the [AI providers guide](docs/ai-providers.md) for endpoints, pricing provenance and onboarding.
 

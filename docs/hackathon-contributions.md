@@ -162,3 +162,17 @@ imported. Synthetic fixtures only; no real logs, keys, provider
 calls, push/main/deploy, follow activation or release/acceptance
 claims. Independent review stays required; protected E2E recorded
 BLOCKED in this shell sandbox for coordinator execution.
+
+## Alternate model upgrade, 2 November 2026
+
+Owner-requested alternate model upgrade (OpenAI cache-write
+accounting/reservation, Sonnet `between_tools` low with signed
+exact-content replay, Gemini `LOW` with pricing validity),
+implemented solely by Muse Spark 1.3 Contributor (medium,
+Contributor ON) with safeguards ON and no subagents; synthetic
+fixtures only; no new dependencies or third-party code. Gemini and
+Sonnet owner-authorized synthetic tool-to-evidence runs PASS on
+2026-11-02; OpenAI real generation BLOCKED by account quota (429
+`credit_balance_exhausted`), not validated successful — see the
+dated operational closeout in `verification.md`. Original LogCarve
+code remains Apache-2.0.

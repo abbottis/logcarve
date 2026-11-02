@@ -16,9 +16,9 @@ per-model pricing with provenance.
 | Provider | Model | Native endpoint | Tier | Live verification |
 |---|---|---|---|---|
 | Meta | `muse-spark-1.3` | `https://api.meta.ai:443/v1/responses` | Standard | Owner-authorized synthetic run PASS (see [verification](verification.md)) |
-| OpenAI | `gpt-6.1-terra` | `https://api.openai.com:443/v1/responses` | Standard | Offline tests PASS; live runs pending coordinator (owner-supplied keys) |
-| Google Gemini | `gemini-3.8-flash` | `https://generativelanguage.googleapis.com:443/v1beta/models/gemini-3.8-flash:generateContent` | Paid API | Offline tests PASS; live runs pending coordinator (owner-supplied keys) |
-| Anthropic Claude | `claude-sonnet-5-5` | `https://api.anthropic.com:443/v1/messages` | API | Offline tests PASS; live runs pending coordinator (owner-supplied keys) |
+| OpenAI | `gpt-6.1-terra` | `https://api.openai.com:443/v1/responses` | Standard | Offline tests PASS and model metadata access 200; real generation BLOCKED by account quota (429), not validated successful (see [verification](verification.md)) |
+| Google Gemini | `gemini-3.8-flash` | `https://generativelanguage.googleapis.com:443/v1beta/models/gemini-3.8-flash:generateContent` | Paid API | Owner-authorized synthetic tool-to-evidence tests PASS on 2026-11-02 (see [verification](verification.md)) |
+| Anthropic Claude | `claude-sonnet-5-5` | `https://api.anthropic.com:443/v1/messages` | API | Owner-authorized synthetic tool-to-evidence tests PASS on 2026-11-02 (see [verification](verification.md)) |
 
 Tiers are labeled honestly: Gemini Paid/API and Anthropic API are
 never presented as Meta Standard. Pricing provenance per model:
@@ -176,12 +176,20 @@ Sonnet pricing (no 100k tier) with disjoint input/cache-write
 (5m/1h)/cache-read counts. Sonnet replays the exact original
 assistant blocks (text/thinking/redacted_thinking/tool_use in
 original order, verbatim original inputs) carried once on the first
-call's replay metadata; execution still uses server-overridden args,
-and opaque thinking never reaches answer/UI/DB/log/evidence.
+call's replay metadata, with narrow normalization only:
+response-only optional neutral null `caller`/`toolset_name`/
+`citations` values are accepted but omitted in request replay
+(empty citations arrays and direct callers are preserved). Exact
+thinking and signature contents never change; execution still uses
+server-overridden args, and opaque thinking never reaches
+answer/UI/DB/log/evidence.
 
-Other-provider live runs are pending coordinator execution with
-owner-supplied keys and explicit per-call authorization; only the
-Meta Standard synthetic run has completed. See [deployment](deployment.md) for host operation,
+Gemini and Sonnet owner-authorized synthetic tool-to-evidence runs
+completed PASS on 2026-11-02; OpenAI real generation remains
+BLOCKED by account quota (429) and is not validated successful —
+no further OpenAI calls without resolved quota. Meta is restored
+active/synthetic. See [verification](verification.md) for the
+dated operational closeout. See [deployment](deployment.md) for host operation,
 [privacy and data egress](privacy-and-security.md) for the full
 boundary, and [ADR 0004](decisions/0004-multi-provider-ai.md) for the
 accepted scope.
