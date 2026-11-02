@@ -19,7 +19,7 @@ def _tables(conn: sqlite3.Connection) -> set[str]:
 def test_fresh_migrate_applies_initial_schema(tmp_path):
     db = tmp_path / "fresh.sqlite3"
     result = migrate(db)
-    assert result.applied == (1, 2, 3, 4, 5, 6, 7, 8)
+    assert result.applied == (1, 2, 3, 4, 5, 6, 7, 8, 9)
     assert result.backup_path is None
     conn = connect(db, read_only=True)
     try:
@@ -30,6 +30,8 @@ def test_fresh_migrate_applies_initial_schema(tmp_path):
     assert {"admin_users", "admin_sessions", "api_tokens"} <= tables
     assert {"ai_spend"} <= tables
     assert {"smoke_allowance", "smoke_holds"} <= tables
+    # ADR 0004 migration 0009: explicit bounded runtime usage grant/holds.
+    assert {"runtime_allowance", "runtime_holds"} <= tables
     # T5a/PAR-09 migration 0007: nullable offline-country enrichment on
     # requests (NULL on legacy rows until a reprocess enriches them).
     columns = {
@@ -60,7 +62,7 @@ def test_fresh_migrate_applies_initial_schema(tmp_path):
 
 def test_migrate_is_idempotent(tmp_path):
     db = tmp_path / "fresh.sqlite3"
-    assert migrate(db).applied == (1, 2, 3, 4, 5, 6, 7, 8)
+    assert migrate(db).applied == (1, 2, 3, 4, 5, 6, 7, 8, 9)
     assert migrate(db).applied == ()
     assert migrate(db, backup_dir=tmp_path / "backups").backup_path is None
 

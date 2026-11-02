@@ -46,7 +46,7 @@ def test_readyz_accepts_upgraded_store(tmp_path):
     body = response.json()
     assert body["ready"] is True
     assert body["database"] == "ok"
-    assert body["schema_version"] == SUPPORTED_SCHEMA_VERSION == 8
+    assert body["schema_version"] == SUPPORTED_SCHEMA_VERSION == 9
     assert response.headers["X-Request-ID"]
 
 
@@ -79,7 +79,7 @@ def test_readyz_rejects_structurally_incomplete_store(tmp_path):
 
 
 def test_readyz_rejects_forged_max_missing_query_columns(tmp_path):
-    """A forged MAX-8 missing cache/timing/version columns stays not ready."""
+    """A forged MAX-9 missing cache/timing/version columns stays not ready."""
     db = tmp_path / "t.db"
     _seeded_db(db)
     conn = sqlite3.connect(db)
@@ -110,17 +110,74 @@ def test_readyz_rejects_outdated_migration_version(tmp_path):
     _seeded_db(db)
     conn = sqlite3.connect(db)
     try:
-        conn.execute("DELETE FROM schema_migrations WHERE version = 8")
+        conn.execute("DELETE FROM schema_migrations WHERE version = 9")
         conn.commit()
         max_version = conn.execute("SELECT MAX(version) FROM schema_migrations").fetchone()[0]
     finally:
         conn.close()
-    assert max_version == 7
+    assert max_version == 8
     client = TestClient(_app(db), raise_server_exceptions=False)
     _login(client)
     response = client.get("/readyz")
     assert response.status_code == 503, response.text
     assert response.json()["code"] == "not_ready"
+
+
+def test_readyz_rejects_max9_missing_runtime_tables(tmp_path):
+    """A MAX-9 store without the migration-0009 runtime tables stays not ready."""
+    db = tmp_path / "t.db"
+    _seeded_db(db)
+    conn = sqlite3.connect(db)
+    try:
+        conn.execute("DROP TABLE runtime_holds")
+        conn.execute("DROP TABLE runtime_allowance")
+        conn.commit()
+        max_version = conn.execute("SELECT MAX(version) FROM schema_migrations").fetchone()[0]
+    finally:
+        conn.close()
+    assert max_version == SUPPORTED_SCHEMA_VERSION
+    conn = connect(db, read_only=True)
+    try:
+        supported, version = schema_supported(conn)
+    finally:
+        conn.close()
+    assert supported is False and version == SUPPORTED_SCHEMA_VERSION
+    client = TestClient(_app(db), raise_server_exceptions=False)
+    _login(client)
+    response = client.get("/readyz")
+    assert response.status_code == 503, response.text
+    assert response.json()["code"] == "not_ready"
+
+
+def test_schema8_upgrades_to_9_with_data_preserved(tmp_path):
+    """An 8-store migrates to 9 in place: rows survive, MAX becomes 9."""
+    db = tmp_path / "t.db"
+    _seeded_db(db)
+    with writer_transaction(db) as conn:
+        conn.execute(
+            "INSERT INTO admin_settings (key, value, updated_at) VALUES (?, ?, ?)",
+            ("ai.provider", "openai", "2026-11-02T00:00:00+00:00"),
+        )
+        conn.execute("DELETE FROM schema_migrations WHERE version = 9")
+        conn.execute("DROP TABLE runtime_holds")
+        conn.execute("DROP TABLE runtime_allowance")
+    result = migrate(db)
+    assert result.applied == (9,)
+    conn = connect(db, read_only=True)
+    try:
+        supported, version = schema_supported(conn)
+        kept = conn.execute(
+            "SELECT value FROM admin_settings WHERE key = 'ai.provider'"
+        ).fetchone()[0]
+    finally:
+        conn.close()
+    assert (supported, version) == (True, 9)
+    assert kept == "openai"
+    client = TestClient(_app(db), raise_server_exceptions=False)
+    _login(client)
+    response = client.get("/readyz")
+    assert response.status_code == 200, response.text
+    assert response.json()["schema_version"] == 9
 
 
 def test_readyz_missing_store_creates_no_file(tmp_path):

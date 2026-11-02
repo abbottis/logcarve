@@ -75,6 +75,8 @@ Before **every** provider call, validate allowed provider/model and independentl
 
 Real-data transmission is blocked for Contributor, unknown tier, unverified provider or a policy switch. `--contributor-mode off` and `MODEL_SERVICE_TIER=standard` express intent only; they do not prove account/service handling. Standard service is not blanket privacy approval. Until checks are documented, only synthetic/nonconfidential data may be sent. Do not expose sensitive project context via coding-agent tools or retained history.
 
+Multi-provider extension (ADR 0004, owner-accepted 2026-11-02): Meta, OpenAI, Gemini and Claude share the same boundary. Tiers stay provider-labeled (Meta/OpenAI Standard, Gemini Paid API, Anthropic API) and Google free/unknown/unverified handling stays blocked: real-data mode requires the provider-specific explicit acknowledgment recorded in backend Settings, and synthetic-only demo mode requires the operator synthetic-source assertion. Provider keys at rest are AES-256-GCM ciphertext under the dedicated `AI_SETTINGS_KEY` (per-provider associated data, strict key separation); pages and errors report only configured/not-configured (or env-managed) state. Mid-investigation provider/model/key/policy changes fail closed; no previous-provider history or secret is replayed elsewhere. A separate explicit bounded runtime usage grant (initially none) gates every real dispatch alongside the preserved T8 smoke ledger.
+
 The optional Open-weight identifier `meta-models/muse-spark-open-1026` has no verified provider/base URL/data policy here. It receives a separate adapter, key, budget and approval gate if adopted.
 
 ## Separate data consumers

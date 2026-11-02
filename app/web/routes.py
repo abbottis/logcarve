@@ -2067,6 +2067,9 @@ def _ask_context(request: Request, conn, params):
     filt = context["filt"]
     summary = service.summarize(conn, filt, request.app.state.rules)
     settings = load_settings()
+    from app.ai import effective as ai_effective
+
+    ai_effective_settings = ai_effective.resolve(request.app.state.db_path, settings)
     _attach_observed_options(conn, context, filt, request.app.state.rules)
     starters = [
         {
@@ -2080,7 +2083,9 @@ def _ask_context(request: Request, conn, params):
         {
             "summary": summary,
             "duration_available": summary["duration"]["available"],
-            "ai_enabled": settings.ai_enabled,
+            "ai_enabled": ai_effective_settings.ai_enabled,
+            "ai_provider_label": ai_effective_settings.provider_label,
+            "ai_tier_label": ai_effective_settings.tier_label,
             "starters": starters,
             "form_action": "/ask",
             # Ask has no saved-view target and no report fragment to
@@ -2122,6 +2127,53 @@ def _settings_context(request: Request, conn, settings_error: str | None = None)
     display_state = private_store.resolve_display_state(conn)
     key, _ = private_view.key_status(conn)
     session = _session_or_none(request)
+    from app.ai import catalog as ai_catalog
+    from app.ai import effective as ai_effective
+    from app.ai import settings_store as ai_settings_store
+
+    db_path = request.app.state.db_path
+    effective = ai_effective.resolve(db_path, settings)
+    key_states = ai_effective.key_statuses(db_path, settings)
+    overlay = ai_effective._overlay(db_path)
+    ai_providers = []
+    for provider_id in ai_catalog.provider_ids():
+        state = key_states.get(provider_id, {})
+        if state.get("stored") and state.get("readable"):
+            key_state = "stored"
+        elif state.get("stored"):
+            key_state = "stored_unreadable"
+        elif state.get("env"):
+            key_state = "env"
+        else:
+            key_state = "none"
+        ai_providers.append(
+            {
+                "id": provider_id,
+                "label": ai_catalog.provider_label(provider_id),
+                "models": list(ai_catalog.models_for(provider_id)),
+                "default_model": ai_catalog.default_model(provider_id),
+                "guide_key": f"settings.ai_guide_{provider_id}",
+                "tier_label": ai_effective.TIER_LABELS.get(
+                    ai_catalog.CATALOG[provider_id].tier,
+                    ai_catalog.CATALOG[provider_id].tier,
+                ),
+                "selected": provider_id == effective.model_provider,
+                "key_state": key_state,
+                "policy": (
+                    overlay.get(f"ai.policy.{provider_id}", "")
+                    if provider_id != effective.model_provider
+                    else effective.ai_policy
+                ),
+                "env_key_name": ai_settings_store.PROVIDER_ENV_KEYS.get(provider_id, ""),
+            }
+        )
+    if effective.model_provider in ai_catalog.provider_ids():
+        ai_provider_guide_key = f"settings.ai_guide_{effective.model_provider}"
+    else:
+        ai_provider_guide_key = "settings.ai_guide_meta"
+    from app.ai import allowance as ai_allowance
+
+    allowance_snapshot = ai_allowance.status(db_path)
     return {
         "t": t,
         "request": request,
@@ -2143,6 +2195,22 @@ def _settings_context(request: Request, conn, settings_error: str | None = None)
         "llm_stop_at_usd": settings.llm_stop_at_usd,
         "llm_daily_limit_usd": settings.llm_daily_limit_usd,
         "open_model_id": settings.open_model_id,
+        "ai_effective_enabled": effective.ai_enabled,
+        "ai_provider": effective.model_provider,
+        "ai_provider_label": effective.provider_label,
+        "ai_model": effective.model_id,
+        "ai_tier_label": effective.tier_label,
+        "ai_policy": effective.ai_policy,
+        "ai_policy_provider": effective.model_provider,
+        "ai_provider_guide_key": ai_provider_guide_key,
+        "ai_synthetic_source": effective.synthetic_source_asserted,
+        "ai_key_source": effective.ai_key_source,
+        "ai_key_stored": effective.ai_key_stored,
+        "ai_key_error": effective.ai_key_error,
+        "ai_providers": ai_providers,
+        "ai_workspace": effective.workspace_id,
+        "ai_allowance_granted": allowance_snapshot is not None,
+        "ai_allowance": allowance_snapshot,
         "ip_mode": display_state.get("mode"),
         "ip_v4_hidden": display_state.get("v4_hidden"),
         "ip_v6_hidden": display_state.get("v6_hidden"),
@@ -2764,6 +2832,199 @@ async def settings_ip_display_update(request: Request):
     # Return target rebuilt from the validated state above — never from
     # raw query text — so only safe local filter/window/TZ state
     # survives and unknown values cannot leak into the redirect.
+    return_target: dict[str, object] = {
+        "range": nav_params["range"],
+        "from": nav_params["window"].time_from.isoformat(),
+        "to": nav_params["window"].time_to.isoformat(),
+        "tz": nav_params["tz_name"],
+    }
+    if nav_params["site"] is not None:
+        return_target["site"] = nav_params["site"]
+    if nav_params["source"] is not None:
+        return_target["source"] = nav_params["source"]
+    return_target.update(_matcher_query(nav_params))
+    return RedirectResponse(url="/settings?" + urlencode(return_target), status_code=303)
+
+
+@router.post("/settings/ai", response_class=HTMLResponse)
+async def settings_ai_update(request: Request):
+    """Persist the backend AI provider settings (ADR 0004).
+
+    Local-admin session only (analytics Bearer [REDACTED] never authorize
+    this); CSRF is accepted as the per-session header or as the form
+    field of the same token. The bounded streamed form carries the
+    enable switch, the provider and its bounded model dropdown, one
+    per-provider data-policy selection, per-provider password inputs
+    (blank keeps the stored key, explicit remove deletes it) and the
+    optional Anthropic workspace ID. Unknown providers/models,
+    policies, endpoints or workspace shapes reject with a fixed 400;
+    no provider auth check or model-list call ever runs on save, and
+    saving never spends budget or creates a runtime allowance.
+
+    Stored keys are encrypted with the dedicated server-only
+    ``AI_SETTINGS_KEY`` (per-provider associated data, strict key
+    separation); missing/wrong/tampered keys fail closed at dispatch
+    without breaking deterministic analytics. No stored key, suffix,
+    prefill or validation input is ever returned, echoed, logged or
+    exported: the page only reports configured/not-configured (or
+    env-managed) state.
+    """
+    session = _session_or_none(request)
+    if session is None:
+        return _error_page(request, "error.auth_required", 401)
+    from app.api.deps import require_csrf
+
+    request_id = request.state.request_id
+    header_ok = require_csrf(request, session, request_id) is None
+    body, form_status = await _read_bounded_form(request)
+    if form_status == "too_large":
+        with read_store(request) as conn:
+            context = _settings_context(request, conn, "error.form_too_large")
+        return templates.TemplateResponse(request, "pages/settings.html", context, status_code=413)
+    field_token = body.get("csrf_token")
+    if not header_ok and not _valid_csrf_field(field_token, session.csrf_token):
+        return _error_page(request, "error.csrf_required", 403)
+
+    def _bad() -> HTMLResponse:
+        with read_store(request) as conn:
+            context = _settings_context(request, conn, "error.bad_params")
+        return templates.TemplateResponse(request, "pages/settings.html", context, status_code=400)
+
+    def _key_error() -> HTMLResponse:
+        with read_store(request) as conn:
+            context = _settings_context(request, conn, "settings.ai_key_error")
+        return templates.TemplateResponse(request, "pages/settings.html", context, status_code=400)
+
+    from app.ai import catalog as ai_catalog
+    from app.ai import settings_store as ai_settings_store
+
+    raw_enabled = body.get("ai_enabled")
+    if raw_enabled in (None, ""):
+        enabled = False
+    elif raw_enabled in ("1", "0"):
+        enabled = raw_enabled == "1"
+    else:
+        return _bad()
+    provider = (body.get("ai_provider") or "").strip()
+    model = (body.get("ai_model") or "").strip()
+    if provider not in ai_catalog.provider_ids():
+        return _bad()
+    try:
+        ai_catalog.validate_pair(provider, model)
+    except ValueError:
+        return _bad()
+    policy = (body.get("ai_policy") or "").strip()
+    if policy not in ("", ai_settings_store.POLICY_SYNTHETIC, ai_settings_store.POLICY_REAL):
+        return _bad()
+    # Provider identity contract: a non-empty policy is bound to the
+    # intended provider. The hidden identity field carries the
+    # provider the form was acknowledged for (progressive JS rebinds
+    # it and resets the policy on provider change); without JS the
+    # operator ticks the explicit confirmation instead. A stale
+    # carried-over value from the previous provider is rejected.
+    policy_provider = (body.get("ai_policy_provider") or "").strip()
+    if len(policy_provider) > 64:
+        return _bad()
+    raw_confirm = body.get("ai_policy_confirm")
+    if raw_confirm in (None, ""):
+        policy_confirm = False
+    elif raw_confirm in ("1", "0"):
+        policy_confirm = raw_confirm == "1"
+    else:
+        return _bad()
+    if policy and policy_provider != provider and not policy_confirm:
+        return _bad()
+    raw_synthetic = body.get("ai_synthetic_source")
+    if raw_synthetic in (None, ""):
+        synthetic_source = False
+    elif raw_synthetic in ("1", "0"):
+        synthetic_source = raw_synthetic == "1"
+    else:
+        return _bad()
+    workspace = (body.get("ai_workspace") or "").strip()
+    if provider != "anthropic" and workspace:
+        return _bad()
+    if len(workspace) > ai_settings_store.WORKSPACE_MAX_CHARS:
+        return _bad()
+    if workspace:
+        try:
+            from app.ai.providers import anthropic_messages
+            from app.ai.providers.base import ProviderError as _ProviderError
+
+            anthropic_messages.validate_workspace_id(workspace)
+        except (_ProviderError, ValueError, TypeError):
+            return _bad()
+    new_keys: dict[str, str] = {}
+    remove_keys: dict[str, bool] = {}
+    for provider_id in ai_catalog.provider_ids():
+        candidate = body.get(f"ai_key_{provider_id}") or ""
+        if not isinstance(candidate, str):
+            return _bad()
+        if len(candidate) > ai_settings_store.KEY_MAX_CHARS:
+            return _bad()
+        new_keys[provider_id] = candidate
+        raw_remove = body.get(f"ai_remove_key_{provider_id}")
+        if raw_remove in (None, ""):
+            remove_keys[provider_id] = False
+        elif raw_remove in ("1", "0"):
+            remove_keys[provider_id] = raw_remove == "1"
+        else:
+            return _bad()
+    if any(new_keys.values()):
+        try:
+            settings_key = ai_settings_store.require_settings_key(load_settings().ai_settings_key)
+        except ai_settings_store.SettingsStoreError:
+            return _key_error()
+    else:
+        settings_key = None
+    nav_params, nav_error = _parse_view_params(request, datetime.now(UTC))
+    if nav_error is not None:
+        with read_store(request) as conn:
+            context = _settings_context(request, conn, "error.bad_params")
+        return templates.TemplateResponse(request, "pages/settings.html", context, status_code=400)
+    from app.db.database import writer_transaction
+
+    try:
+        with writer_transaction(request.app.state.db_path) as conn:
+            ai_settings_store.set_setting(
+                conn, ai_settings_store.ENABLED_SETTING, "1" if enabled else "0"
+            )
+            ai_settings_store.set_setting(conn, ai_settings_store.PROVIDER_SETTING, provider)
+            ai_settings_store.set_setting(conn, ai_settings_store.MODEL_SETTING, model)
+            policy_key = ai_settings_store.POLICY_SETTING_PREFIX + provider
+            if policy:
+                ai_settings_store.set_setting(conn, policy_key, policy)
+            else:
+                ai_settings_store.delete_setting(conn, policy_key)
+            ai_settings_store.set_setting(
+                conn, "ai.synthetic_source", "1" if synthetic_source else "0"
+            )
+            if provider == "anthropic":
+                if workspace:
+                    ai_settings_store.set_setting(
+                        conn, ai_settings_store.WORKSPACE_SETTING, workspace
+                    )
+                else:
+                    ai_settings_store.delete_setting(conn, ai_settings_store.WORKSPACE_SETTING)
+            else:
+                # Leaving Anthropic drops the stale workspace binding
+                # instead of carrying it to the new provider.
+                ai_settings_store.delete_setting(conn, ai_settings_store.WORKSPACE_SETTING)
+            for provider_id in ai_catalog.provider_ids():
+                key_setting = ai_settings_store.KEY_SETTING_PREFIX + provider_id
+                if remove_keys[provider_id]:
+                    ai_settings_store.delete_setting(conn, key_setting)
+                elif new_keys[provider_id]:
+                    assert settings_key is not None
+                    ai_settings_store.reject_settings_key_reuse(
+                        new_keys[provider_id], key=settings_key
+                    )
+                    blob = ai_settings_store.encrypt_provider_key(
+                        provider_id, new_keys[provider_id], key=settings_key
+                    )
+                    ai_settings_store.set_setting(conn, key_setting, blob)
+    except ai_settings_store.SettingsStoreError:
+        return _key_error()
     return_target: dict[str, object] = {
         "range": nav_params["range"],
         "from": nav_params["window"].time_from.isoformat(),

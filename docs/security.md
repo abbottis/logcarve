@@ -8,8 +8,9 @@ Status: controls implemented per the acceptance criteria; parser/auth/tool/reten
 | Imported text → DB/UI | Sanitization, HMAC, parameterized SQL, output escaping, controlled markdown rendering | PRIV-03, ANA-01, UI-04 |
 | Browser → admin | Private login, strong password hash, rate limits, secure cookies, CSRF and safe headers | AUTH-01 |
 | Client → external API | Hashed scoped tokens, server-side site/time checks, bounded pagination, safe errors | AUTH-02, API-01–04 |
-| Analytics → model | Tool allowlist, egress filter, verified tier/provider, no shell/SQL/network tools | AI-03, PRIV-01–02 |
-| Model work → billing | Time/token/step limits, concurrency-aware budget handling, fail-safe deterministic service | COST-01–02 |
+| Analytics → model | Tool allowlist, egress filter, verified tier/provider, no shell/SQL/network tools | AI-03, AI-05, PRIV-01–02 |
+| Backend AI settings | Admin session + CSRF, bounded form parsing, encrypted per-provider keys, no key echoes/exports, token exclusion | AI-06, AUTH-01–02, API-04 |
+| Model work → billing | Time/token/step limits, concurrency-aware budget handling, explicit runtime grant, fail-safe deterministic service | COST-01–02, AI-07 |
 | App → host | Non-root container, minimal ports/capabilities, no Docker socket, read-only source mount | OPS-01–02 |
 
 Treat URL, User-Agent and Referer prompt injection as data. Requests to run scans, block addresses, modify server configuration or escalate permissions must not cause tool execution. Findings describe suspicions and source limits, never prove attribution or compromise.

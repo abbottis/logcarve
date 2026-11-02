@@ -112,7 +112,7 @@ All product settings come from the environment; see [.env.example](.env.example)
 - `SESSION_SECRET`, `HMAC_KEY` — distinct server secrets for sessions and address pseudonymization.
 - `ORIGINAL_IP_KEY` — separate key for the optional encrypted original-IP store; empty keeps originals uncaptured.
 - `GEOIP_DB_PATH` — optional path of the operator-mounted genuine country database; empty keeps lookups honestly `unavailable`.
-- `AI_ENABLED=false` with an empty `MODEL_API_KEY` — the safe default; enabling chat additionally requires verified provider, data mode and budget settings.
+- `AI_ENABLED=false` with an empty `MODEL_API_KEY` — the safe default; enabling chat additionally requires a verified provider, data mode, budget settings and an explicit runtime usage grant (no grant exists initially).
 
 ## Repository map
 
@@ -124,7 +124,7 @@ All product settings come from the environment; see [.env.example](.env.example)
 
 ## Optional assistant
 
-An internal Meta assistant is available server-side when explicitly enabled with your own account, API access, data mode and usage limits. It uses bounded read-only analytics tools and reports evidence IDs, filters, coverage and limitations with every finding. The dashboard and the API work fully without it, and the synthetic demo keeps it disabled. Model failure never takes deterministic analytics offline.
+An internal assistant is available server-side from Meta, OpenAI, Google Gemini or Anthropic Claude when explicitly enabled with your own account, API access, data mode and usage limits. Providers and models are configured in the backend Settings page with per-provider encrypted keys, explicit data-policy acknowledgment and a separate explicit runtime usage grant. It uses bounded read-only analytics tools and reports evidence IDs, filters, coverage and limitations with every finding. The dashboard and the API work fully without it, and the synthetic demo keeps it disabled. Model failure never takes deterministic analytics offline.
 
 ## Documentation
 

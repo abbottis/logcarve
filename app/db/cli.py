@@ -753,6 +753,35 @@ def cmd_backup(args: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_ai_allowance_grant(args: argparse.Namespace) -> int:
+    """Create or narrow the explicit runtime AI usage grant (ADR 0004).
+
+    Explicit operator action only: the grant starts absent
+    (fail-closed), settings saves never create it, and it can only be
+    narrowed afterwards — recorded spend is never refunded or reset.
+    Prints the resulting caps as JSON without any key material.
+    """
+    from app.ai import allowance, budget
+
+    migrate(Path(args.db))
+    snapshot = allowance.grant(
+        Path(args.db),
+        max_investigations=args.investigations,
+        max_requests=args.requests,
+        max_micro_usd=budget.usd_to_micro(args.usd),
+    )
+    print(
+        json.dumps(
+            {
+                "max_investigations": snapshot["max_investigations"],
+                "max_requests": snapshot["max_requests"],
+                "max_micro_usd": snapshot["max_micro_usd"],
+            }
+        )
+    )
+    return 0
+
+
 def cmd_restore(args: argparse.Namespace) -> int:
     path = restore_database(Path(args.backup), Path(args.dest))
     if args.retention_days is not None:
@@ -941,6 +970,14 @@ def build_parser() -> argparse.ArgumentParser:
     restore.add_argument("--dest", required=True, help="Isolated destination, never a live DB")
     restore.add_argument("--retention-days", type=int, default=None)
     restore.set_defaults(func=cmd_restore)
+
+    ai_grant = sub.add_parser(
+        "ai-allowance-grant", help="Create or narrow the explicit runtime AI usage grant"
+    )
+    ai_grant.add_argument("--investigations", type=int, required=True)
+    ai_grant.add_argument("--requests", type=int, required=True)
+    ai_grant.add_argument("--usd", type=float, required=True)
+    ai_grant.set_defaults(func=cmd_ai_allowance_grant)
 
     return parser
 

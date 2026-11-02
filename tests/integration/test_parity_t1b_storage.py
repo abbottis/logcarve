@@ -224,7 +224,7 @@ def test_upgrade_schema4_preserves_core_and_unrelated_tables(tmp_path, monkeypat
     finally:
         conn.close()
     monkeypatch.setattr(migrations_runner, "MIGRATIONS_DIR", real)
-    assert migrate(db).applied == (5, 6, 7, 8)
+    assert migrate(db).applied == (5, 6, 7, 8, 9)
     assert migrate(db).applied == ()
     conn = connect(db, read_only=True)
     try:
@@ -290,7 +290,7 @@ def test_premigrate_backup_then_restore_round_trip(tmp_path, monkeypatch):
     monkeypatch.setattr(migrations_runner, "MIGRATIONS_DIR", real)
     backups = tmp_path / "backups"
     result = migrate(db, backup_dir=backups)
-    assert result.applied == (5, 6, 7, 8)
+    assert result.applied == (5, 6, 7, 8, 9)
     assert result.backup_path is not None and result.backup_path.is_file()
     import stat as statmod
 

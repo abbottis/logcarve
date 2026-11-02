@@ -47,6 +47,19 @@ re-verifies the destination afterwards, and reapplies the configured
 UTC event retention when `--retention-days` is given. After restoring,
 confirm expected record counts and analytics coverage before serving.
 
+## Encrypted settings and key recovery (ADR 0004)
+
+`admin_settings` rows (including the AES-256-GCM provider-key
+ciphertext and the runtime-allowance counters) are backed up with the
+database as ciphertext only. No backup ever contains a provider key,
+suffix or the `AI_SETTINGS_KEY` itself. Preserve `AI_SETTINGS_KEY`
+separately through the same protected channel as the other server
+secrets: losing it makes stored provider keys permanently unreadable
+(dispatches fail closed; deterministic analytics keep working) and no
+backup can recover them. Restoring a backup never resets spend: the
+budget, smoke and runtime-allowance ledgers restore with their used
+counters intact.
+
 ## Backup before migrations
 
 `migrate()` accepts a backup directory and takes a timestamped online

@@ -36,6 +36,18 @@ services:
       # Explicit `environment` below still forces AI off / empty model key.
       - path: ./artifacts/local-demo-secrets/original-ip.env
         required: false
+      # Optional protected AI adjunct (coordinator-owned, never
+      # committed): ./artifacts/local-demo-secrets/ai.env holds ONLY
+      # AI_SETTINGS_KEY=<generated> (and, once the coordinator lifts
+      # the forced-off `environment` below during reviewed activation,
+      # the owner-provided product key). Missing file means stored
+      # provider keys stay unreadable and chat stays unavailable.
+      # Explicit `environment` below still forces AI off / empty model
+      # key by default; the coordinator controls actual enablement
+      # after review, and a runtime usage grant is additionally
+      # required before any paid call (see docs/deployment.md).
+      - path: ./artifacts/local-demo-secrets/ai.env
+        required: false
     environment:
       AI_ENABLED: "false"
       MODEL_API_KEY: ""

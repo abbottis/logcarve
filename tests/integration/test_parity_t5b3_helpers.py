@@ -82,7 +82,9 @@ def _downgrade_to_v7(db: Path) -> None:
     try:
         conn.execute("DROP TABLE follow_generations")
         conn.execute("DROP TABLE follow_batches")
-        conn.execute("DELETE FROM schema_migrations WHERE version = 8")
+        conn.execute("DROP TABLE IF EXISTS runtime_holds")
+        conn.execute("DROP TABLE IF EXISTS runtime_allowance")
+        conn.execute("DELETE FROM schema_migrations WHERE version IN (8, 9)")
         conn.commit()
         assert conn.execute("SELECT MAX(version) FROM schema_migrations").fetchone()[0] == 7
     finally:
@@ -164,8 +166,8 @@ def test_upgrade_v7_to_v8_preserves_core_and_ledger(tmp_path, monkeypatch, capsy
     assert code == 0, capsys.readouterr().out
     body = json.loads(capsys.readouterr().out)
     assert body["verdict"] == "upgraded"
-    assert body["applied_migrations"] == [8]
-    assert body["schema_version"] == 8
+    assert body["applied_migrations"] == [8, 9]
+    assert body["schema_version"] == 9
     assert body["request_rows"] == before_events == 3
     assert Path(body["backup"]).is_file()
     conn = connect(db, read_only=True)
@@ -379,8 +381,8 @@ def test_upgrade_v4_to_v8_with_actual_enrichment(tmp_path, monkeypatch, capsys):
     assert code == 0, capsys.readouterr().out
     body = json.loads(capsys.readouterr().out)
     assert body["verdict"] == "upgraded"
-    assert body["schema_version"] == 8
-    assert body["applied_migrations"] == [5, 6, 7, 8]
+    assert body["schema_version"] == 9
+    assert body["applied_migrations"] == [5, 6, 7, 8, 9]
     assert body["request_rows"] == 3
     assert len(body["enrichment"]) == 1
     entry = body["enrichment"][0]
@@ -427,7 +429,7 @@ def test_upgrade_changed_fixture_fails_loudly_without_restore(tmp_path, monkeypa
     live = connect(db, read_only=True)
     backup_conn = sqlite3.connect(str(Path(body["backup"])))
     try:
-        assert live.execute("SELECT MAX(version) FROM schema_migrations").fetchone()[0] == 8
+        assert live.execute("SELECT MAX(version) FROM schema_migrations").fetchone()[0] == 9
         assert backup_conn.execute("SELECT MAX(version) FROM schema_migrations").fetchone()[0] == 4
         assert live.execute("SELECT COUNT(*) FROM requests").fetchone()[0] == 3
         assert live.execute("SELECT amount_micro_usd FROM ai_spend").fetchone()[0] == 500000

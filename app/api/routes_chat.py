@@ -41,6 +41,7 @@ _chat_slots = threading.Semaphore(CHAT_MAX_CONCURRENT)
 
 _ERROR_STATUS = {
     "ai_disabled": 409,
+    "usage_not_authorized": 403,
     "budget_reached": 429,
     "invalid_request": 400,
     "unknown_site": 404,
@@ -128,9 +129,11 @@ def post_chat(request: Request, body: ChatBody):
             429, "chat_busy", "The assistant is busy. Try again later.", request_id
         )
     try:
+        from app.ai.effective import resolve
         from app.config import load_settings
 
-        settings = load_settings()
+        db_path = _db_path(request)
+        settings = resolve(db_path, load_settings())
         if not settings.ai_enabled:
             return error_response(
                 409,
@@ -154,6 +157,13 @@ def post_chat(request: Request, body: ChatBody):
                 ),
                 request_id,
             )
+
+        def _reload_settings():
+            from app.ai.effective import resolve as _resolve
+            from app.config import load_settings as _load
+
+            return _resolve(_db_path(request), _load())
+
         try:
             provider = select_provider(settings)
         except BackendUnavailable:
@@ -169,6 +179,7 @@ def post_chat(request: Request, body: ChatBody):
         try:
             result = run_investigation(
                 db_path=_db_path(request),
+                settings_loader=_reload_settings,
                 rules=request.app.state.rules,
                 settings=settings,
                 provider=provider,

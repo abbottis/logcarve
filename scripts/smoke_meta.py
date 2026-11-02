@@ -29,6 +29,7 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT))
 
+from app.ai import allowance as allowance_mod
 from app.ai import budget
 from app.ai.providers.meta_responses import MetaResponsesAdapter
 from app.ai.service import Actor, run_investigation
@@ -152,6 +153,14 @@ def dry_run(root: Path) -> int:
         )
         db = tmp_path / "smoke.sqlite3"
         seed_db(db, logs_root)
+        # Explicit bounded grant for this scratch DB only (ADR 0004):
+        # the dry run still opens no key file and touches no network.
+        allowance_mod.grant(
+            db,
+            max_investigations=3,
+            max_requests=12,
+            max_micro_usd=budget.usd_to_micro(1.0),
+        )
         rules = (
             load_rules(root / "config" / "bot_rules.yaml").rules
             + load_rules(root / "config" / "security_rules.yaml").rules
@@ -541,7 +550,10 @@ def real_run(args, *, transport=None) -> int:
     except smoke_mod.SmokeRefused as exc:
         print(f"refusing real run: {exc}", file=sys.stderr)
         return 2
-    print(f"allowance before run: {state}")
+    print(f"smoke allowance before run: {state}")
+    # Explicit historical T8 entrypoint: this run keeps ONLY the
+    # once-only smoke ledger limits above. It never requires, creates
+    # or consumes the separate runtime grant (normal chat path).
     key_path = Path(args.key_file)
     try:
         key_value = key_path.read_text(encoding="utf-8").splitlines()[0].strip()
@@ -602,6 +614,10 @@ def real_run(args, *, transport=None) -> int:
                 source_id=None,
                 time_from=time_from,
                 time_to=time_to,
+                # Explicit historical T8 entrypoint (trusted server
+                # script only): historical smoke limits, no runtime
+                # grant involved.
+                smoke_enforced=True,
             )
         except Exception as exc:  # noqa: BLE001 - runner records failures, never raises
             entry = {

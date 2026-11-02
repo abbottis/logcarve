@@ -16,6 +16,8 @@ from pathlib import Path
 
 import pytest
 
+from app.ai import allowance as allowance_mod
+from app.ai import budget as budget_mod
 from app.ai import egress as egress_mod
 from app.ai.egress import MAX_WIRE_BYTES
 from app.ai.providers.base import ProviderResponse, ToolCall
@@ -57,6 +59,13 @@ def senv(tmp_path, monkeypatch):
     (root / "access.log").write_bytes(FIXTURE.read_bytes())
     db = tmp_path / "projection.sqlite3"
     migrate(db)
+    # Explicit operator grant for mocked-transport native runs (ADR 0004).
+    allowance_mod.grant(
+        db,
+        max_investigations=50,
+        max_requests=500,
+        max_micro_usd=budget_mod.usd_to_micro(50.0),
+    )
     from app.auth.passwords import hash_password
     from app.auth.tokens import create_admin_user
 

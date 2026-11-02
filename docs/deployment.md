@@ -48,8 +48,44 @@ explicit 413 above the cap). `logcarve-import follow` /
 checkpoints, generation identity and rotation handling; the browser
 starts no watcher. `/readyz` rejects unsupported schemas (fixed
 `not_ready` envelope, no file creation); current supported migration
-MAX is 8. Native Linux x86-64 stays NOT RUN; ARM-host amd64 image runs
+MAX is 9 (migration 0009 adds the runtime-allowance tables the chat
+path relies on; 8-stores upgrade in place with data preserved).
+Native Linux x86-64 stays NOT RUN; ARM-host amd64 image runs
 are EMULATED proof only, with distinct architecture-tagged images.
+
+## Product AI providers (ADR 0004, owner-accepted 2026-11-02)
+
+The backend Settings page (local-admin session + CSRF) selects one of
+Meta (`muse-spark-1.3`), OpenAI (`gpt-6-luna`), Google Gemini
+(`gemini-3.5-flash-lite`) or Anthropic Claude (`claude-haiku-5-5`)
+with its bounded model, data policy and keys. Each provider uses its
+genuine native HTTPS endpoint (fixed allowlist, no configurable URL
+surface; keys travel in auth headers, never in URLs). Tiers are
+labeled honestly: Meta/OpenAI Standard, Gemini Paid API, Anthropic
+API. Verified per-model pricing provenance is recorded in
+`app/ai/catalog.py` (Meta 2026-10-31, OpenAI/Gemini/Anthropic
+2026-11-02 task references).
+
+Safe credential onboarding:
+
+- Generate a dedicated `AI_SETTINGS_KEY` (32 random bytes, base64 or
+  hex) and preserve it separately from every other secret. Stored
+  provider keys are AES-256-GCM ciphertext bound to their provider;
+  backups hold ciphertext only and are useless without this key.
+- Enter provider keys in Settings (blank keeps, explicit remove
+  deletes) or mount per-provider env fallbacks (`MODEL_API_KEY`,
+  `OPENAI_API_KEY`, `GEMINI_API_KEY`, `ANTHROPIC_API_KEY`). Removal
+  while an env fallback exists reports env-managed.
+- Acknowledge the data policy per provider (real or synthetic-only
+  demo mode). Synthetic mode additionally requires the operator
+  `AI_SYNTHETIC_SOURCE` assertion; acknowledgments never transfer
+  between providers.
+- Create the explicit bounded runtime usage grant before any paid
+  call: `python -m app.db.cli --db /data/logcarve.sqlite3
+  ai-allowance-grant --investigations N --requests M --usd U`.
+  There is initially no grant (fail-closed); enabling AI never
+  creates one, and settings saves/restarts never reset it. The
+  historical T8 smoke ledger is preserved untouched alongside it.
 
 ## Demo upgrade via the non-root image (coordinator runs, Muse never executes)
 

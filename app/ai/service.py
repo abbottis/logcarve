@@ -27,6 +27,7 @@ provider; production without an implemented real transport reports
 unavailable instead of answering from a fake.
 """
 
+import hashlib
 import queue
 import threading
 import time
@@ -37,7 +38,7 @@ from pathlib import Path
 
 from pydantic import ValidationError
 
-from app.ai import budget, egress, gate, smoke
+from app.ai import allowance, budget, egress, gate, registry, smoke
 from app.ai.egress import MAX_WIRE_BYTES
 from app.ai.providers.base import (
     BackendUnavailable,
@@ -47,14 +48,6 @@ from app.ai.providers.base import (
     ProviderRequest,
     ProviderResponse,
     ProviderTimeout,
-)
-from app.ai.providers.meta_responses import (
-    WIRE_FRAMING_TOKENS,
-    MetaResponsesAdapter,
-    build_dispatch_body,
-    cost_micro_usd,
-    parse_endpoint,
-    serialize_body,
 )
 from app.ai.tools.definitions import TOOL_NAMES, execute_tool, response_tool_definitions
 from app.analytics.classification import build_classifier, resolve_selector_indexes
@@ -85,16 +78,16 @@ WORKER_CAPACITY = 8
 WORKER_POLL_S = 0.02
 # Application-side planning estimate for legacy/fake reservation
 # accounting ONLY: 100 micro-USD per 1k tokens (input and output
-# alike). Fake-provider paths keep this estimate; real Meta
-# dispatches use the verified pricing in
-# app.ai.providers.meta_responses instead.
+# alike). Fake-provider paths keep this estimate; real
+# dispatches use the verified per-provider pricing in
+# app.ai.registry instead.
 ESTIMATE_MICRO_USD_PER_1K_TOKENS = 100
-# Real Standard Spark pricing is verified in code
-# (meta_responses.PRICING_VERSION, primary docs 31 Oct 2026).
+# Verified per-provider pricing is implemented in code
+# (registry entries, primary docs linked in app.ai.catalog).
 PRICING_VERIFIED = True
 # Serialized protocol overhead added to legacy fake input estimates.
 # Real dispatches reserve for the exact immutable serialized body
-# plus WIRE_FRAMING_TOKENS instead of this planning overhead.
+# plus the adapter framing tokens instead of this planning overhead.
 PROTOCOL_OVERHEAD_TOKENS = 512
 
 
@@ -203,33 +196,127 @@ def estimate_input_tokens_upper(prompt: str) -> int:
     return len(prompt.encode("utf-8")) + PROTOCOL_OVERHEAD_TOKENS
 
 
-def select_provider(settings) -> ProviderAdapter:
-    """Resolve the real Meta transport for settings, else unavailable.
+def _gate_decision(settings) -> tuple:
+    """Real-data decision first, synthetic-only demo decision second.
 
-    Every binding is revalidated here: allowlisted provider/model/
-    tier plus verified data policy (gate), the configured endpoint
-    against the strict HTTPS allowlist, and a non-empty product key.
-    Tests inject FakeProvider directly and never go through this
-    seam; fake paths never require an endpoint or key.
+    Returns ``(decision, synthetic)``. Both paths revalidate the live
+    effective settings; anything else raises the safe investigation
+    failure and sends nothing.
     """
     try:
-        decision = gate.validate_for_real_data(settings)
+        return gate.validate_for_real_data(settings), False
+    except gate.GateBlocked:
+        pass
+    try:
+        return gate.validate_for_synthetic(settings), True
     except gate.GateBlocked as exc:
-        raise BackendUnavailable(
-            "Real-data transmission is not enabled under these settings."
+        raise InvestigationError(
+            "egress_blocked", "The assistant cannot run under these settings."
         ) from exc
+
+
+def _binding_of(settings) -> tuple:
+    """Pinned per-investigation binding; any change fails closed.
+
+    Covers provider, model, resolved key, policy flags, the enable
+    switch AND the service tier, endpoint and workspace, so
+    mid-investigation config changes never silently replay
+    previous-provider history or secrets to a different provider.
+    The fingerprint is in-memory only and never logged or stored.
+    Mirrors :func:`app.ai.effective.binding_of`.
+    """
+    key = getattr(settings, "model_api_key", "")
+    secret = key.get_secret_value() if hasattr(key, "get_secret_value") else key
+    if not isinstance(secret, str):
+        secret = ""
+    fingerprint = hashlib.sha256(secret.encode("utf-8")).hexdigest() if secret else ""
+
+    def _text(name: str) -> str:
+        raw = getattr(settings, name, "")
+        get_secret = getattr(raw, "get_secret_value", None)
+        raw = get_secret() if callable(get_secret) else raw
+        return raw if isinstance(raw, str) else str(raw)
+
+    return (
+        str(getattr(settings, "model_provider", "")),
+        str(getattr(settings, "model_id", "")),
+        fingerprint,
+        bool(getattr(settings, "model_data_policy_verified", False)),
+        bool(getattr(settings, "model_allow_real_data", False)),
+        bool(getattr(settings, "synthetic_only", False)),
+        bool(getattr(settings, "synthetic_source_asserted", False)),
+        bool(getattr(settings, "ai_enabled", False)),
+        _text("model_service_tier"),
+        _text("model_endpoint"),
+        _text("workspace_id"),
+    )
+
+
+def select_provider(settings) -> ProviderAdapter:
+    """Resolve the real native transport for settings, else unavailable.
+
+    Every binding is revalidated here through the provider registry:
+    allowlisted provider/model/tier plus verified data policy (real
+    gate) or explicit synthetic-only demo mode (synthetic gate), the
+    exact trusted native endpoint for that pair, and a non-empty
+    product key. Unknown providers never reach key or endpoint
+    handling. Tests inject FakeProvider directly and never go through
+    this seam; fake paths never require an endpoint or key.
+    A stored key row that exists but is invalid/unreadable (or an
+    unreadable settings store) never falls back to another source:
+    it fails closed here even when an env key is present.
+    """
+    if bool(getattr(settings, "ai_key_error", False)):
+        raise BackendUnavailable("The stored provider key is unavailable.")
+    if str(getattr(settings, "ai_store_error", "") or ""):
+        raise BackendUnavailable("The AI settings store is unavailable.")
+    try:
+        decision = gate.validate_for_real_data(settings)
+    except gate.GateBlocked:
+        try:
+            decision = gate.validate_for_synthetic(settings)
+        except gate.GateBlocked as exc:
+            raise BackendUnavailable(
+                "Real-data transmission is not enabled under these settings."
+            ) from exc
     if not PRICING_VERIFIED:
         raise BackendUnavailable("No verified pricing is implemented in this version.")
-    endpoint = str(getattr(settings, "model_endpoint", "") or "")
+    provider = decision.provider
     try:
-        parse_endpoint(endpoint)
-    except ProviderError as exc:
+        endpoint = registry.endpoint_for(provider, decision.model)
+    except (KeyError, ValueError) as exc:
         raise BackendUnavailable("No usable provider endpoint is configured.") from exc
+    if provider == "meta":
+        # Backwards-compatible operator override for the existing Meta
+        # setup; still validated against the strict HTTPS allowlist.
+        legacy = str(getattr(settings, "model_endpoint", "") or "")
+        if legacy:
+            from app.ai.providers import meta_responses
+
+            try:
+                meta_responses.parse_endpoint(legacy)
+            except ProviderError as exc:
+                raise BackendUnavailable("No usable provider endpoint is configured.") from exc
+            endpoint = legacy
     key = getattr(settings, "model_api_key", None)
     secret = key.get_secret_value() if hasattr(key, "get_secret_value") else key
     if not isinstance(secret, str) or not secret:
         raise BackendUnavailable("No product key is configured.")
-    return MetaResponsesAdapter(endpoint=endpoint, model=decision.model, api_key=key)
+    try:
+        entry = registry.entry_for(provider)
+    except ValueError as exc:
+        raise BackendUnavailable(
+            "Real-data transmission is not enabled under these settings."
+        ) from exc
+    adapter_cls = entry["adapter_cls"]
+    if provider == "anthropic":
+        return adapter_cls(
+            endpoint=endpoint,
+            model=decision.model,
+            api_key=key,
+            workspace_id=str(getattr(settings, "workspace_id", "") or ""),
+        )
+    return adapter_cls(endpoint=endpoint, model=decision.model, api_key=key)
 
 
 _worker_slots = threading.Semaphore(WORKER_CAPACITY)
@@ -481,29 +568,66 @@ def _smoke_error(exc: smoke.SmokeRefused) -> "InvestigationError":
     return InvestigationError("invalid_request", str(exc))
 
 
+def _allowance_error(exc: allowance.AllowanceRefused) -> "InvestigationError":
+    """Map a runtime-allowance refusal to a safe investigation failure."""
+    if exc.code == "usage_not_authorized":
+        return InvestigationError(
+            "usage_not_authorized",
+            "No runtime AI usage allowance has been granted. Analytics remain available.",
+        )
+    if exc.code in (
+        "investigation_cap_reached",
+        "request_cap_reached",
+        "cost_cap_reached",
+    ):
+        return InvestigationError(
+            "budget_reached",
+            "The AI usage limit has been reached. Analytics remain available.",
+        )
+    return InvestigationError("invalid_request", str(exc))
+
+
 def _settle_step(
-    db_path: Path, *, reservation_id: int, smoke_hold: int | None, actual_micro_usd: int
+    db_path: Path,
+    *,
+    reservation_id: int,
+    smoke_hold: int | None,
+    allowance_hold: int | None,
+    actual_micro_usd: int,
 ) -> None:
-    """Convert budget and smoke holds into measured charges."""
+    """Convert budget, smoke and runtime-allowance holds into charges."""
     budget.charge(db_path, reservation_id=reservation_id, actual_micro_usd=actual_micro_usd)
     if smoke_hold is not None:
         smoke.settle_hold(db_path, hold_id=smoke_hold, actual_micro_usd=actual_micro_usd)
+    if allowance_hold is not None:
+        allowance.settle_hold(db_path, hold_id=allowance_hold, actual_micro_usd=actual_micro_usd)
 
 
 def _abandon_step(
-    db_path: Path, *, reservation_id: int, smoke_hold: int | None, cap_micro_usd: int
+    db_path: Path,
+    *,
+    reservation_id: int,
+    smoke_hold: int | None,
+    allowance_hold: int | None,
+    cap_micro_usd: int,
 ) -> None:
     """Keep full holds for dispatched work of unknown size."""
     budget.charge(db_path, reservation_id=reservation_id, actual_micro_usd=cap_micro_usd)
     if smoke_hold is not None:
         smoke.abandon_hold(db_path, hold_id=smoke_hold)
+    if allowance_hold is not None:
+        allowance.abandon_hold(db_path, hold_id=allowance_hold)
 
 
-def _release_step(db_path: Path, *, reservation_id: int, smoke_hold: int | None) -> None:
+def _release_step(
+    db_path: Path, *, reservation_id: int, smoke_hold: int | None, allowance_hold: int | None
+) -> None:
     """Release holds for work that never dispatched (no worker capacity)."""
     budget.release(db_path, reservation_id=reservation_id)
     if smoke_hold is not None:
         smoke.release_hold(db_path, hold_id=smoke_hold)
+    if allowance_hold is not None:
+        allowance.release_hold(db_path, hold_id=allowance_hold)
 
 
 def _validate_response_shape(
@@ -559,6 +683,12 @@ def _validate_response_shape(
             raw_call_id = call.get("call_id", "")
         else:
             raw_call_id = ""
+        if hasattr(call, "metadata"):
+            raw_metadata = call.metadata
+        elif isinstance(call, dict):
+            raw_metadata = call.get("metadata", {})
+        else:
+            raw_metadata = {}
         if not isinstance(name, str) or not name or not isinstance(raw_args, dict):
             raise InvestigationError("invalid_response", "A provider tool call is malformed.")
         call_id = raw_call_id if isinstance(raw_call_id, str) else ""
@@ -566,8 +696,35 @@ def _validate_response_shape(
             if not 1 <= len(call_id) <= 64 or call_id in seen_call_ids:
                 raise InvestigationError("invalid_response", "A provider tool call is malformed.")
             seen_call_ids.add(call_id)
-        parsed.append((name, raw_args, call_id))
+        metadata = _validate_call_metadata(raw_metadata)
+        parsed.append((name, raw_args, call_id, metadata))
     return parsed
+
+
+def _validate_call_metadata(raw: object) -> dict:
+    """Validate opaque provider replay metadata; never inspect content.
+
+    Only small bounded string maps pass (e.g. Gemini thoughtSignature
+    blobs the adapter already validated). Anything else fails closed
+    instead of replaying arbitrary provider text into the next dispatch.
+    """
+    if raw is None:
+        return {}
+    if not isinstance(raw, dict):
+        raise InvestigationError("invalid_response", "A provider tool call is malformed.")
+    if len(raw) > 8:
+        raise InvestigationError("invalid_response", "A provider tool call is malformed.")
+    clean: dict = {}
+    for key, value in raw.items():
+        if (
+            not isinstance(key, str)
+            or not 1 <= len(key) <= 64
+            or not isinstance(value, str)
+            or not 1 <= len(value) <= 8192
+        ):
+            raise InvestigationError("invalid_response", "A provider tool call is malformed.")
+        clean[key] = value
+    return clean
 
 
 def _utc_today(clock) -> str:
@@ -634,6 +791,7 @@ def run_investigation(
     now: datetime | None = None,
     clock=None,
     smoke_enforced: bool | None = None,
+    settings_loader=None,
 ) -> InvestigationResult:
     """Run one bounded investigation with fake-provider-safe egress.
 
@@ -643,11 +801,22 @@ def run_investigation(
     while observation metadata stays stable. Tests may inject a frozen
     `now` (which also freezes the clock unless `clock` is given) or a
     scripted advancing `clock` for midnight rollover. `smoke_enforced`
-    admits every investigation and request against the lifetime smoke
-    allowance from settings. The default (None) enforces it for every
-    REAL dispatch — including authenticated UI/API chat — and leaves
-    fake-only paths alone; pass False explicitly only to opt a
-    fake-provider test out.
+    selects the EXPLICIT historical T8 entrypoint: only the trusted
+    server-side smoke script passes True, and that run is admitted
+    against the historical once-only smoke ledger ONLY (never the
+    runtime grant, never renewed or reset). The default (None/False)
+    is normal runtime chat: real dispatches require the explicit
+    bounded runtime grant plus the global budget, and never touch the
+    historical smoke counters — so a refused runtime call cannot
+    mutate them and an exhausted historical row cannot block a
+    separately authorized runtime path. Client request bodies never
+    choose the mode; only trusted server entrypoints pass True.
+    `settings_loader` (a zero-arg callable
+    returning the current effective settings) re-resolves settings
+    before every provider attempt: provider, model, key, policy and
+    enable changes take effect on the next request, and any change to
+    the pinned binding fails the investigation closed instead of
+    replaying previous-provider history or secrets elsewhere.
     """
     if not bool(getattr(settings, "ai_enabled", False)):
         raise InvestigationError(
@@ -703,12 +872,8 @@ def run_investigation(
         timing_max_ms=timing_max_ms,
         country=country,
     )
-    try:
-        gate.validate_for_real_data(settings)
-    except gate.GateBlocked as exc:
-        raise InvestigationError(
-            "egress_blocked", "The assistant cannot run under these settings."
-        ) from exc
+    _decision, _synthetic = _gate_decision(settings)
+    pinned_binding = _binding_of(settings)
     if search is not None:
         # Operator search text replays into typed tool arguments, so it
         # crosses the egress boundary like the question: sensitive shapes
@@ -734,11 +899,18 @@ def run_investigation(
     except egress.EgressViolation as exc:
         raise InvestigationError("egress_blocked", "The request cannot be sent safely.") from exc
 
-    is_real = getattr(provider, "name", "") == MetaResponsesAdapter.name
+    is_real = getattr(provider, "name", "") in registry.real_adapter_names()
     response_ids: list[str] = []
     provider_calls: list[dict] = []
     if smoke_enforced is None:
-        smoke_enforced = is_real
+        smoke_enforced = False
+    else:
+        smoke_enforced = bool(smoke_enforced)
+    # Exclusive modes: the explicit T8 entrypoint keeps ONLY its
+    # historical limits; normal runtime chat keeps ONLY the runtime
+    # grant plus the global budget. Neither mode touches the other's
+    # counters, so neither can renew, reset, block or mutate the other.
+    allowance_enforced = is_real and not smoke_enforced
     if smoke_enforced:
         try:
             smoke.init_or_check(
@@ -752,6 +924,11 @@ def run_investigation(
             smoke.admit_investigation(Path(db_path), investigation_id=investigation_id)
         except smoke.SmokeRefused as exc:
             raise _smoke_error(exc) from exc
+    if allowance_enforced:
+        try:
+            allowance.admit_investigation(Path(db_path), investigation_id=investigation_id)
+        except allowance.AllowanceRefused as exc:
+            raise _allowance_error(exc) from exc
 
     history: list[str] = []
     evidence: list[dict] = []
@@ -774,12 +951,12 @@ def run_investigation(
             raise InvestigationError(
                 "output_limit_reached", "The investigation outgrew its history bound."
             )
-        try:
-            decision = gate.validate_for_real_data(settings)
-        except gate.GateBlocked as exc:
+        live_settings = settings_loader() if settings_loader is not None else settings
+        if _binding_of(live_settings) != pinned_binding:
             raise InvestigationError(
-                "egress_blocked", "The assistant cannot run under these settings."
-            ) from exc
+                "egress_blocked", "The assistant settings changed during the investigation."
+            )
+        decision, _step_synthetic = _gate_decision(live_settings)
         model = decision.model
         prompt = _compose_prompt(
             system_prompt,
@@ -853,7 +1030,13 @@ def run_investigation(
                 country=scope.country,
             )
             try:
-                body_dict = build_dispatch_body(
+                entry = registry.entry_for(decision.provider)
+            except ValueError as exc:
+                raise InvestigationError(
+                    "egress_blocked", "The assistant cannot run under these settings."
+                ) from exc
+            try:
+                body_dict = entry["build_dispatch_body"](
                     model=model,
                     max_output_tokens=MAX_OUTPUT_TOKENS,
                     instructions=system_prompt,
@@ -865,7 +1048,7 @@ def run_investigation(
                 raise InvestigationError(
                     "egress_blocked", "The request cannot be sent safely."
                 ) from exc
-            wire = serialize_body(body_dict)
+            wire = entry["serialize_body"](body_dict)
             try:
                 checker = getattr(provider, "check_dispatch", None)
                 if callable(checker):
@@ -878,10 +1061,17 @@ def run_investigation(
                 raise InvestigationError(
                     "output_limit_reached", "The investigation outgrew its prompt bound."
                 )
-            input_upper = len(wire) + WIRE_FRAMING_TOKENS
-            step_cap = cost_micro_usd(
-                input_tokens=input_upper, cached_tokens=0, output_tokens=MAX_OUTPUT_TOKENS
-            )
+            input_upper = len(wire) + entry["framing_tokens"]
+            try:
+                step_cap = registry.step_cap_for(
+                    decision.provider,
+                    input_upper=len(wire),
+                    max_output_tokens=MAX_OUTPUT_TOKENS,
+                )
+            except ProviderError as exc:
+                raise InvestigationError(
+                    "invalid_response", "The provider usage is malformed."
+                ) from exc
             dispatch_request = ProviderRequest(
                 prompt_text=prompt, max_output_tokens=MAX_OUTPUT_TOKENS, body=wire
             )
@@ -918,6 +1108,19 @@ def run_investigation(
             except smoke.SmokeRefused as exc:
                 budget.release(Path(db_path), reservation_id=step_reservation)
                 raise _smoke_error(exc) from exc
+        allowance_hold: int | None = None
+        if allowance_enforced:
+            try:
+                allowance_hold = allowance.admit_request(
+                    Path(db_path),
+                    amount_micro_usd=step_cap,
+                    investigation_id=investigation_id,
+                )
+            except allowance.AllowanceRefused as exc:
+                budget.release(Path(db_path), reservation_id=step_reservation)
+                if smoke_hold is not None:
+                    smoke.release_hold(Path(db_path), hold_id=smoke_hold)
+                raise _allowance_error(exc) from exc
         try:
             response = _wait_provider(
                 provider,
@@ -926,7 +1129,12 @@ def run_investigation(
                 cancel=cancel_event,
             )
         except _WorkerBusy as exc:
-            _release_step(Path(db_path), reservation_id=step_reservation, smoke_hold=smoke_hold)
+            _release_step(
+                Path(db_path),
+                reservation_id=step_reservation,
+                smoke_hold=smoke_hold,
+                allowance_hold=allowance_hold,
+            )
             raise InvestigationError(
                 "provider_unavailable", "The AI assistant is unavailable. Please try again later."
             ) from exc
@@ -937,6 +1145,7 @@ def run_investigation(
                 Path(db_path),
                 reservation_id=step_reservation,
                 smoke_hold=smoke_hold,
+                allowance_hold=allowance_hold,
                 cap_micro_usd=step_cap,
             )
             raise InvestigationError("cancelled", "The investigation was cancelled.") from exc
@@ -946,6 +1155,7 @@ def run_investigation(
                 Path(db_path),
                 reservation_id=step_reservation,
                 smoke_hold=smoke_hold,
+                allowance_hold=allowance_hold,
                 cap_micro_usd=step_cap,
             )
             raise InvestigationError(
@@ -963,6 +1173,7 @@ def run_investigation(
                 Path(db_path),
                 reservation_id=step_reservation,
                 smoke_hold=smoke_hold,
+                allowance_hold=allowance_hold,
                 cap_micro_usd=step_cap,
             )
             raise
@@ -977,23 +1188,36 @@ def run_investigation(
                     Path(db_path),
                     reservation_id=step_reservation,
                     smoke_hold=smoke_hold,
+                    allowance_hold=allowance_hold,
                     cap_micro_usd=step_cap,
                 )
                 raise InvestigationError("invalid_response", "The provider usage is malformed.")
             try:
-                step_actual = cost_micro_usd(
-                    input_tokens=real_usage["input_tokens"],
-                    cached_tokens=real_usage.get("cached_tokens", 0),
-                    output_tokens=real_usage["output_tokens"],
-                )
-            except (KeyError, ProviderError):
+                step_actual = registry.cost_for(decision.provider, real_usage)
+            except (KeyError, ProviderError, ValueError):
                 _abandon_step(
                     Path(db_path),
                     reservation_id=step_reservation,
                     smoke_hold=smoke_hold,
+                    allowance_hold=allowance_hold,
                     cap_micro_usd=step_cap,
                 )
                 raise InvestigationError("invalid_response", "The provider usage is malformed.")
+            if step_actual > step_cap:
+                # The measured charge exceeds the worst-case
+                # reservation for this dispatch (tier flip, unpriced
+                # tokens): keep the full hold and fail closed rather
+                # than spending past the admitted bound silently.
+                _abandon_step(
+                    Path(db_path),
+                    reservation_id=step_reservation,
+                    smoke_hold=smoke_hold,
+                    allowance_hold=allowance_hold,
+                    cap_micro_usd=step_cap,
+                )
+                raise InvestigationError(
+                    "invalid_response", "The provider usage exceeds its requested bounds."
+                )
             spent_cached += real_usage.get("cached_tokens", 0)
             spent_reasoning += real_usage.get("reasoning_tokens", 0)
             spent_micro_usd += step_actual
@@ -1005,7 +1229,7 @@ def run_investigation(
             exchange_calls: list[dict] = []
             exchange_outputs: list[dict] = []
             try:
-                for name, raw_args, call_id in calls:
+                for name, raw_args, call_id, call_metadata in calls:
                     tool_total += 1
                     result = _execute_bounded_tool(
                         db_path,
@@ -1058,10 +1282,15 @@ def run_investigation(
                                 "call_id": call_id,
                                 "name": name,
                                 "arguments": result["arguments"],
+                                "metadata": call_metadata,
                             }
                         )
                         exchange_outputs.append(
-                            {"call_id": call_id, "evidence": result["evidence_output"]}
+                            {
+                                "call_id": call_id,
+                                "name": name,
+                                "evidence": result["evidence_output"],
+                            }
                         )
             except InvestigationError:
                 # Dispatched work of unknown reconciled size keeps its
@@ -1070,6 +1299,7 @@ def run_investigation(
                     Path(db_path),
                     reservation_id=step_reservation,
                     smoke_hold=smoke_hold,
+                    allowance_hold=allowance_hold,
                     cap_micro_usd=step_cap,
                 )
                 raise
@@ -1079,6 +1309,7 @@ def run_investigation(
                 Path(db_path),
                 reservation_id=step_reservation,
                 smoke_hold=smoke_hold,
+                allowance_hold=allowance_hold,
                 actual_micro_usd=step_actual,
             )
             charged_input, charged_output = spent_input, spent_output
@@ -1093,6 +1324,7 @@ def run_investigation(
                 Path(db_path),
                 reservation_id=step_reservation,
                 smoke_hold=smoke_hold,
+                allowance_hold=allowance_hold,
                 cap_micro_usd=step_cap,
             )
             raise InvestigationError(
@@ -1105,6 +1337,7 @@ def run_investigation(
                 Path(db_path),
                 reservation_id=step_reservation,
                 smoke_hold=smoke_hold,
+                allowance_hold=allowance_hold,
                 cap_micro_usd=step_cap,
             )
             raise InvestigationError(
@@ -1113,15 +1346,22 @@ def run_investigation(
         if is_real:
             # `spent_micro_usd` already includes this step's settled
             # micro-USD (added above), so the display is exactly the
-            # ledger sum — never the last step twice.
+            # ledger sum — never the last step twice. The tier travels
+            # with the record: Gemini Paid/API and Anthropic API are
+            # never mislabeled as Meta Standard.
             actual_micro = spent_micro_usd
+            try:
+                pricing_version = registry.entry_for(decision.provider)["pricing_version"]
+            except ValueError:
+                pricing_version = "unknown"
             usage_record = {
                 "input_tokens": spent_input,
                 "output_tokens": spent_output,
                 "cached_tokens": spent_cached,
                 "reasoning_tokens": spent_reasoning,
+                "tier": decision.tier,
                 "estimated_cost_usd": budget.micro_to_usd(actual_micro),
-                "pricing_version": "2026-10-31-dev.meta.ai",
+                "pricing_version": pricing_version,
                 "response_ids": list(response_ids),
                 "duration_s": round(time.monotonic() - started, 3),
                 "tool_calls": tool_total,
@@ -1142,6 +1382,7 @@ def run_investigation(
             Path(db_path),
             reservation_id=step_reservation,
             smoke_hold=smoke_hold,
+            allowance_hold=allowance_hold,
             actual_micro_usd=step_actual,
         )
         return InvestigationResult(

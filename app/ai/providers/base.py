@@ -19,6 +19,11 @@ class ToolCall:
     # Responses ``function_call`` correlation ID; empty for legacy
     # scripted (fake) calls, required for real stateless dispatches.
     call_id: str = ""
+    # Opaque provider-native correlation blob replayed verbatim by the
+    # service (e.g. a Gemini thoughtSignature). Adapters validate
+    # shape/bounds on parse and never reconstruct it; the service
+    # never inspects or logs its content.
+    metadata: dict = field(default_factory=dict)
 
 
 @dataclass(frozen=True)

@@ -24,6 +24,9 @@ All criteria are **NOT IMPLEMENTED / NOT RUN** at scaffold creation. Check a cri
 | AI-02 | Three questions are demonstrable with evidence | AI crawler, 404 with referrer and suspicious-pattern cases; counts/time/source limits visible |
 | AI-03 | Tool allowlist, validated arguments and read-only boundaries survive hostile inputs | Adversarial URL/UA/Referer; SQL/shell/scan/firewall/tool escalation attempts cause no execution |
 | AI-04 | Assistant failure/cancellation does not break deterministic features | Timeout, offline/provider failure and cancellation with API/dashboard still usable |
+| AI-05 | Native server-side transports for Meta, OpenAI, Gemini and Claude with model-specific pricing | Per-provider mocked-transport chat→tool→evidence runs; native bodies/headers/IDs, usage normalization and cost ledger checks (ADR 0004) |
+| AI-06 | Backend AI settings: provider/model selection, per-provider encrypted keys, policies | Auth/CSRF/body-bound tests; blank-keeps/remove-deletes/env-managed semantics; encrypted at rest; provider switches never mix credentials or policies (ADR 0004) |
+| AI-07 | Explicit bounded runtime usage authorization, initially none, never implicit | Grant-missing fail-closed; caps across providers and restarts; settings saves never create/reset spend; T8 smoke ledger preserved (ADR 0004) |
 | PRIV-01 | No raw logs, original IPs, query secrets or sensitive context leave the egress gate | Capture mocked outgoing prompts, history, tool outputs, retries and replay; assert forbidden data absent |
 | PRIV-02 | Real-data requests fail closed on Contributor/unknown/unverified providers/tiers | Fake account/provider metadata and mid-session/replay tier-switch tests |
 | PRIV-03 | Privacy defaults minimize storage and local disclosure | HMAC key separation, query discard, path/Referer/UA masking, safe diagnostics and retention tests |

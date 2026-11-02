@@ -29,7 +29,7 @@ CSRF_HEADER = "X-CSRF-Token"
 #: or partially applied upgrade) is still not ready. This is a cheap
 #: explicit preflight (version row, table list, two column sets), never
 #: a full integrity scan, and it creates no files.
-SUPPORTED_SCHEMA_VERSION = 8
+SUPPORTED_SCHEMA_VERSION = 9
 _READINESS_TABLES = frozenset(
     {
         "schema_migrations",
@@ -39,10 +39,16 @@ _READINESS_TABLES = frozenset(
         "requests",
         "follow_generations",
         "follow_batches",
+        # Explicit bounded runtime usage authorization (ADR 0004,
+        # migration 0009): chat insists on these tables before
+        # serving, so a store upgraded only to 8 stays not ready
+        # instead of failing allowance checks per request.
+        "runtime_allowance",
+        "runtime_holds",
     }
 )
 #: Per-table columns the current query/export paths actually require. A
-#: store that reports migration MAX 8 but misses any of these (a
+#: store that reports migration MAX 9 but misses any of these (a
 #: spoofed MAX row or a partially applied upgrade) is still not ready:
 #: without the check it would report ready and then fail analytic
 #: queries. This stays a cheap explicit read-only schema check (table
@@ -73,6 +79,19 @@ _READINESS_COLUMNS = {
     # Stored host aliases feeding internal/external referrer classification.
     "log_sources": frozenset({"allowed_hosts"}),
     "follow_generations": frozenset({"import_id", "consumed_sha256"}),
+    # Runtime allowance grant/hold columns the chat path relies on.
+    "runtime_allowance": frozenset(
+        {
+            "version",
+            "max_investigations",
+            "max_requests",
+            "max_micro_usd",
+            "used_investigations",
+            "used_requests",
+            "used_micro_usd",
+            "held_micro_usd",
+        }
+    ),
 }
 
 

@@ -14,6 +14,7 @@ from pathlib import Path
 import pytest
 from starlette.testclient import TestClient
 
+from app.ai import allowance as allowance_mod
 from app.ai import budget
 from app.ai import egress as egress_mod
 from app.ai import smoke as smoke_mod
@@ -52,6 +53,14 @@ def _seed(tmp_path, monkeypatch):
     (root / "access.log").write_bytes(FIXTURE.read_bytes())
     db = tmp_path / "t8.sqlite3"
     migrate(db)
+    # Explicit operator grant for mocked-transport native runs (ADR 0004);
+    # zero network is still enforced by the injected mock transports.
+    allowance_mod.grant(
+        db,
+        max_investigations=50,
+        max_requests=500,
+        max_micro_usd=budget.usd_to_micro(50.0),
+    )
     with writer_transaction(db) as conn:
         create_admin_user(conn, username="admin", password_hash=hash_password("s3cret-pw"))
     run_import(
@@ -521,6 +530,22 @@ def test_real_run_entry_offline_with_temporary_fake_key(tmp_path, monkeypatch):
 
     module = _load_runner()
     _entry_env(monkeypatch)
+    # Explicit operator grant for the offline stub run (ADR 0004): the
+    # preflight seeds the known fixture first, then the grant is
+    # created like the production `ai-allowance-grant` step. No
+    # network is used: the stub transport below is the only backend.
+    module.preflight(
+        tmp_path / "entry.sqlite3",
+        tmp_path / "staging-logs",
+        _all_rules(),
+        HMAC_KEY,
+    )
+    allowance_mod.grant(
+        tmp_path / "entry.sqlite3",
+        max_investigations=3,
+        max_requests=12,
+        max_micro_usd=budget.usd_to_micro(1.0),
+    )
     key_file = tmp_path / "fake.key"
     key_file.write_text("temporary-fake-key-never-real\n")
     args = argparse.Namespace(

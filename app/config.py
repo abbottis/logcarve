@@ -54,6 +54,18 @@ class Settings(BaseSettings):
     model_data_policy_verified: bool = False
     model_allow_real_data: bool = False
     model_api_key: SecretStr = SecretStr("")
+    # DB-backed backend AI settings (ADR 0004) overlay these env
+    # defaults; the env contract stays backwards-compatible for the
+    # current Meta setup. New providers use catalog-fixed native
+    # endpoints (no env URL surface) plus their own key env vars.
+    ai_settings_key: SecretStr = SecretStr("")
+    openai_api_key: SecretStr = SecretStr("")
+    gemini_api_key: SecretStr = SecretStr("")
+    anthropic_api_key: SecretStr = SecretStr("")
+    anthropic_workspace_id: str = ""
+    # Operator trusted assertion that imported source data is
+    # synthetic (never inferred from client questions or URLs).
+    ai_synthetic_source: bool = False
     # Real Responses endpoint. Runtime default is EMPTY on purpose:
     # the operator supplies the allowlisted URL through validated
     # configuration; no fallback URL lives in application code.
