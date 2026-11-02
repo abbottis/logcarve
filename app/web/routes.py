@@ -1189,6 +1189,13 @@ def _base_context(request: Request, params, site: str, sites, path: str, rules=N
         "canonical_url": _canonical(path, params, site),
         "nav_query": _nav_query(params, site),
         "fragment_url": None,
+        # Filter-bar capabilities per page: saved views target data
+        # pages only (see SAVED_VIEW_PATHS) and auto-refresh polls the
+        # report fragment; pages without either support hide the
+        # inoperative controls while keeping scope controls and no
+        # implicit model call.
+        "page_supports_save": True,
+        "page_supports_refresh": True,
         "page_url": lambda path, **overrides: _page_url(path, params, site, **overrides),
         "evidence_url": _evidence_url,
         "matchers": {k: v for k, v in params["matchers"].items() if v is not None},
@@ -2076,6 +2083,10 @@ def _ask_context(request: Request, conn, params):
             "ai_enabled": settings.ai_enabled,
             "starters": starters,
             "form_action": "/ask",
+            # Ask has no saved-view target and no report fragment to
+            # refresh: hide those controls, keep scope controls only.
+            "page_supports_save": False,
+            "page_supports_refresh": False,
         }
     )
     return context, None

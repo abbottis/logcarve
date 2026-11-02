@@ -68,21 +68,28 @@ def build_api(
 
     @app.get("/readyz")
     def readyz(request: Request):
+        from app.api.deps import schema_supported
+
         session = require_admin_session(request)
         if isinstance(session, JSONResponse):
             return session
         try:
             conn = connect(app.state.db_path, read_only=True)
             try:
-                row = conn.execute("SELECT MAX(version) FROM schema_migrations").fetchone()
-                conn.execute("SELECT 1 FROM sites LIMIT 1").fetchall()
+                supported, version = schema_supported(conn)
+                if supported:
+                    conn.execute("SELECT 1 FROM sites LIMIT 1").fetchall()
             finally:
                 conn.close()
         except Exception:  # noqa: BLE001 - readiness maps any DB failure to 503
             return error_response(
                 503, "not_ready", "The database is not ready.", request.state.request_id
             )
-        return {"ready": True, "database": "ok", "schema_version": row[0]}
+        if not supported:
+            return error_response(
+                503, "not_ready", "The database is not ready.", request.state.request_id
+            )
+        return {"ready": True, "database": "ok", "schema_version": version}
 
     app.include_router(routes_analytics.router)
     app.include_router(routes_export.router)

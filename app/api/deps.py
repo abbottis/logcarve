@@ -23,6 +23,61 @@ from app.db.database import connect
 SESSION_COOKIE = "lc_admin_session"
 CSRF_HEADER = "X-CSRF-Token"
 
+#: Supported on-disk schema for serving traffic. The migration MAX
+#: version plus the structural gates newer queries require: a database
+#: that reports a current MAX row but misses gated structures (spoofed
+#: or partially applied upgrade) is still not ready. This is a cheap
+#: explicit preflight (version row, table list, two column sets), never
+#: a full integrity scan, and it creates no files.
+SUPPORTED_SCHEMA_VERSION = 8
+_READINESS_TABLES = frozenset(
+    {
+        "schema_migrations",
+        "sites",
+        "log_sources",
+        "imports",
+        "requests",
+        "follow_generations",
+        "follow_batches",
+    }
+)
+_READINESS_COLUMNS = {
+    "requests": frozenset({"country_code", "geo_status"}),
+    "follow_generations": frozenset({"import_id", "consumed_sha256"}),
+}
+
+
+def schema_supported(conn: sqlite3.Connection) -> tuple[bool, int | None]:
+    """Check the store against the supported schema (read-only, cheap).
+
+    Returns ``(supported, version)`` where ``version`` is the reported
+    migration MAX (or ``None`` when unreadable). Table names are module
+    constants, never request input.
+    """
+    try:
+        row = conn.execute("SELECT MAX(version) FROM schema_migrations").fetchone()
+    except sqlite3.Error:
+        return False, None
+    version = row[0] if row else None
+    if not isinstance(version, int) or version != SUPPORTED_SCHEMA_VERSION:
+        return False, version if isinstance(version, int) else None
+    try:
+        tables = {
+            row[0]
+            for row in conn.execute(
+                "SELECT name FROM sqlite_master WHERE type = 'table'"
+            ).fetchall()
+        }
+        if not _READINESS_TABLES <= tables:
+            return False, version
+        for table, required in _READINESS_COLUMNS.items():
+            have = {info[1] for info in conn.execute(f"PRAGMA table_info({table})").fetchall()}
+            if not required <= have:
+                return False, version
+    except sqlite3.Error:
+        return False, version
+    return True, version
+
 
 class StoreUnavailable(RuntimeError):
     """The credential store cannot be read (missing, corrupt or uninitialized)."""
