@@ -199,7 +199,16 @@ def test_login_and_header_wordmark(page, brand_base, observed, theme, width):
     # Surrounding navigation controls stay usable in both layouts.
     assert page.locator("#theme-select").is_visible()
     assert page.get_by_role("button", name="Log out").count() == 1
-    assert page.get_by_role("link", name="Overview").first.count() >= 1
+    overview = page.get_by_role("link", name="Overview").first
+    if width < 1024:
+        nav_button = page.locator("#nav-button")
+        nav_button.click()
+        assert nav_button.get_attribute("aria-expanded") == "true"
+        assert overview.is_visible()
+        page.keyboard.press("Escape")
+        assert nav_button.get_attribute("aria-expanded") == "false"
+    else:
+        assert overview.is_visible()
     assert page.evaluate("document.documentElement.scrollWidth") <= width
     assert observed["errors"] == [], observed["errors"]
     for url in observed["requests"]:

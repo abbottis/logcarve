@@ -3125,3 +3125,41 @@ login works) and reported three small corrections:
 
 UI-01/UI-02/UI-03 mapping is unchanged; UI-03 browser
 confirmation stays root-owned as before.
+
+## 2026-11-02 — Branding slice closeout (ACTUAL root-run results)
+
+Test/doc-only commit on the same feature branch from clean
+`cb57a9f`. Application source is unchanged by this commit
+(root packages `cb57a9f`); only
+`tests/e2e/test_branding.py` and this log changed. Same
+scope and protections (sole writer, exact Muse Spark 1.3
+Contributor / medium, sandbox + approval ON, no agents, no
+app/source/config changes, no private parent material, no
+model calls, no full suites, no build, no push/deployment,
+no Chromium from this shell).
+
+Narrow-viewport repair: widths below 1024 click `#nav-button`,
+assert `aria-expanded=true`, assert the Overview link is
+visible, then close and assert `aria-expanded=false`.
+Desktop asserts the visible Overview link directly. The
+close uses `Escape` (the app's own overlay-dismiss path,
+`assets/src/js/nav.js:37-41`) because a second click on the
+menu button is intercepted by the opened side-nav overlay —
+a harness interaction issue, not a product failure. All
+prior assertions/protections (logo, fonts, glyph bounds,
+theme, login, overflow, console-error and local-request
+guards) are preserved.
+
+| Check | Result | Evidence |
+| --- | --- | --- |
+| Focused branding E2E, exact 6 cases (root-run) | PASS | `tests/e2e/test_branding.py::test_login_and_header_wordmark`: 6 passed in 4.85s; 1 unrelated upstream pytest-playwright `base_url` fixture deprecation warning |
+| Local Docker preview (root-run) | PASS | Fresh tracked build, image `sha256:4124314a739e27d022ea4f408b349ff15b14ce6d14792c791b21f37e1f016ffa` (`linux/arm64`), `http://127.0.0.1:8080`, user 10001, AI disabled, model key empty, 120 events, 17/17 preservation checks, 12 visual cases (1440/390/320 x light/dark), login/logout PASS, SVG glyph bounds PASS, no page overflow, no console errors, all browser requests local |
+| `ruff check` on repaired test (this shell) | PASS | `UV_CACHE_DIR=/tmp/uv-cache .venv/bin/python -m ruff check tests/e2e/test_branding.py`: all checks passed |
+
+This entry supersedes the earlier pending coordinator rows
+for the repaired focused E2E and the actual-image visual
+check (recorded BLOCKED/NOT RUN above). Prior failed runs
+are superseded: SVG `inner_text`, session reuse, collapsed
+nav role query, second click intercepted by the overlay
+(corrected to `Escape`, no app change). No further checks
+claimed.
