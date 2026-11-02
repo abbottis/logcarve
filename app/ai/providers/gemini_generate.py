@@ -70,7 +70,7 @@ SIGNATURE_MAX_ITEMS = 8
 #: charset plus length, never inspected or reconstructed.
 _SIGNATURE_RE = re.compile(r"[A-Za-z0-9+/=_-]+\Z")
 
-#: Provider FunctionCall.id bounds (optional server unique ID, opaque).
+#: Provider FunctionCall.id bounds (required server unique ID, opaque).
 CALL_ID_MAX_LEN = 64
 
 
@@ -351,12 +351,15 @@ def parse_response(
 
     ``thoughtSignature`` is read as a SIBLING of ``functionCall`` on
     the Part (its documented native position); a signature nested
-    inside ``functionCall`` is rejected as malformed. A provided
-    ``FunctionCall.id`` is preserved verbatim for replay correlation
-    (only an absent id falls back to a positional local id, which the
-    matching ``FunctionResponse.id`` then echoes). A provided
-    ``modelVersion`` must equal the verified expected model exactly:
-    mismatches (including prefix-style near matches) are rejected.
+    inside ``functionCall`` is rejected as malformed. Gemini 3 always
+    returns a unique ``FunctionCall.id`` with every functionCall, so a
+    missing, null, empty or otherwise invalid id fails closed instead
+    of inventing a positional substitute that could repeat across
+    turns and never echoes a real server id. A provided id is
+    preserved verbatim for replay correlation, and the matching
+    ``FunctionResponse.id`` echoes it. A provided ``modelVersion``
+    must equal the verified expected model exactly: mismatches
+    (including prefix-style near matches) are rejected.
     """
     if not isinstance(expected_model, str) or not expected_model:
         raise ProviderError("The configured model is missing.")
@@ -385,7 +388,7 @@ def parse_response(
     texts: list[str] = []
     calls: list[ToolCall] = []
     signatures = 0
-    for index, part in enumerate(parts):
+    for part in parts:
         if not isinstance(part, dict):
             raise ProviderError("The provider answer is malformed.")
         if "text" in part:
@@ -403,13 +406,10 @@ def parse_response(
             args = call.get("args", {})
             if not isinstance(name, str) or not name or not isinstance(args, dict):
                 raise ProviderError("A provider tool call is malformed.")
-            provided_id = call.get("id", "")
-            if provided_id not in ("", None):
-                if not isinstance(provided_id, str) or not 1 <= len(provided_id) <= CALL_ID_MAX_LEN:
-                    raise ProviderError("A provider tool call is malformed.")
-                call_id = provided_id
-            else:
-                call_id = f"gemini-{index}"
+            provided_id = call.get("id")
+            if not isinstance(provided_id, str) or not 1 <= len(provided_id) <= CALL_ID_MAX_LEN:
+                raise ProviderError("A provider tool call is malformed.")
+            call_id = provided_id
             metadata: dict = {}
             signature = part.get("thoughtSignature")
             if signature is not None:

@@ -2,7 +2,8 @@
 
 Native ``POST https://api.openai.com/v1/responses`` with
 ``Authorization: Bearer`` (key in header, never in URL), ``store:
-false`` and explicit ``call_id`` correlation. Stateless: every turn
+false``, explicit ``strict: false`` on the direct function tools
+(deliberate non-strict opt-out) and explicit ``call_id`` correlation. Stateless: every turn
 carries the user message plus the prior typed
 ``function_call``/``function_call_output`` pairs the service hands
 over. No ``previous_response_id``, no replayed reasoning items, no
@@ -105,6 +106,13 @@ def build_dispatch_body(
     Decoded values are egress-validated BEFORE ``arguments`` and
     ``output`` are JSON-encoded, so forbidden content cannot hide
     behind escapes.
+
+    The direct function tools carry explicit ``strict: false``: the
+    Responses API otherwise attempts strict schema normalization and
+    only falls back to non-strict when needed, so omission is not a
+    non-strict default. The flag is set on per-dispatch copies —
+    the shared tool schemas (also used by Meta/Gemini/Claude) are
+    never mutated.
     """
     from app.ai.egress import check_wire_values
 
@@ -118,6 +126,19 @@ def build_dispatch_body(
         },
         context="provider dispatch",
     )
+    if not isinstance(tools, list) or not tools:
+        raise ProviderError("The provider dispatch tools are malformed.")
+    wire_tools: list = []
+    for tool in tools:
+        if (
+            not isinstance(tool, dict)
+            or tool.get("type") != "function"
+            or not isinstance(tool.get("name"), str)
+            or not tool.get("name")
+            or not isinstance(tool.get("parameters"), dict)
+        ):
+            raise ProviderError("The provider dispatch tools are malformed.")
+        wire_tools.append({**tool, "strict": False})
     items: list = [
         {
             "type": "message",
@@ -150,7 +171,7 @@ def build_dispatch_body(
         "model": model,
         "instructions": instructions,
         "input": items,
-        "tools": tools,
+        "tools": wire_tools,
         "reasoning": {"effort": REASONING_EFFORT},
         "store": False,
         "max_output_tokens": max_output_tokens,
@@ -178,6 +199,19 @@ def validate_body(wire: bytes, *, expected_model: str) -> None:
         raise ProviderError("The provider dispatch must be stateless.")
     if body.get("reasoning") != {"effort": REASONING_EFFORT}:
         raise ProviderError("The provider dispatch reasoning profile is not allowlisted.")
+    wire_tools = body.get("tools")
+    if not isinstance(wire_tools, list) or not wire_tools:
+        raise ProviderError("The provider dispatch tools are malformed.")
+    for tool in wire_tools:
+        if (
+            not isinstance(tool, dict)
+            or tool.get("type") != "function"
+            or not isinstance(tool.get("name"), str)
+            or not tool.get("name")
+            or not isinstance(tool.get("parameters"), dict)
+            or tool.get("strict") is not False
+        ):
+            raise ProviderError("The provider dispatch tools are malformed.")
 
 
 def cost_micro_usd(*, input_tokens: int, cached_tokens: int, output_tokens: int) -> int:

@@ -2,6 +2,17 @@
 
 ## Where things stand
 
+> Current AI state (2 Nov 2026, supersedes older "AI-off" lines below):
+> owner-authorized Meta Standard synthetic investigation completed with
+> bounded PASS (see first entry below and `docs/verification.md`).
+> The tracked demo still defaults to AI off; the owner retains the one
+> remaining authorized investigation for their own video. No new live,
+> paid, or provider calls are authorized from this shell, and the
+> other three providers' account live checks remain NOT RUN. Older
+> entries saying "AI off" / "demo stays AI-off" / "AI-02 INCOMPLETE"
+> are preserved history from before that live run — they are not
+> current instructions.
+
 - Meta live final receipt 2 Nov 2026 (this checkout, docs-only, no new action): application source frozen at `8daf28c48b4823fa312dc06003672806f57f4b28` on `feature/logwerk-parity-ready-2026-11-02`. Coordinator-reported actual local evidence per `artifacts/task-inputs/ai-live-final-receipt.json`: Meta local enabled (`muse-spark-1.3` Standard, synthetic-only, image `sha256:c330b129bc8986dfff8da0bbc5fe843573a5cfc3b8b9591d0432fcc455d3c3b5`); owner-authorized additional investigation genuinely completed — `POST /api/v1/chat/ask` HTTP 200 with visible actual Meta answer and seven evidence links (`b1c8550a-tc1` … `b1c8550a-tc7`), 3 provider requests / 56176 micro-USD this investigation; independent scoped external API match (28 HTTP 404, 4992 bytes). Recorder harness FAIL is a harness artifact (waited on preceding 403 CSRF `response.json()`), NOT app failure; raw 200 JSON NOT captured, evidence-link click NOT completed. Screenshot + full original browser recording saved; first 36 s exported as `artifacts/presentation/LogCarve-Meta-Echtlauf-36s.mp4`. Current bounded real completion now PASS by HTTP/browser/ledger/independent-API evidence; previous failures preserved as history; no blanket release/QA01 approval. Allowance used 2 / 4 / 76974 micro-USD, remaining 1 / 8 / 923026, held 0; caps 3 / 12 / 1000000 unchanged; historical T8 unchanged. Other-provider account live calls NOT RUN; x86-64 NOT RUN. Prior full-suite (1374 passed / 2 skipped) and browser evidence retained without re-running. See `docs/verification.md` final entry.
 - LogWerk-parity closeout 2 Nov 2026: all authorized implementation is
   complete and ACTUAL local demo activation has occurred at clean code

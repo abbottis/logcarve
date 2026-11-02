@@ -244,3 +244,49 @@ def test_redirects_are_refused_by_shared_transport():
     assert opener.open is not None
     handler = _http._NoRedirect()
     assert handler.redirect_request(None, None, 302, None, None, None) is None
+
+
+def test_wire_tools_carry_explicit_strict_false_without_mutating_shared():
+    from app.ai.tools.definitions import response_tool_definitions
+
+    shared = response_tool_definitions()
+    body = build_dispatch_body(
+        model="gpt-6-luna",
+        max_output_tokens=2048,
+        instructions="sys",
+        user_text="hi",
+        exchanges=[],
+        tools=shared,
+    )
+    assert body["tools"], "wire must carry the bounded tools"
+    for tool in body["tools"]:
+        assert tool["strict"] is False
+    # The shared catalog schemas (also used by Meta/Gemini/Claude)
+    # are untouched: no strict key leaks into them.
+    assert all("strict" not in tool for tool in shared)
+    wire = serialize_body(body)
+    validate_body(wire, expected_model="gpt-6-luna")
+
+
+def test_validate_body_rejects_tampered_strict_profile():
+    body = build_dispatch_body(
+        model="gpt-6-luna",
+        max_output_tokens=2048,
+        instructions="sys",
+        user_text="hi",
+        exchanges=[],
+        tools=_tools(),
+    )
+    wire = json.loads(serialize_body(body).decode("utf-8"))
+
+    def _encode(mutated):
+        return json.dumps(mutated, sort_keys=True, separators=(",", ":")).encode("utf-8")
+
+    omitted = json.loads(json.dumps(wire))
+    del omitted["tools"][0]["strict"]
+    with pytest.raises(ProviderError):
+        validate_body(_encode(omitted), expected_model="gpt-6-luna")
+    strict_true = json.loads(json.dumps(wire))
+    strict_true["tools"][0]["strict"] = True
+    with pytest.raises(ProviderError):
+        validate_body(_encode(strict_true), expected_model="gpt-6-luna")

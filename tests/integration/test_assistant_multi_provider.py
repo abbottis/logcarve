@@ -145,6 +145,17 @@ def _scripted_transport(provider, calls, first_payload=None):
             assert payload["model"] == model
             assert payload["store"] is False
             assert "previous_response_id" not in payload
+            if provider == "openai":
+                # Deliberate non-strict opt-out: explicit false on every
+                # direct function tool (omission is not the default).
+                assert payload["tools"], "openai wire must carry tools"
+                for tool in payload["tools"]:
+                    assert tool["strict"] is False
+            else:
+                # The shared catalog schemas are never mutated by the
+                # OpenAI wire builder: Meta tools carry no strict key.
+                for tool in payload["tools"]:
+                    assert "strict" not in tool
         elif provider == "gemini":
             assert headers["x-goog-api-key"].startswith("synthetic")
             assert "Authorization" not in headers
@@ -719,3 +730,72 @@ def test_native_wire_oversize_still_blocked(menv, no_network):
     assert excinfo.value.code == "output_limit_reached"
     assert "prompt bound" in str(excinfo.value)
     assert len(calls) >= 2
+
+
+def test_native_http_failure_keeps_analytics_and_caps(menv, no_network):
+    """A native 503 through the real HTTP helper fails the run closed.
+
+    The OpenAI adapter dispatches through the genuine
+    ``_http.post_json`` over a fake urllib opener (no sockets, no
+    network, no real key) that answers HTTP 503 once. The service
+    reports ``provider_unavailable`` with no leaked holds, global caps
+    stay unchanged, and a follow-up scripted investigation on the same
+    store still completes with evidence — the deterministic analytics
+    layer is independent of the provider outcome.
+    """
+    import urllib.error
+
+    from app.ai.providers import _http
+
+    model, _ = PROVIDERS["openai"]
+    endpoint = registry.endpoint_for("openai", model)
+    opener_calls = []
+
+    class _FailingOpener:
+        def open(self, request, timeout=None):
+            opener_calls.append(request.full_url)
+            raise urllib.error.HTTPError(request.full_url, 503, "synthetic overloaded", {}, None)
+
+    def failing_transport(
+        *, url, headers, body, timeout_s, max_response_bytes, max_wire_bytes=None
+    ):
+        return _http.post_json(
+            url=url,
+            headers=headers,
+            body=body,
+            timeout_s=timeout_s,
+            max_response_bytes=max_response_bytes,
+            max_wire_bytes=max_wire_bytes,
+            opener_factory=lambda context: _FailingOpener(),
+        )
+
+    before = allowance_mod.status(menv["db"])
+    adapter = OpenAIResponsesAdapter(
+        endpoint=endpoint,
+        model=model,
+        api_key="synthetic-test-key",
+        transport=failing_transport,
+    )
+    with pytest.raises(InvestigationError) as excinfo:
+        _investigate(menv, "openai", adapter)
+    assert excinfo.value.code == "provider_unavailable"
+    assert "synthetic-test-key" not in str(excinfo.value)
+    # Exactly one native attempt: no automatic retries at any layer.
+    assert opener_calls == [registry.endpoint_for("openai", model)]
+
+    after = allowance_mod.status(menv["db"])
+    assert after["max_investigations"] == before["max_investigations"]
+    assert after["max_requests"] == before["max_requests"]
+    assert after["max_micro_usd"] == before["max_micro_usd"]
+    assert after["held_micro_usd"] == 0
+
+    # Deterministic analytics and the allowance ledger still serve:
+    # the same store completes a scripted follow-up with evidence.
+    calls = []
+    followup = _investigate(
+        menv, "openai", _adapter("openai", _scripted_transport("openai", calls))
+    )
+    assert followup.tool_calls == 1
+    assert followup.evidence, "scripted follow-up must carry evidence links"
+    final = allowance_mod.status(menv["db"])
+    assert final["held_micro_usd"] == 0

@@ -13,7 +13,7 @@ Self-hosted web access-log analytics: reproducible traffic, crawler, SEO and sec
 
 ## What it is
 
-LogCarve imports NCSA Combined access logs (Nginx and Apache), including measured-timing presets, gzip archives and bounded administrator custom formats, normalizes them locally into SQLite, and serves one deterministic analytics layer to a browser dashboard, an authenticated read-only REST API and a small stdlib client. The dashboard, the API and the client share the same numbers and work with chat disabled, no model key and no Internet; the optional server-side Meta assistant uses that same layer when enabled.
+LogCarve imports NCSA Combined access logs (Nginx and Apache), including measured-timing presets, gzip archives and bounded administrator custom formats, normalizes them locally into SQLite, and serves one deterministic analytics layer to a browser dashboard, an authenticated read-only REST API and a small stdlib client. The dashboard, the API and the client share the same numbers and work with chat disabled, no model key and no Internet; the optional server-side AI assistant (Meta, OpenAI, Google Gemini, or Anthropic Claude — see [AI providers](docs/ai-providers.md)) uses that same layer when enabled.
 
 LogCarve covers one site and one configured source at a time. Hostname and alias filtering selects within that site; it is not a multi-site platform.
 
@@ -100,18 +100,20 @@ Start here:
 - [Deployment](docs/deployment.md) — hosts, mounts, secrets, offline behavior.
 - [Log formats](docs/log-formats.md) — Combined, timing presets, gzip, custom mappings.
 - [Privacy and data egress](docs/privacy-and-security.md) — pseudonymization, masking, model boundaries.
+- [AI providers](docs/ai-providers.md) — the four supported providers, backend Settings onboarding, allowance, and troubleshooting.
 - [Security](docs/security.md) — auth, tokens, CSRF, review guidance.
 - [External API](docs/external-api.md) — endpoints, tokens, export contract.
 - [Backup and restore](docs/backup-restore.md) — online backups, retention.
 
 ## Configuration at a glance
 
-All product settings come from the environment; see [.env.example](.env.example) for the full contract with no real secrets inside:
+Host and storage settings come from the environment; see [.env.example](.env.example) for the full contract with no real secrets inside. Provider selection, keys, and data policy live in the backend Settings page (see [AI providers](docs/ai-providers.md)):
 
 - `LOGCARVE_LOG_PATHS`, `DATABASE_PATH`, `DEFAULT_TIMEZONE`, `RETENTION_DAYS` — where logs are read and state is kept.
 - `SESSION_SECRET`, `HMAC_KEY` — distinct server secrets for sessions and address pseudonymization.
 - `ORIGINAL_IP_KEY` — separate key for the optional encrypted original-IP store; empty keeps originals uncaptured.
 - `GEOIP_DB_PATH` — optional path of the operator-mounted genuine country database; empty keeps lookups honestly `unavailable`.
+- `AI_SETTINGS_KEY` — dedicated key encrypting the per-provider model keys stored via backend Settings; never shared with other secrets.
 - `AI_ENABLED=false` with an empty `MODEL_API_KEY` — the safe default; enabling chat additionally requires a verified provider, data mode, budget settings and an explicit runtime usage grant (no grant exists initially).
 
 ## Repository map
@@ -124,7 +126,7 @@ All product settings come from the environment; see [.env.example](.env.example)
 
 ## Optional assistant
 
-An internal assistant is available server-side from Meta, OpenAI, Google Gemini or Anthropic Claude when explicitly enabled with your own account, API access, data mode and usage limits. Providers and models are configured in the backend Settings page with per-provider encrypted keys, explicit data-policy acknowledgment and a separate explicit runtime usage grant. It uses bounded read-only analytics tools and reports evidence IDs, filters, coverage and limitations with every finding. The dashboard and the API work fully without it, and the synthetic demo keeps it disabled. Model failure never takes deterministic analytics offline.
+An internal assistant is available server-side from Meta, OpenAI, Google Gemini or Anthropic Claude when explicitly enabled with your own account, API access, data mode and usage limits. Providers and models are configured in the backend Settings page with per-provider encrypted keys, explicit data-policy acknowledgment and a separate explicit runtime usage grant. It uses bounded read-only analytics tools and reports evidence IDs, filters, coverage and limitations with every finding. The dashboard and the API work fully without it, and the synthetic demo keeps it disabled. Model failure never takes deterministic analytics offline. Setup, per-provider policy, and troubleshooting are covered in the [AI providers guide](docs/ai-providers.md).
 
 ## Documentation
 

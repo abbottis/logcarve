@@ -87,6 +87,9 @@ Safe credential onboarding:
   creates one, and settings saves/restarts never reset it. The
   historical T8 smoke ledger is preserved untouched alongside it.
 
+Operator onboarding, provider tiers, troubleshooting, and live-status
+notes are collected in the [AI providers guide](ai-providers.md).
+
 ## Demo upgrade via the non-root image (coordinator runs, Muse never executes)
 
 The runtime image copies `app/` + `config/` but not `scripts/`, so the

@@ -129,7 +129,7 @@ def test_dispatch_body_native_stateless_with_signature_replay():
             {
                 "calls": [
                     {
-                        "call_id": "gemini-0",
+                        "call_id": "call_1_0",
                         "name": "get_summary",
                         "arguments": {"limit": 5},
                         "metadata": {"thoughtSignature": "opaque-sig-1"},
@@ -137,7 +137,7 @@ def test_dispatch_body_native_stateless_with_signature_replay():
                 ],
                 "outputs": [
                     {
-                        "call_id": "gemini-0",
+                        "call_id": "call_1_0",
                         "name": "get_summary",
                         "evidence": {
                             "tool_call_id": "abc-tc1",
@@ -171,10 +171,10 @@ def test_dispatch_body_native_stateless_with_signature_replay():
     assert replayed["thoughtSignature"] == "opaque-sig-1"
     assert "thoughtSignature" not in replayed["functionCall"]
     # The provided call correlation is preserved and echoed by the response.
-    assert replayed["functionCall"]["id"] == "gemini-0"
+    assert replayed["functionCall"]["id"] == "call_1_0"
     assert replayed["functionCall"]["args"] == {"limit": 5}
     echoed = body["contents"][2]["parts"][0]["functionResponse"]
-    assert echoed["id"] == "gemini-0"
+    assert echoed["id"] == "call_1_0"
     wire = serialize_body(body)
     assert len(wire) <= MAX_WIRE_BYTES
     validate_body(wire, expected_model=MODEL)
@@ -191,7 +191,7 @@ def test_dispatch_rejects_forged_signature_shapes():
                 {
                     "calls": [
                         {
-                            "call_id": "gemini-0",
+                            "call_id": "call_1_0",
                             "name": "get_summary",
                             "arguments": {},
                             "metadata": {"thoughtSignature": 123},
@@ -218,7 +218,7 @@ def test_dispatch_requires_first_call_part_signature():
                 {
                     "calls": [
                         {
-                            "call_id": "gemini-0",
+                            "call_id": "call_1_0",
                             "name": "get_summary",
                             "arguments": {},
                             "metadata": {},
@@ -361,6 +361,48 @@ def test_parse_response_rejects_truncated_and_refused():
                     "candidates": [dict(base_candidate, finishReason=reason)],
                     "usageMetadata": usage,
                 },
+                expected_model=MODEL,
+                max_output_tokens=2048,
+                input_upper=5000,
+            )
+
+
+def test_parse_response_rejects_missing_null_empty_invalid_call_id():
+    # Gemini 3 always returns a unique FunctionCall.id: a missing,
+    # null, empty or otherwise invalid id fails closed instead of
+    # inventing a positional substitute that could repeat across
+    # turns. Exact provided IDs are still preserved (see the
+    # signature test above).
+    base_usage = {
+        "promptTokenCount": 10,
+        "candidatesTokenCount": 1,
+        "totalTokenCount": 11,
+    }
+
+    def payload_with(call):
+        return {
+            "responseId": "resp_1",
+            "modelVersion": MODEL,
+            "candidates": [
+                {
+                    "finishReason": "STOP",
+                    "content": {"role": "model", "parts": [{"functionCall": call}]},
+                }
+            ],
+            "usageMetadata": dict(base_usage),
+        }
+
+    cases = [
+        {"name": "get_summary", "args": {}},  # missing id
+        {"name": "get_summary", "args": {}, "id": None},
+        {"name": "get_summary", "args": {}, "id": ""},
+        {"name": "get_summary", "args": {}, "id": 123},
+        {"name": "get_summary", "args": {}, "id": "x" * 65},
+    ]
+    for call in cases:
+        with pytest.raises(ProviderError):
+            parse_response(
+                payload_with(call),
                 expected_model=MODEL,
                 max_output_tokens=2048,
                 input_upper=5000,
