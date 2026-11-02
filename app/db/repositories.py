@@ -233,27 +233,32 @@ def finish_import(
 
 
 #: Core event columns (legacy, preserved) plus nullable T1b enrichment
-#: metadata. ``duration_ms`` stays legacy (Combined never supplies it and
-#: reprocessing must never overwrite it); measured timings live in
+#: metadata and T5a offline-country enrichment. ``duration_ms`` stays
+#: legacy (Combined never supplies it and reprocessing must never
+#: overwrite it); measured timings live in
 #: ``request_time_ms``/``upstream_time_ms``/``upstream_count`` with
-#: ``None`` meaning absent, and ``policy_version`` records the parser
-#: policy that produced the enrichment (NULL on legacy rows).
+#: ``None`` meaning absent, ``policy_version`` records the parser
+#: policy that produced the enrichment (NULL on legacy rows), and
+#: ``country_code``/``geo_source``/``geo_release``/``geo_status`` carry
+#: the safe offline-country outcome (NULL/NULL/NULL/NULL on legacy
+#: rows until a reprocess enriches them; never an original address).
 _INSERT_EVENT = (
     "INSERT INTO requests (import_id, site_id, source_id, file_fingerprint,"
     " byte_offset, line_number, ts_utc, method, path, status, bytes,"
     " referer_host, user_agent, client_pseudonym, duration_ms,"
     " format_id, http_version, server_host, referer_scheme, referer_path,"
     " cache_status, mime_type, tls_protocol, request_time_ms, upstream_time_ms,"
-    " upstream_count, policy_version)"
+    " upstream_count, policy_version,"
+    " country_code, geo_source, geo_release, geo_status)"
     " VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?,"
-    " ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"
+    " ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"
     " ON CONFLICT (source_id, file_fingerprint, byte_offset) DO NOTHING"
 )
 
 
 def event_row_width() -> int:
     """Number of bound values one event row carries (insert contract)."""
-    return 27
+    return 31
 
 
 #: Columns only reprocessing may update; core identity stays read-only.
@@ -270,13 +275,18 @@ _METADATA_COLUMNS = (
     "upstream_time_ms",
     "upstream_count",
     "policy_version",
+    "country_code",
+    "geo_source",
+    "geo_release",
+    "geo_status",
 )
 
 _UPDATE_METADATA = (
     "UPDATE requests SET format_id = ?, http_version = ?, server_host = ?,"
     " referer_scheme = ?, referer_path = ?, cache_status = ?, mime_type = ?,"
     " tls_protocol = ?, request_time_ms = ?, upstream_time_ms = ?,"
-    " upstream_count = ?, policy_version = ? WHERE id = ?"
+    " upstream_count = ?, policy_version = ?,"
+    " country_code = ?, geo_source = ?, geo_release = ?, geo_status = ? WHERE id = ?"
 )
 
 
@@ -284,7 +294,8 @@ _UPDATE_METADATA_GUARDED = (
     "UPDATE requests SET format_id = ?, http_version = ?, server_host = ?,"
     " referer_scheme = ?, referer_path = ?, cache_status = ?, mime_type = ?,"
     " tls_protocol = ?, request_time_ms = ?, upstream_time_ms = ?,"
-    " upstream_count = ?, policy_version = ? WHERE id = ?"
+    " upstream_count = ?, policy_version = ?,"
+    " country_code = ?, geo_source = ?, geo_release = ?, geo_status = ? WHERE id = ?"
     " AND site_id = ? AND source_id = ? AND file_fingerprint = ?"
 )
 
@@ -391,7 +402,8 @@ def fetch_reprocess_page(
             " bytes, referer_host, user_agent, client_pseudonym, duration_ms,"
             " format_id, http_version, server_host, referer_scheme, referer_path,"
             " cache_status, mime_type, tls_protocol, request_time_ms,"
-            " upstream_time_ms, upstream_count, policy_version"
+            " upstream_time_ms, upstream_count, policy_version,"
+            " country_code, geo_source, geo_release, geo_status"
             " FROM requests"
             " WHERE source_id = ? AND file_fingerprint = ? AND site_id = ?"
             " AND byte_offset > ? ORDER BY byte_offset LIMIT ?",

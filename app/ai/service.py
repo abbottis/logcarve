@@ -175,6 +175,7 @@ class ValidatedScope:
     upstream_available: bool | None = None
     timing_min_ms: float | None = None
     timing_max_ms: float | None = None
+    country: str | None = None
 
 
 _TRAFFIC_VALUES = ("all", "browser_like", "claimed_bot", "other_automation", "unknown")
@@ -315,6 +316,7 @@ def validate_scope(
     upstream_available: bool | None = None,
     timing_min_ms: float | None = None,
     timing_max_ms: float | None = None,
+    country: str | None = None,
 ) -> ValidatedScope:
     """Validate the trusted actor/site/source/window/selector contract first.
 
@@ -397,6 +399,16 @@ def validate_scope(
         raise InvestigationError(
             "invalid_request", "The requested timing range contradicts itself."
         )
+    from app.ingestion.geoip import normalize_country_selector
+
+    normalized_country: str | None = None
+    if country is not None:
+        try:
+            normalized_country = normalize_country_selector(country)
+        except ValueError as exc:
+            raise InvestigationError(
+                "invalid_request", "The requested country selector is invalid."
+            ) from exc
     try:
         window = TimeWindow(time_from=time_from, time_to=time_to)
     except ValidationError as exc:
@@ -450,6 +462,7 @@ def validate_scope(
         upstream_available=upstream_available,
         timing_min_ms=timing_min_ms,
         timing_max_ms=timing_max_ms,
+        country=normalized_country,
     )
 
 
@@ -613,6 +626,7 @@ def run_investigation(
     upstream_available: bool | None = None,
     timing_min_ms: float | None = None,
     timing_max_ms: float | None = None,
+    country: str | None = None,
     max_steps: int = MAX_STEPS,
     timeout_s: float = PROVIDER_TIMEOUT_S,
     cancel: threading.Event | None = None,
@@ -686,6 +700,7 @@ def run_investigation(
         upstream_available=upstream_available,
         timing_min_ms=timing_min_ms,
         timing_max_ms=timing_max_ms,
+        country=country,
     )
     try:
         gate.validate_for_real_data(settings)
@@ -795,6 +810,7 @@ def run_investigation(
             upstream_available=scope.upstream_available,
             timing_min_ms=scope.timing_min_ms,
             timing_max_ms=scope.timing_max_ms,
+            country=scope.country,
         )
         if is_real:
             # Real dispatch: decoded body from already-gated values,
@@ -833,6 +849,7 @@ def run_investigation(
                 upstream_available=scope.upstream_available,
                 timing_min_ms=scope.timing_min_ms,
                 timing_max_ms=scope.timing_max_ms,
+                country=scope.country,
             )
             try:
                 body_dict = build_dispatch_body(
@@ -1020,6 +1037,7 @@ def run_investigation(
                         upstream_available=scope.upstream_available,
                         timing_min_ms=scope.timing_min_ms,
                         timing_max_ms=scope.timing_max_ms,
+                        country=scope.country,
                         tool_index=tool_total,
                         investigation_id=investigation_id,
                         observation_time=observed,
@@ -1184,6 +1202,7 @@ def _compose_user_text(
     upstream_available: bool | None = None,
     timing_min_ms: float | None = None,
     timing_max_ms: float | None = None,
+    country: str | None = None,
 ) -> str:
     """User message: scope, question and evidence text (no system prompt)."""
     lines = [
@@ -1214,6 +1233,7 @@ def _compose_user_text(
         f"upstream_available: {'-' if upstream_available is None else str(upstream_available)}",
         f"timing_min_ms: {'-' if timing_min_ms is None else timing_min_ms}",
         f"timing_max_ms: {'-' if timing_max_ms is None else timing_max_ms}",
+        f"country: {country or '-'}",
         f"tools: {', '.join(TOOL_NAMES)}",
         "",
         f"Operator question: {question}",
@@ -1260,6 +1280,7 @@ def _compose_prompt(
     upstream_available: bool | None = None,
     timing_min_ms: float | None = None,
     timing_max_ms: float | None = None,
+    country: str | None = None,
 ) -> str:
     prompt = (
         system_prompt
@@ -1293,6 +1314,7 @@ def _compose_prompt(
             upstream_available=upstream_available,
             timing_min_ms=timing_min_ms,
             timing_max_ms=timing_max_ms,
+            country=country,
         )
     )
     try:
@@ -1484,6 +1506,7 @@ def _execute_bounded_tool(
     upstream_available: bool | None = None,
     timing_min_ms: float | None = None,
     timing_max_ms: float | None = None,
+    country: str | None = None,
     tool_index: int,
     investigation_id: str,
     observation_time: datetime,
@@ -1531,6 +1554,7 @@ def _execute_bounded_tool(
     )
     scoped["timing_min_ms"] = _inherit_narrowing(timing_min_ms, model.get("timing_min_ms"), None)
     scoped["timing_max_ms"] = _inherit_narrowing(timing_max_ms, model.get("timing_max_ms"), None)
+    scoped["country"] = _inherit_narrowing(country, model.get("country"), None)
     tool_call_id = f"{investigation_id[:8]}-tc{tool_index}"
     conn = connect(Path(db_path), read_only=True)
     try:

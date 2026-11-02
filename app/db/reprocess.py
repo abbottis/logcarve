@@ -48,6 +48,12 @@ from app.ingestion.combined import (
     enrichment_policy,
 )
 from app.ingestion.custom import CustomFormat, CustomFormatError
+from app.ingestion.geoip import (
+    GEO_STATUS_UNKNOWN,
+    CountryInfo,
+    CountryLookup,
+    GeoipError,
+)
 from app.ingestion.gzipio import GzipError, GzipLimits
 from app.ingestion.sources import HostFilter, SourceConfig, resolve_source_path
 from app.ingestion.stream import HostSkipped, ImportReport, fingerprint_source, iter_records
@@ -112,8 +118,15 @@ def _core_tuple(record: CombinedRecord) -> tuple:
     )
 
 
-def _metadata_tuple(record: CombinedRecord, policy: str) -> tuple:
-    """New nullable enrichment metadata, in repository column order."""
+def _metadata_tuple(
+    record: CombinedRecord, policy: str, country: CountryInfo | None = None
+) -> tuple:
+    """New nullable enrichment metadata, in repository column order.
+
+    The T5a ``country`` outcome appends the safe ISO code plus
+    source/release/status; ``None`` leaves all four NULL (a legacy row
+    the lookup cannot enrich, e.g. a non-address host).
+    """
     extra = record.extra
     return (
         record.format_id,
@@ -128,6 +141,10 @@ def _metadata_tuple(record: CombinedRecord, policy: str) -> tuple:
         extra.upstream_time_ms if extra is not None else None,
         extra.upstream_count if extra is not None else None,
         policy,
+        country.code if country is not None else None,
+        country.source if country is not None else None,
+        country.release if country is not None else None,
+        country.status if country is not None else None,
     )
 
 
@@ -149,12 +166,19 @@ def run_reprocess(
     autodetect_sample_lines: int = 32,
     capture_originals: bool = False,
     ip_key: object = None,
+    country_lookup: CountryLookup | None = None,
+    geoip_required: bool = False,
 ) -> ReprocessResult:
     """Enrich stored rows from their approved read-only source file.
 
     ``source.format_id`` selects the enrichment grammar (for example an
     extended preset with measured timings). Capture without a valid
-    configured key fails before any write.
+    configured key fails before any write. The T5a offline-country
+    outcome enriches the same way through ``country_lookup`` (an
+    unavailable handle stores fixed ``unavailable`` markers); with
+    ``geoip_required=True`` a missing or unusable database fails
+    before any write with the fixed
+    ``geoip_unavailable:database_required`` code.
     """
     if not hmac_key:
         raise ValueError("hmac_key must be non-empty")
@@ -170,6 +194,9 @@ def run_reprocess(
         raise CustomFormatError("interrupted:custom_invalid")
     if custom_format is not None and source.format_id not in (CUSTOM, custom_format.format_id):
         raise CustomFormatError("interrupted:custom_invalid")
+    lookup = country_lookup if country_lookup is not None else CountryLookup.unavailable()
+    if geoip_required and not lookup.available:
+        raise GeoipError()
     private_key: bytes | None = None
     if capture_originals:
         private_key = _private.require_ip_key(ip_key)
@@ -392,12 +419,11 @@ def run_reprocess(
             gzip_limits=gzip_limits,
             autodetect_sample_lines=autodetect_sample_lines,
             default_combined=default_combined,
-            capture_original=capture_originals,
+            # Always capture the transient validated address for the
+            # T5a country hook (encrypted storage stays flag-gated).
+            capture_original=True,
         ):
-            if capture_originals:
-                item, original = yielded
-            else:
-                item, original = yielded, None
+            item, original = yielded
             offset = getattr(item, "byte_offset", None)
             stored = _stored_at(int(offset)) if offset is not None else None
             if isinstance(item, CombinedRecord) and stored is not None:
@@ -418,7 +444,11 @@ def run_reprocess(
                     )
                     continue
                 result.rows_verified += 1
-                wanted = _metadata_tuple(item, policy)
+                if isinstance(original, CapturedOriginal):
+                    country = lookup.lookup(original.reveal())
+                else:
+                    country = CountryInfo(None, GEO_STATUS_UNKNOWN, None, None)
+                wanted = _metadata_tuple(item, policy, country)
                 current = (
                     stored["format_id"],
                     stored["http_version"],
@@ -432,6 +462,10 @@ def run_reprocess(
                     stored["upstream_time_ms"],
                     stored["upstream_count"],
                     stored["policy_version"],
+                    stored["country_code"],
+                    stored["geo_source"],
+                    stored["geo_release"],
+                    stored["geo_status"],
                 )
                 if wanted != current:
                     pending_meta.append(

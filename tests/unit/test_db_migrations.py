@@ -19,7 +19,7 @@ def _tables(conn: sqlite3.Connection) -> set[str]:
 def test_fresh_migrate_applies_initial_schema(tmp_path):
     db = tmp_path / "fresh.sqlite3"
     result = migrate(db)
-    assert result.applied == (1, 2, 3, 4, 5, 6)
+    assert result.applied == (1, 2, 3, 4, 5, 6, 7)
     assert result.backup_path is None
     conn = connect(db, read_only=True)
     try:
@@ -30,6 +30,20 @@ def test_fresh_migrate_applies_initial_schema(tmp_path):
     assert {"admin_users", "admin_sessions", "api_tokens"} <= tables
     assert {"ai_spend"} <= tables
     assert {"smoke_allowance", "smoke_holds"} <= tables
+    # T5a/PAR-09 migration 0007: nullable offline-country enrichment on
+    # requests (NULL on legacy rows until a reprocess enriches them).
+    columns = {
+        row[1]: row[3] for row in connect(db, read_only=True).execute("PRAGMA table_info(requests)")
+    }
+    for column in ("country_code", "geo_source", "geo_release", "geo_status"):
+        assert column in columns, columns
+        assert columns[column] == 0, (column, columns)
+    assert "idx_requests_country" in {
+        row[0]
+        for row in connect(db, read_only=True).execute(
+            "SELECT name FROM sqlite_master WHERE type='index'"
+        )
+    }
     for index in (
         "idx_requests_ts",
         "idx_requests_status",
@@ -46,7 +60,7 @@ def test_fresh_migrate_applies_initial_schema(tmp_path):
 
 def test_migrate_is_idempotent(tmp_path):
     db = tmp_path / "fresh.sqlite3"
-    assert migrate(db).applied == (1, 2, 3, 4, 5, 6)
+    assert migrate(db).applied == (1, 2, 3, 4, 5, 6, 7)
     assert migrate(db).applied == ()
     assert migrate(db, backup_dir=tmp_path / "backups").backup_path is None
 

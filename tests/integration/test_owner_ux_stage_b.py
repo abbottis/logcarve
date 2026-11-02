@@ -422,6 +422,12 @@ def test_service_and_queries_agree_with_stable_legacy_sorts(stage_b_db):
                     "tls_protocol",
                     "timing_available",
                     "upstream_available",
+                    # T5a/PAR-09 offline country: safe ISO code plus
+                    # lookup source/release/status, never an address.
+                    "country_code",
+                    "geo_source",
+                    "geo_release",
+                    "geo_status",
                 }
     finally:
         conn.close()

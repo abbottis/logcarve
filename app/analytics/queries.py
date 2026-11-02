@@ -30,6 +30,7 @@ from app.analytics.contracts import (
 )
 from app.analytics.rules import Rule
 from app.db.importer import sanitize_error_summary
+from app.ingestion.geoip import COUNTRY_CODE_RE, UNKNOWN_COUNTRY
 
 MAX_DISTINCT_SCAN = 5000
 
@@ -225,6 +226,19 @@ def _matcher_clauses(
         # below: embedding the HMAC in a UA/path never matches here.
         clauses.append("client_pseudonym = ?")
         params.append(filt.client)
+    if filt.country is not None:
+        # T5a offline-country selector (PAR-09): the contract already
+        # normalized the value through the shared allowlist. The
+        # explicit UNKNOWN selector matches every row with no known
+        # country (NULL code: unknown lookups, unavailable lookups and
+        # never-looked-up legacy rows alike); ISO codes match exactly.
+        # An empty value never arrives here (transports map it to no
+        # filter or reject), so Unknown is never silently selected.
+        if filt.country == UNKNOWN_COUNTRY:
+            clauses.append("country_code IS NULL")
+        else:
+            clauses.append("country_code = ?")
+            params.append(filt.country)
     if filt.search is not None:
         # LogWerk-style explorer search over stored sanitized fields only:
         # query-stripped path, truncated-at-read user agent, minimized
@@ -311,12 +325,20 @@ def status_distribution(
 def _option_scope(filt: AnalyticsFilter) -> AnalyticsFilter:
     """Dropdown scope: window/site/source plus non-method/status matchers.
 
-    Method/status/status-class narrowing is lifted so the dropdown can
-    always offer every value in the current scope (the current selection
-    is retained separately); everything else still narrows honestly.
+    Method/status/status-class/country narrowing is lifted so the
+    dropdown can always offer every value in the current scope (the
+    current selection is retained separately); everything else still
+    narrows honestly.
     """
     return filt.model_copy(
-        update={"method": None, "status": None, "status_class": None, "limit": 1, "offset": 0}
+        update={
+            "method": None,
+            "status": None,
+            "status_class": None,
+            "country": None,
+            "limit": 1,
+            "offset": 0,
+        }
     )
 
 
@@ -771,6 +793,105 @@ def traffic_breakdown(
     ]
 
 
+def country_breakdown(
+    conn: sqlite3.Connection, filt: AnalyticsFilter, classifier: Classifier | None = None
+) -> list[dict[str, object]]:
+    """Exact per-country request/error/byte totals, Unknown included.
+
+    One ``GROUP BY`` over the filtered scope: every row lands in
+    exactly one group (its ISO code, or ``Unknown`` for a NULL code),
+    so group totals sum exactly. Stable order is requests descending,
+    then the display label ascending.
+    """
+    where, params = _where(filt, classifier)
+    rows = conn.execute(
+        "SELECT COALESCE(country_code, 'Unknown') AS country, COUNT(*),"
+        " COUNT(CASE WHEN status BETWEEN 400 AND 499 THEN 1 END),"
+        " COUNT(CASE WHEN status BETWEEN 500 AND 599 THEN 1 END),"
+        " COALESCE(SUM(bytes), 0)"
+        " FROM requests WHERE"
+        f" {where} GROUP BY country ORDER BY COUNT(*) DESC, country ASC",
+        params,
+    ).fetchall()
+    return [
+        {
+            "country": country,
+            "requests": int(count),
+            "errors_4xx": int(e4),
+            "errors_5xx": int(e5),
+            "bytes_total": int(nbytes),
+        }
+        for country, count, e4, e5, nbytes in rows
+    ]
+
+
+def geo_coverage(
+    conn: sqlite3.Connection, filt: AnalyticsFilter, classifier: Classifier | None = None
+) -> dict[str, object]:
+    """Honest lookup coverage over the filtered scope (safe fields only).
+
+    ``with_country`` rows carry a looked-up ISO code; ``unknown`` rows
+    ran the lookup (or an equivalent eligibility decision) without a
+    country; ``unavailable`` rows were stored while no database could
+    be read; ``legacy`` rows predate the lookup columns entirely.
+    Distinct observed sources/releases describe which databases the
+    rows came from; no address, path or exception text is exposed.
+    """
+    where, params = _where(filt, classifier)
+    row = conn.execute(
+        "SELECT COUNT(*),"
+        " COUNT(CASE WHEN country_code IS NOT NULL THEN 1 END),"
+        " COUNT(CASE WHEN country_code IS NULL AND geo_status = 'unknown' THEN 1 END),"
+        " COUNT(CASE WHEN geo_status = 'unavailable' THEN 1 END),"
+        " COUNT(CASE WHEN geo_status IS NULL THEN 1 END)"
+        f" FROM requests WHERE {where}",
+        params,
+    ).fetchone()
+    sources = [
+        r[0]
+        for r in conn.execute(
+            "SELECT DISTINCT geo_source FROM requests"
+            f" WHERE {where} AND geo_source IS NOT NULL ORDER BY geo_source LIMIT 16",
+            params,
+        ).fetchall()
+        if isinstance(r[0], str)
+    ]
+    releases = [
+        r[0]
+        for r in conn.execute(
+            "SELECT DISTINCT geo_release FROM requests"
+            f" WHERE {where} AND geo_release IS NOT NULL ORDER BY geo_release LIMIT 16",
+            params,
+        ).fetchall()
+        if isinstance(r[0], str)
+    ]
+    return {
+        "requests": int(row[0]),
+        "with_country": int(row[1]),
+        "unknown": int(row[2]),
+        "unavailable": int(row[3]),
+        "legacy": int(row[4]),
+        "sources": sources,
+        "releases": releases,
+    }
+
+
+def distinct_countries(
+    conn: sqlite3.Connection, filt: AnalyticsFilter, classifier: Classifier | None = None
+) -> list[str]:
+    """Observed ISO country codes in scope; parameterized, bounded, safe."""
+    scope = _option_scope(filt)
+    where, params = _where(scope, classifier)
+    rows = conn.execute(
+        "SELECT DISTINCT country_code FROM requests"
+        f" WHERE {where} AND country_code IS NOT NULL"
+        " ORDER BY country_code LIMIT 249",
+        params,
+    ).fetchall()
+    codes = [row[0] for row in rows if isinstance(row[0], str)]
+    return [code for code in codes if COUNTRY_CODE_RE.match(code)]
+
+
 def bot_index_rows(
     conn: sqlite3.Connection, filt: AnalyticsFilter, classifier: Classifier
 ) -> list[dict[str, object]]:
@@ -950,6 +1071,10 @@ EXPORT_COLUMNS: tuple[str, ...] = (
     "upstream_count",
     "format_id",
     "policy_version",
+    "country_code",
+    "geo_source",
+    "geo_release",
+    "geo_status",
     "user_agent",
     "ua_truncated",
     "client_pseudonym",
@@ -986,6 +1111,7 @@ def _explorer_select(
         "SELECT ts_utc, method, path, status, bytes, referer_scheme, referer_host,"
         " referer_path, server_host, http_version, mime_type, cache_status, tls_protocol,"
         " request_time_ms, upstream_time_ms, upstream_count, format_id, policy_version,"
+        " country_code, geo_source, geo_release, geo_status,"
         " substr(user_agent, 1, 200),"
         " CASE WHEN user_agent IS NOT NULL AND LENGTH(user_agent) > 200 THEN 1 ELSE 0 END,"
         " client_pseudonym,"
@@ -1017,6 +1143,10 @@ def export_row_to_dict(row: tuple) -> dict[str, object]:
         upstream_count,
         format_id,
         policy_version,
+        country_code,
+        geo_source,
+        geo_release,
+        geo_status,
         agent,
         truncated,
         pseudonym,
@@ -1042,6 +1172,12 @@ def export_row_to_dict(row: tuple) -> dict[str, object]:
         "upstream_count": upstream_count,
         "format_id": format_id,
         "policy_version": policy_version,
+        # Safe offline-country outcome (PAR-09): ISO code or None for
+        # Unknown, plus lookup provenance. Never an original address.
+        "country_code": country_code,
+        "geo_source": geo_source,
+        "geo_release": geo_release,
+        "geo_status": geo_status,
         "user_agent": agent,
         "ua_truncated": bool(truncated),
         "client_pseudonym": pseudonym,
@@ -2487,10 +2623,10 @@ def _journey_segments(
 
     The base projection carries every stored column the shared
     matchers can reference (host, HTTP version, MIME, cache, TLS,
-    measured/upstream timing) alongside the grouping keys, so a
-    metadata filter narrows ``shown`` exactly like everywhere else
-    instead of failing with an unknown column. Gap and edge
-    comparisons use exact integer epoch microseconds
+    measured/upstream timing, offline country) alongside the grouping
+    keys, so a metadata filter narrows ``shown`` exactly like
+    everywhere else instead of failing with an unknown column. Gap
+    and edge comparisons use exact integer epoch microseconds
     (:func:`epoch_micros`), so fractional instants split journeys
     precisely at the 1800-second boundary.
     """
@@ -2505,7 +2641,8 @@ def _journey_segments(
         " SELECT id, ts_utc, method, path, status, bytes, referer_host,"
         " user_agent, client_pseudonym,"
         " server_host, http_version, mime_type, cache_status, tls_protocol,"
-        " request_time_ms, upstream_time_ms"
+        " request_time_ms, upstream_time_ms, country_code,"
+        " geo_source, geo_release, geo_status"
         f" FROM requests WHERE {base_where}"
         "), prev AS ("
         " SELECT base.*,"
@@ -2712,7 +2849,8 @@ def _journey_timeline_for_key(
         " AND COALESCE(user_agent, CHAR(0)) = COALESCE(?, CHAR(0)) AND jseq = ?)"
         " SELECT ts_utc, method, path, status, bytes, referer_host,"
         " substr(user_agent, 1, 200),"
-        " CASE WHEN user_agent IS NOT NULL AND LENGTH(user_agent) > 200 THEN 1 ELSE 0 END"
+        " CASE WHEN user_agent IS NOT NULL AND LENGTH(user_agent) > 200 THEN 1 ELSE 0 END,"
+        " country_code, geo_status"
         f" FROM keyed_rows WHERE {shown_cond}"
         " ORDER BY ts_utc ASC, id ASC LIMIT ? OFFSET ?",
         [
@@ -2746,8 +2884,10 @@ def _journey_timeline_for_key(
             "referer_host": host,
             "user_agent": agent,
             "ua_truncated": bool(truncated),
+            "country_code": country,
+            "geo_status": geo_status,
         }
-        for ts, method, path, status, nbytes, host, agent, truncated in rows
+        for ts, method, path, status, nbytes, host, agent, truncated, country, geo_status in rows
     ]
     return {
         "journey_id": journey_id_for(

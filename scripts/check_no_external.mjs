@@ -9,7 +9,14 @@ const roots = ["app/web/static", "app/web/templates"];
 const SKIP = new Set(["vendor", "fonts", "icons"]);
 // Only real fetch vectors count: license-banner comments (e.g. the
 // Tailwind MIT banner naming its homepage) are not network requests.
-const REMOTE = /(@import\s+["']https?:|url\(\s*["']?https?:|src=["']https?:|href=["']https?:|fetch\(\s*["']https?:|from\s+["']https?:)/i;
+// The CC BY 4.0 credit the DB-IP Country Lite license requires (T5a /
+// PAR-09) is a plain text anchor to exactly https://db-ip.com: the
+// browser issues no request unless the user deliberately follows it,
+// so that one href is allowlisted while every other remote reference
+// (all src/fetch/import/url forms, any other href) still fails.
+const REMOTE = /(@import\s+["']https?:|url\(\s*["']?https?:|src=["']https?:|fetch\(\s*["']https?:|from\s+["']https?:)/i;
+const CREDIT_HREF = /href=["']https?:\/\/[^"']*["']/i;
+const CREDIT_ALLOWLIST = new Set(["https://db-ip.com"]);
 let failures = 0;
 
 function walk(dir) {
@@ -27,6 +34,16 @@ function walk(dir) {
       if (REMOTE.test(line)) {
         console.error(`${path}:${i + 1}: possible external reference: ${line.trim().slice(0, 120)}`);
         failures += 1;
+        return;
+      }
+      const hrefs = line.match(CREDIT_HREF) || [];
+      for (const href of hrefs) {
+        const url = href.slice(6, -1);
+        if (!CREDIT_ALLOWLIST.has(url)) {
+          console.error(`${path}:${i + 1}: possible external reference: ${line.trim().slice(0, 120)}`);
+          failures += 1;
+          break;
+        }
       }
     });
   }

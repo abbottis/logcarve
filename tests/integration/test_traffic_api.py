@@ -196,6 +196,12 @@ def test_explorer_search_and_sort(tapi):
             # no original IP, raw line, query value or secret.
             "format_id",
             "policy_version",
+            # T5a/PAR-09 offline country: safe ISO code plus lookup
+            # source/release/status, never an original address.
+            "country_code",
+            "geo_source",
+            "geo_release",
+            "geo_status",
             "referer_scheme",
             "referer_path",
             "server_host",

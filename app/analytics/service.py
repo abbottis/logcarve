@@ -31,6 +31,7 @@ from app.analytics.contracts import (
 )
 from app.analytics.rules import Rule
 from app.ingestion.combined import _REJECTION_REASONS
+from app.ingestion.geoip import GEO_ATTRIBUTION_TEXT, GEO_ATTRIBUTION_URL
 
 LIMITATIONS_LOGS = [
     "access logs alone cannot prove traffic completeness: coverage describes observed events, not proven source coverage",
@@ -39,6 +40,11 @@ LIMITATIONS_LOGS = [
 
 LIMITATIONS_BOT = [
     "a User-Agent match proves a claimed identity only, never a verified crawler",
+]
+
+LIMITATIONS_GEO = [
+    "a server-country estimate describes where the observed address is registered, never visitor identity, residence or proof of bot origin",
+    "Unknown means the lookup yielded no country (unroutable address, no database record or no database), never a hidden default",
 ]
 
 LIMITATIONS_SECURITY = [
@@ -108,6 +114,7 @@ def _filter_dict(filt: AnalyticsFilter) -> dict[str, object]:
         "upstream_available": filt.upstream_available,
         "timing_min_ms": filt.timing_min_ms,
         "timing_max_ms": filt.timing_max_ms,
+        "country": filt.country,
     }
 
 
@@ -1066,6 +1073,7 @@ _COMPARISON_SELECTORS = (
     "upstream_available",
     "timing_min_ms",
     "timing_max_ms",
+    "country",
 )
 
 
@@ -1276,6 +1284,33 @@ _BOT_TABLE_ORDER = {
     "errors_desc": lambda e: (-(e["errors_4xx"] + e["errors_5xx"]), -e["requests"], e["rule_id"]),
     "bytes_desc": lambda e: (-e["bytes_total"], -e["requests"], e["rule_id"]),
 }
+
+
+def country_breakdown(
+    conn: sqlite3.Connection, filt: AnalyticsFilter, rules: list[Rule] | None = None
+) -> dict[str, object]:
+    """Exact per-country request/error/byte totals with lookup coverage.
+
+    ``items`` carries one row per observed country, including an
+    ``Unknown`` row whenever rows lack a country code (absent when
+    every row has a country — callers read ``geo`` for the honest
+    counts either way). ``geo`` reports the filtered-scope lookup
+    coverage (safe counts and observed database sources/releases
+    only), and ``attribution`` carries the CC BY 4.0 database credit
+    every renderer must display alongside country results.
+    """
+    clf = _classifier_for(filt, rules)
+    items = queries.country_breakdown(conn, filt, clf)
+    return {
+        "site_id": filt.site_id,
+        "time_range": _window_dict(filt),
+        "filters": _filter_dict(filt),
+        "items": items,
+        "geo": queries.geo_coverage(conn, filt, clf),
+        "attribution": {"text": GEO_ATTRIBUTION_TEXT, "url": GEO_ATTRIBUTION_URL},
+        "coverage": coverage_summary(conn, filt, rules),
+        "limitations": [*LIMITATIONS_GEO, *LIMITATIONS_LOGS],
+    }
 
 
 def error_groups(

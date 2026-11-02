@@ -34,6 +34,18 @@ class Settings(BaseSettings):
     # Never SESSION_SECRET/HMAC_KEY/MODEL_API_KEY; empty means capture and
     # private reads fail closed while deterministic analytics keep working.
     original_ip_key: SecretStr = SecretStr("")
+    # Optional mounted path of the genuine offline GeoIP country
+    # database (DB-IP Country Lite MMDB, T5a/PAR-09). Empty means
+    # unconfigured: every row stores fixed ``unavailable`` markers and
+    # ordinary analytics keep working. The file itself is
+    # operator-mounted read-only and never lives in Git.
+    geoip_db_path: str = ""
+    # Required-database policy for imports/reprocess: when true, a
+    # missing or unreadable configured database fails the run before
+    # any write with the fixed ``geoip_unavailable:database_required``
+    # code; when false (default), the run completes with
+    # ``unavailable`` markers instead.
+    geoip_required: bool = False
 
     ai_enabled: bool = False
     model_provider: str = "meta"

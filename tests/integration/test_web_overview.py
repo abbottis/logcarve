@@ -6,6 +6,8 @@ rendered total is checked against independently expected fixture values
 the shared service on the same filter. Synthetic data only.
 """
 
+import re
+
 from app.analytics import service
 from app.analytics.contracts import AnalyticsFilter, TimeWindow
 from app.db.database import connect, writer_transaction
@@ -71,8 +73,15 @@ def test_overview_totals_and_notices(web):
     # Referrer and development summaries come from the shared layer.
     assert "example.org" in html
     assert "/identical" in html
-    # Every script, stylesheet and image is served locally.
-    assert 'src="http' not in html and 'href="http' not in html
+    # Every script, stylesheet and image is served locally. The only
+    # permitted absolute link is the CC BY 4.0 credit the DB-IP
+    # Country Lite license requires wherever country results appear
+    # (T5a/PAR-09): a plain text anchor, never a remote asset.
+    assert 'src="http' not in html
+    assert re.search(r'src="https?://', html) is None
+    absolute_hrefs = re.findall(r'href="(https?://[^"]*)"', html)
+    assert absolute_hrefs != []
+    assert all(href == "https://db-ip.com" for href in absolute_hrefs), absolute_hrefs
 
 
 def test_overview_matches_shared_service(web):

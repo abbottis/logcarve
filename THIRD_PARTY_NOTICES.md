@@ -58,8 +58,22 @@ SOFTWARE.
 | `regex` (Python runtime, custom-format engine timeout) | Apache-2.0 AND CNRI-Python | 2026.9.29, pinned in `pyproject.toml`/`uv.lock`/`requirements.txt`; installed METADATA confirms `License-Expression: Apache-2.0 AND CNRI-Python`, `Requires-Python: >=3.10` |
 | `cryptography` (Python runtime, T1b AES-256-GCM original-IP store) | Apache-2.0 OR BSD-3-Clause | 50.0.2, pinned in `pyproject.toml`/`uv.lock`/`requirements.txt`; installed METADATA confirms `License-Expression: Apache-2.0 OR BSD-3-Clause`; primary AESGCM docs at `https://github.com/pyca/cryptography/blob/main/docs/hazmat/primitives/aead.rst` |
 | pytest-playwright + Playwright (dev/test only) | Apache-2.0 / MIT | 0.10.0 + 1.64.1, pinned in `uv.lock`; browsers in ignored `artifacts/` |
+| `maxminddb` (Python runtime, T5a offline MMDB country reader) | Apache-2.0 | 3.2.0, pinned unconditionally in `pyproject.toml`/`uv.lock`/`requirements.txt`; official metadata reports `Requires-Python: >=3.10` (the lock itself carries cp312/cp313/cp314/cp315 wheels); installed METADATA confirms `License-Expression: Apache-2.0`; primary reader docs at `https://maxminddb.readthedocs.io/en/latest/` and source at `https://github.com/maxmind/MaxMind-DB-Reader-python` |
 
 No LogWerk application code or assets are imported (the 70 adapted rule-catalog patterns are recorded in the LogWerk entry above). The inventory records the browser assets and selected runtime/test packages; lockfiles provide the complete dependency versions. Installed Python distributions retain their own license files.
+
+### DB-IP Country Lite (operator-mounted GeoIP data, T5a/PAR-09)
+
+The country database itself is NOT bundled, vendored or committed: the
+operator mounts a genuine `dbip-country-lite-YYYY-MM.mmdb` file
+read-only outside Git (see `GEOIP_DB_PATH` in `.env.example`).
+Official download: https://download.db-ip.com/free/dbip-country-lite-2026-11.mmdb.gz
+(source and license: https://db-ip.com/db/download/ip-to-country-lite).
+The data is licensed CC BY 4.0 (https://creativecommons.org/licenses/by/4.0/);
+every LogCarve page showing country results carries the required credit
+link https://db-ip.com with the text "IP Geolocation by DB-IP". Only a
+safe ISO country code plus lookup source/release/status is ever stored;
+no database content is copied into the repository, exports or prompts.
 
 ## Browser dependency license texts
 

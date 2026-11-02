@@ -204,7 +204,8 @@ def test_exact_replay_preserves_valid_values():
     assert error is None
     # Slice A trusted-filter contract: the matchers dict carries every
     # selector (traffic/bot/category/provider/purpose/search unset here).
-    # T4a adds the shared T2 enrichment selectors (PAR-03), unset here.
+    # T4a adds the shared T2 enrichment selectors (PAR-03), unset here;
+    # T5a adds the offline-country selector (PAR-09), unset here.
     assert matchers == {
         "method": "get",
         "status": 404,
@@ -228,6 +229,7 @@ def test_exact_replay_preserves_valid_values():
         "upstream_available": None,
         "timing_min_ms": None,
         "timing_max_ms": None,
+        "country": None,
     }
     matchers, error = web_routes._parse_matchers({"method": "OPTIONS"})
     assert error is None and matchers["method"] == "OPTIONS"

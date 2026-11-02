@@ -122,6 +122,17 @@ class ToolArguments(BaseModel):
     upstream_available: bool | None = Field(default=None)
     timing_min_ms: float | None = Field(default=None, ge=0)
     timing_max_ms: float | None = Field(default=None, ge=0)
+    country: str | None = Field(
+        default=None,
+        min_length=1,
+        max_length=16,
+        pattern="^([A-Za-z]{2}|[Uu][Nn][Kk][Nn][Oo][Ww][Nn])$",
+        description=(
+            "Offline-country selector: one ISO 3166-1 alpha-2 code or "
+            "UNKNOWN for rows with no known country. The shared "
+            "contract revalidates and normalizes."
+        ),
+    )
     limit: int = Field(default=20, ge=1, le=TOOL_RESULT_LIMIT)
     offset: int = Field(default=0, ge=0)
     bucket: str = Field(default="hour", pattern="^(hour|day)$")
@@ -222,6 +233,8 @@ def _evidence_filters(args: ToolArguments, filt: AnalyticsFilter) -> dict[str, o
         filters["timing_min_ms"] = filt.timing_min_ms
     if filt.timing_max_ms is not None:
         filters["timing_max_ms"] = filt.timing_max_ms
+    if filt.country is not None:
+        filters["country"] = filt.country
     filters["limit"] = filt.limit
     filters["offset"] = filt.offset
     filters["bucket"] = args.bucket
@@ -258,6 +271,7 @@ def _filter(args: ToolArguments) -> AnalyticsFilter:
             upstream_available=args.upstream_available,
             timing_min_ms=args.timing_min_ms,
             timing_max_ms=args.timing_max_ms,
+            country=args.country,
             limit=args.limit,
             offset=args.offset,
         )

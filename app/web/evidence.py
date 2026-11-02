@@ -106,6 +106,7 @@ def evidence_url(page_path: str, envelope_filters: dict, tz_name: str = "UTC") -
         "upstream_available",
         "timing_min_ms",
         "timing_max_ms",
+        "country",
         "report",
         "limit",
         "offset",

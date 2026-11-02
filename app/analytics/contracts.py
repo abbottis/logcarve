@@ -12,6 +12,8 @@ from typing import Literal
 
 from pydantic import BaseModel, Field, field_validator, model_validator
 
+from app.ingestion.geoip import normalize_country_selector
+
 MAX_LIMIT = 1000
 MAX_WINDOW_DAYS = 366
 MAX_SEARCH_LEN = 128
@@ -126,6 +128,14 @@ class AnalyticsFilter(BaseModel):
     upstream_available: bool | None = Field(default=None)
     timing_min_ms: float | None = Field(default=None, ge=0)
     timing_max_ms: float | None = Field(default=None, ge=0)
+    #: T5a offline-country selector (PAR-09). An ISO 3166-1 alpha-2
+    #: code matches looked-up rows exactly; the explicit ``UNKNOWN``
+    #: selector matches rows with no known country (NULL code,
+    #: including never-looked-up legacy rows). An empty value never
+    #: reaches this contract (transports map it to no filter or
+    #: reject); only the validated selector selects Unknown, never a
+    #: silently ignored blank.
+    country: str | None = Field(default=None, min_length=1, max_length=16)
     limit: int = Field(default=100, ge=1, le=MAX_LIMIT)
     offset: int = Field(default=0, ge=0, le=SQLITE_INT64_MAX)
 
@@ -136,6 +146,20 @@ class AnalyticsFilter(BaseModel):
         if value is None:
             return None
         return value.strip()
+
+    @field_validator("country")
+    @classmethod
+    def _normalize_country(cls, value: str | None) -> str | None:
+        """Country through the shared selector allowlist (PAR-09).
+
+        ``UNKNOWN`` selects rows with no known country; ISO codes
+        match exactly (case-insensitive input, uppercase storage).
+        Anything else — including a blank that reaches the contract
+        directly — raises instead of silently widening.
+        """
+        if value is None:
+            return None
+        return normalize_country_selector(value)
 
     @model_validator(mode="after")
     def _enrichment_consistent(self) -> "AnalyticsFilter":

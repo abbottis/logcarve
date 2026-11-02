@@ -177,6 +177,31 @@
   </section>
 </div>
 
+<section class="card mt-6 bg-base-100 shadow" aria-labelledby="country-h">
+  <div class="card-body">
+    <h2 id="country-h" class="card-title text-base">{{ t("overview.countries") }}</h2>
+    <p class="text-sm text-base-content/70">{{ t("geo.estimate_note") }}</p>
+    <div class="table-scroll overflow-x-auto">
+      <table class="table table-sm">
+        <caption class="sr-only">{{ t("overview.countries") }}</caption>
+        <thead><tr><th scope="col">{{ t("filter.country") }}</th><th scope="col" class="text-right">{{ t("table.requests") }}</th><th scope="col" class="text-right">{{ t("table.errors") }}</th><th scope="col" class="text-right">{{ t("table.bytes") }}</th></tr></thead>
+        <tbody>
+          {% for item in countries["items"] %}
+          <tr><td class="tech"><a class="link" href="{{ page_url("/requests", country=("UNKNOWN" if item.country == "Unknown" else item.country)) }}">{{ t("filter.country_unknown") if item.country == "Unknown" else item.country }}</a></td><td class="text-right tech">{{ item.requests }}</td><td class="text-right tech">{{ item.errors_4xx + item.errors_5xx }}</td><td class="text-right tech">{{ item.bytes_total }}</td></tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+    {% if countries["geo"]["sources"] %}
+    <p class="mt-2 text-sm text-base-content/70">{{ t("geo.source_line", source=countries["geo"]["sources"] | join(", "), release=countries["geo"]["releases"] | join(", ")) }}</p>
+    {% else %}
+    <p class="mt-2 text-sm text-base-content/70" role="note">{{ t("geo.no_database") }}</p>
+    {% endif %}
+    <p class="text-sm text-base-content/70">{{ t("geo.coverage_line", with=countries["geo"]["with_country"], unknown=countries["geo"]["unknown"], unavailable=countries["geo"]["unavailable"]) }}</p>
+    <p class="mt-2 text-sm"><a class="link" href="https://db-ip.com">{{ t("geo.attribution") }}</a></p>
+  </div>
+</section>
+
 <div class="mt-6 grid gap-6 xl:grid-cols-2">
   <section class="card bg-base-100 shadow" aria-labelledby="browser-h">
     <div class="card-body">

@@ -170,6 +170,12 @@ class ExplorerRowOut(BaseModel):
     cache_status: str | None = None
     mime_type: str | None = None
     tls_protocol: str | None = None
+    #: Safe offline-country outcome (PAR-09): ISO code or null for
+    #: Unknown, plus lookup provenance. Never an original address.
+    country_code: str | None = None
+    geo_source: str | None = None
+    geo_release: str | None = None
+    geo_status: str | None = None
     timing_available: bool = False
     upstream_available: bool = False
 
@@ -278,6 +284,30 @@ class TrafficBreakdownResponse(BaseModel):
     time_range: TimeRangeOut
     filters: dict[str, object]
     buckets: list[TrafficBucketOut]
+    coverage: dict[str, object]
+    limitations: list[str]
+
+
+class CountryItemOut(BaseModel):
+    country: str
+    requests: int
+    errors_4xx: int
+    errors_5xx: int
+    bytes_total: int
+
+
+class GeoAttributionOut(BaseModel):
+    text: str
+    url: str
+
+
+class CountryBreakdownResponse(BaseModel):
+    site_id: str
+    time_range: TimeRangeOut
+    filters: dict[str, object]
+    items: list[CountryItemOut]
+    geo: dict[str, object]
+    attribution: GeoAttributionOut
     coverage: dict[str, object]
     limitations: list[str]
 
@@ -579,6 +609,10 @@ class JourneyTimelineItemOut(BaseModel):
     referer_host: str | None = None
     user_agent: str | None = None
     ua_truncated: bool = False
+    #: Safe offline-country outcome (PAR-09): ISO code or null for
+    #: Unknown. Never an original address.
+    country_code: str | None = None
+    geo_status: str | None = None
 
 
 class JourneyTimelineResponse(BaseModel):

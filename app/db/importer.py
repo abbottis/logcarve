@@ -57,6 +57,12 @@ from app.ingestion.combined import (
     enrichment_policy,
 )
 from app.ingestion.custom import CustomFormat, CustomFormatError
+from app.ingestion.geoip import (
+    GEO_STATUS_UNKNOWN,
+    CountryInfo,
+    CountryLookup,
+    GeoipError,
+)
 from app.ingestion.gzipio import GzipError, GzipLimits
 from app.ingestion.sources import HostFilter, SourceConfig, resolve_source_path
 from app.ingestion.stream import HostSkipped, ImportReport, fingerprint_source, iter_records
@@ -141,6 +147,9 @@ class ImportResult:
     records_inserted: int = 0
     records_replayed: int = 0
     records_skipped_foreign: int = 0
+    geoip_available: bool = False
+    geoip_source: str | None = None
+    geoip_release: str | None = None
     is_gzip: bool = False
     gzip_members: int = 0
     status: str = "completed"
@@ -177,13 +186,17 @@ def _event_row(
     site_id: str,
     file_fingerprint: str,
     policy: str,
+    country: CountryInfo | None = None,
 ) -> tuple:
-    """Legacy core columns plus nullable T1b enrichment metadata.
+    """Legacy core columns plus nullable T1b/T5a enrichment metadata.
 
     ``duration_ms`` stays legacy (always ``None`` from the parser: Combined
     never supplies timing). Measured timings land in
     ``request_time_ms``/``upstream_time_ms``/``upstream_count`` with
-    ``None`` meaning absent; ``policy`` tags the parser policy.
+    ``None`` meaning absent; ``policy`` tags the parser policy. The
+    T5a ``country`` outcome appends the safe ISO code plus
+    source/release/status (``None`` country means Unknown); it carries
+    no original address.
     """
     extra = record.extra
     return (
@@ -214,6 +227,10 @@ def _event_row(
         extra.upstream_time_ms if extra is not None else None,
         extra.upstream_count if extra is not None else None,
         policy,
+        country.code if country is not None else None,
+        country.source if country is not None else None,
+        country.release if country is not None else None,
+        country.status if country is not None else None,
     )
 
 
@@ -238,6 +255,8 @@ def run_import(
     autodetect_sample_lines: int = 32,
     capture_originals: bool = False,
     ip_key: object = None,
+    country_lookup: CountryLookup | None = None,
+    geoip_required: bool = False,
 ) -> ImportResult:
     """Import one resolved source file; repeatable and interruption-safe.
 
@@ -251,6 +270,14 @@ def run_import(
     server key, per-event AAD). Capture without a valid configured key
     fails before any write. Routine rows, reports and payloads never carry
     originals regardless of this flag.
+
+    The T5a offline-country outcome is derived transiently from the
+    validated address of each accepted record — before the raw address
+    is discarded or encrypted — through ``country_lookup`` (an
+    unavailable handle stores fixed ``unavailable`` markers and
+    ordinary analytics keep working). With ``geoip_required=True`` a
+    missing or unusable database fails the import with the fixed
+    ``geoip_unavailable:database_required`` code before any write.
     """
     if not hmac_key:
         raise ValueError("hmac_key must be non-empty")
@@ -266,6 +293,12 @@ def run_import(
         raise CustomFormatError("interrupted:custom_invalid")
     if custom_format is not None and source.format_id not in (CUSTOM, custom_format.format_id):
         raise CustomFormatError("interrupted:custom_invalid")
+    lookup = country_lookup if country_lookup is not None else CountryLookup.unavailable()
+    if geoip_required and not lookup.available:
+        # Documented required-database policy: fail before any write
+        # (before migrate, binding checks and event rows) with a fixed
+        # code that leaks no path, address or exception text.
+        raise GeoipError()
     from app.db import private as _private
 
     private_key: bytes | None = None
@@ -421,14 +454,23 @@ def run_import(
             gzip_limits=gzip_limits,
             autodetect_sample_lines=autodetect_sample_lines,
             default_combined=default_combined,
-            capture_original=capture_originals,
+            # Always capture the transient validated address: it feeds
+            # the T5a country hook below and (only when the flag is
+            # set) the encrypted private channel. The plaintext never
+            # reaches routine rows, reports or diagnostics either way.
+            capture_original=True,
         ):
-            if capture_originals:
-                item, original = yielded
-            else:
-                item, original = yielded, None
+            item, original = yielded
             if isinstance(item, (LineRejection, HostSkipped)):
                 continue
+            if isinstance(original, CapturedOriginal):
+                # Transient derivation before discard/encryption: the
+                # revealed text lives only in this call frame, and only
+                # the safe ISO outcome persists on the row.
+                country = lookup.lookup(original.reveal())
+            else:
+                # Non-address hosts (names, not IPs) have no country.
+                country = CountryInfo(None, GEO_STATUS_UNKNOWN, None, None)
             batch.append(
                 _event_row(
                     item,
@@ -436,6 +478,7 @@ def run_import(
                     site_id=site_id,
                     file_fingerprint=fingerprint,
                     policy=policy,
+                    country=country,
                 )
             )
             if capture_originals and isinstance(original, CapturedOriginal):
@@ -519,6 +562,7 @@ def run_import(
         )
     if failure is not None:
         raise failure
+    geo = lookup.describe()
     return ImportResult(
         import_id=import_id,
         source_id=source.source_id,
@@ -529,6 +573,9 @@ def run_import(
         records_inserted=counts.records_inserted,
         records_replayed=accepted - inserted,
         records_skipped_foreign=skipped_foreign,
+        geoip_available=bool(geo["available"]),
+        geoip_source=geo["source"] if isinstance(geo["source"], str) else None,
+        geoip_release=geo["release"] if isinstance(geo["release"], str) else None,
         is_gzip=logical.is_gzip,
         gzip_members=stream_report.gzip_members,
         status=status,

@@ -10,7 +10,7 @@
      deliberately: a new window always starts at the first page, while
      prev/next links carry explicit offsets. #}
   {% for key, value in matchers.items() %}
-  {% if key not in ["traffic", "bot", "category", "provider", "purpose", "status", "status_class", "search", "path_prefix", "path_exact", "method", "referer_host", "server_host", "http_version", "mime_type", "cache_status", "tls_protocol", "timing_available", "upstream_available", "timing_min_ms", "timing_max_ms"] %}
+  {% if key not in ["traffic", "bot", "category", "provider", "purpose", "status", "status_class", "search", "path_prefix", "path_exact", "method", "referer_host", "server_host", "http_version", "mime_type", "cache_status", "tls_protocol", "timing_available", "upstream_available", "timing_min_ms", "timing_max_ms", "country"] %}
   <input type="hidden" name="{{ key }}" value="{{ value }}">
   {% endif %}
   {% endfor %}
@@ -136,6 +136,16 @@
       <option value="" {% if filt.status is none %}selected{% endif %}>{{ t("filter.all") }}</option>
       {% for entry in filter_options.statuses %}
       <option value="{{ entry.value }}" {% if filt.status == entry.value %}selected{% endif %}>{{ entry.label }}</option>
+      {% endfor %}
+    </select>
+  </div>
+  <div class="form-control">
+    <label class="label py-1" for="f-country"><span class="label-text">{{ t("filter.country") }}</span></label>
+    <select id="f-country" name="country" class="select select-bordered select-sm">
+      <option value="" {% if not filt.country %}selected{% endif %}>{{ t("filter.all") }}</option>
+      <option value="UNKNOWN" {% if filt.country == "UNKNOWN" %}selected{% endif %}>{{ t("filter.country_unknown") }}</option>
+      {% for code in filter_options.countries %}
+      <option value="{{ code }}" {% if filt.country == code %}selected{% endif %}>{{ code }}</option>
       {% endfor %}
     </select>
   </div>

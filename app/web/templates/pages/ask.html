@@ -24,6 +24,7 @@
   data-upstream-available="{{ "yes" if filt.upstream_available is true else ("no" if filt.upstream_available is false else "") }}"
   data-timing-min-ms="{{ filt.timing_min_ms if filt.timing_min_ms is not none else "" }}"
   data-timing-max-ms="{{ filt.timing_max_ms if filt.timing_max_ms is not none else "" }}"
+  data-country="{{ filt.country or "" }}"
     data-msg-evidence="{{ t("ask.evidence") }}"
     data-msg-disabled="{{ t("ai.disabled") }}"
     data-msg-unavailable="{{ t("ai.unavailable") }}"

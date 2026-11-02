@@ -80,6 +80,24 @@ def _split_hosts(values: list[str] | None) -> list[str]:
     return hosts
 
 
+def _country_lookup(args: argparse.Namespace):
+    """Country lookup for import/reprocess from flag or environment.
+
+    ``--geoip-db`` wins; otherwise ``GEOIP_DB_PATH``; empty means
+    unconfigured (fixed ``unavailable`` markers). The handle opens
+    read-only and never downloads anything.
+    """
+    from app.ingestion.geoip import CountryLookup
+
+    configured = args.geoip_db
+    if configured is None:
+        configured = os.environ.get("GEOIP_DB_PATH", "")
+    configured = (configured or "").strip()
+    if not configured:
+        return CountryLookup.unavailable()
+    return CountryLookup.open(configured)
+
+
 def _resolve_explicit_hosts(
     *,
     site_hostname: str,
@@ -183,51 +201,63 @@ def cmd_import(args: argparse.Namespace) -> int:
         return 2
     payloads: list[dict] = []
     overall = "completed"
-    for index, relative in enumerate(args.path):
-        try:
-            source = SourceConfig(
-                source_id=args.source_id,
-                format_id=args.format,
-                allowed_root=Path(args.root),
-                relative_path=relative,
-                allowed_hosts=allowed_hosts,
-            )
-        except ValueError:
-            print("error: invalid source configuration", file=sys.stderr)
-            return 2
-        from app.db.private import PrivateUnavailable
-        from app.db.repositories import SourceBindingError
+    from app.db.private import PrivateUnavailable
+    from app.db.repositories import SourceBindingError
+    from app.ingestion.geoip import GeoipError
 
-        try:
-            result = run_import(
-                Path(args.db),
-                source=source,
-                site_id=args.site_id,
-                site_name=args.site_name,
-                site_hostname=args.site_hostname,
-                server_type=args.server_type,
-                path_alias=relative,
-                hmac_key=_hmac_key(),
-                batch_size=args.batch_size,
-                limits=limits,
-                host_filter=host_filter,
-                custom_format=custom_format,
-                gzip_limits=gzip_limits,
-                autodetect_sample_lines=args.autodetect_sample_lines,
-                capture_originals=args.capture_original_ips,
+    with _country_lookup(args) as lookup:
+        for index, relative in enumerate(args.path):
+            try:
+                source = SourceConfig(
+                    source_id=args.source_id,
+                    format_id=args.format,
+                    allowed_root=Path(args.root),
+                    relative_path=relative,
+                    allowed_hosts=allowed_hosts,
+                )
+            except ValueError:
+                print("error: invalid source configuration", file=sys.stderr)
+                return 2
+            try:
+                result = run_import(
+                    Path(args.db),
+                    source=source,
+                    site_id=args.site_id,
+                    site_name=args.site_name,
+                    site_hostname=args.site_hostname,
+                    server_type=args.server_type,
+                    path_alias=relative,
+                    hmac_key=_hmac_key(),
+                    batch_size=args.batch_size,
+                    limits=limits,
+                    host_filter=host_filter,
+                    custom_format=custom_format,
+                    gzip_limits=gzip_limits,
+                    autodetect_sample_lines=args.autodetect_sample_lines,
+                    capture_originals=args.capture_original_ips,
+                    country_lookup=lookup,
+                    geoip_required=args.geoip_required,
+                )
+            except PrivateUnavailable as exc:
+                print(f"error: {exc.code}", file=sys.stderr)
+                return 1
+            except GeoipError as exc:
+                print(f"error: {exc.code}", file=sys.stderr)
+                return 1
+            except SourceBindingError as exc:
+                print(f"error: {exc.code}", file=sys.stderr)
+                return 1
+            entry = _result_payload(result)
+            entry["file_index"] = index
+            entry["format_id"] = (
+                custom_format.format_id if custom_format is not None else args.format
             )
-        except PrivateUnavailable as exc:
-            print(f"error: {exc.code}", file=sys.stderr)
-            return 1
-        except SourceBindingError as exc:
-            print(f"error: {exc.code}", file=sys.stderr)
-            return 1
-        entry = _result_payload(result)
-        entry["file_index"] = index
-        entry["format_id"] = custom_format.format_id if custom_format is not None else args.format
-        payloads.append(entry)
-        if result.status != "completed":
-            overall = result.status
+            entry["geoip_available"] = result.geoip_available
+            entry["geoip_source"] = result.geoip_source
+            entry["geoip_release"] = result.geoip_release
+            payloads.append(entry)
+            if result.status != "completed":
+                overall = result.status
     if len(payloads) == 1:
         print(json.dumps(payloads[0]))
     else:
@@ -238,6 +268,7 @@ def cmd_import(args: argparse.Namespace) -> int:
 def cmd_reprocess(args: argparse.Namespace) -> int:
     """Enrich stored rows from their approved read-only source files."""
     from app.db.private import PrivateUnavailable
+    from app.ingestion.geoip import GeoipError
 
     custom_format = None
     if args.format == CUSTOM or args.format_config is not None:
@@ -295,37 +326,43 @@ def cmd_reprocess(args: argparse.Namespace) -> int:
         return 2
     payloads: list[dict] = []
     overall = "completed"
-    for index, relative in enumerate(args.path):
-        try:
-            source = SourceConfig(
-                source_id=args.source_id,
-                format_id=args.format,
-                allowed_root=Path(args.root),
-                relative_path=relative,
-                allowed_hosts=sorted(host_filter.hosts) if host_filter is not None else None,
-            )
-        except ValueError:
-            print("error: invalid source configuration", file=sys.stderr)
-            return 2
-        try:
-            result = run_reprocess(
-                Path(args.db),
-                source=source,
-                site_id=args.site_id,
-                site_hostname=args.site_hostname,
-                server_type=args.server_type,
-                hmac_key=_hmac_key(),
-                batch_size=args.batch_size,
-                limits=limits,
-                host_filter=host_filter,
-                custom_format=custom_format,
-                gzip_limits=gzip_limits,
-                autodetect_sample_lines=args.autodetect_sample_lines,
-                capture_originals=args.capture_original_ips,
-            )
-        except PrivateUnavailable as exc:
-            print(f"error: {exc.code}", file=sys.stderr)
-            return 1
+    with _country_lookup(args) as lookup:
+        for index, relative in enumerate(args.path):
+            try:
+                source = SourceConfig(
+                    source_id=args.source_id,
+                    format_id=args.format,
+                    allowed_root=Path(args.root),
+                    relative_path=relative,
+                    allowed_hosts=sorted(host_filter.hosts) if host_filter is not None else None,
+                )
+            except ValueError:
+                print("error: invalid source configuration", file=sys.stderr)
+                return 2
+            try:
+                result = run_reprocess(
+                    Path(args.db),
+                    source=source,
+                    site_id=args.site_id,
+                    site_hostname=args.site_hostname,
+                    server_type=args.server_type,
+                    hmac_key=_hmac_key(),
+                    batch_size=args.batch_size,
+                    limits=limits,
+                    host_filter=host_filter,
+                    custom_format=custom_format,
+                    gzip_limits=gzip_limits,
+                    autodetect_sample_lines=args.autodetect_sample_lines,
+                    capture_originals=args.capture_original_ips,
+                    country_lookup=lookup,
+                    geoip_required=args.geoip_required,
+                )
+            except PrivateUnavailable as exc:
+                print(f"error: {exc.code}", file=sys.stderr)
+                return 1
+            except GeoipError as exc:
+                print(f"error: {exc.code}", file=sys.stderr)
+                return 1
         entry = {
             "file_index": index,
             "status": result.status,
@@ -438,6 +475,18 @@ def build_parser() -> argparse.ArgumentParser:
         default=False,
         help="Store validated client addresses encrypted (requires ORIGINAL_IP_KEY)",
     )
+    importer.add_argument(
+        "--geoip-db",
+        default=None,
+        help="Mounted offline country database (DB-IP Country Lite MMDB);"
+        " defaults to GEOIP_DB_PATH; empty stores unavailable markers",
+    )
+    importer.add_argument(
+        "--geoip-required",
+        action="store_true",
+        default=False,
+        help="Fail before any write when the country database is missing/unreadable",
+    )
     importer.set_defaults(func=cmd_import)
 
     reprocess = sub.add_parser(
@@ -483,6 +532,18 @@ def build_parser() -> argparse.ArgumentParser:
         action="store_true",
         default=False,
         help="Store validated client addresses encrypted (requires ORIGINAL_IP_KEY)",
+    )
+    reprocess.add_argument(
+        "--geoip-db",
+        default=None,
+        help="Mounted offline country database (DB-IP Country Lite MMDB);"
+        " defaults to GEOIP_DB_PATH; empty stores unavailable markers",
+    )
+    reprocess.add_argument(
+        "--geoip-required",
+        action="store_true",
+        default=False,
+        help="Fail before any write when the country database is missing/unreadable",
     )
     reprocess.set_defaults(func=cmd_reprocess)
 

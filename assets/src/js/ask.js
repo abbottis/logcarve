@@ -61,6 +61,7 @@
     text("search");
     text("client");
     text("server-host", "server_host");
+    text("country");
     text("http-version", "http_version");
     text("mime-type", "mime_type");
     text("cache-status", "cache_status");

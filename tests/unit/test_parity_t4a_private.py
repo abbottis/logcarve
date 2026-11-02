@@ -24,7 +24,7 @@ from app.web.routes import _valid_csrf_field
 
 def _db(tmp_path):
     db = tmp_path / "t4a.sqlite3"
-    assert migrate(db).applied == (1, 2, 3, 4, 5, 6)
+    assert migrate(db).applied == (1, 2, 3, 4, 5, 6, 7)
     return db
 
 

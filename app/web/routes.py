@@ -39,6 +39,7 @@ from app.analytics.service import Finding
 from app.api.deps import read_store, require_admin_session
 from app.config import load_settings
 from app.db import private as private_store
+from app.ingestion.geoip import normalize_country_selector
 from app.web import private_ip as private_view
 from app.web.evidence import evidence_url as _evidence_url
 from app.web.locales import t
@@ -296,6 +297,15 @@ def _parse_matchers(q) -> tuple[dict | None, str | None]:
         len(client) != 64 or any(char not in "0123456789abcdef" for char in client)
     ):
         return None, "error.bad_params"
+    # T5a offline-country selector (PAR-09) through the single shared
+    # allowlist: ISO code (any case, stored uppercase) or the explicit
+    # UNKNOWN selector for rows with no known country. Blank stays no
+    # filter here (never Unknown); anything else rejects.
+    raw_country = (q.get("country") or "").strip() or None
+    try:
+        country = normalize_country_selector(raw_country)
+    except ValueError:
+        return None, "error.bad_params"
     enriched, error = _parse_enrichment_matchers(q)
     if error is not None:
         return None, error
@@ -308,6 +318,7 @@ def _parse_matchers(q) -> tuple[dict | None, str | None]:
         "traffic": traffic,
         "search": search,
         "client": client,
+        "country": country,
         **selectors,
         **enriched,
     }, None
@@ -509,6 +520,7 @@ MATCHER_KEYS = (
     "upstream_available",
     "timing_min_ms",
     "timing_max_ms",
+    "country",
 )
 
 
@@ -711,6 +723,7 @@ def _base_filter(params, site: str) -> AnalyticsFilter:
         upstream_available=matchers.get("upstream_available"),
         timing_min_ms=matchers.get("timing_min_ms"),
         timing_max_ms=matchers.get("timing_max_ms"),
+        country=matchers.get("country"),
         limit=100,
         offset=0,
     )
@@ -755,6 +768,7 @@ def _overview_context(request, conn, rules, params) -> tuple[dict | None, str | 
     traffic = service.traffic_breakdown(conn, filt, rules)
     resources = service.resource_breakdown(conn, filt, rules)
     browsers = service.browser_breakdown(conn, filt, rules)
+    countries = service.country_breakdown(conn, filt, rules)
     try:
         heatmap = service.heatmap(conn, filt, rules, tz_name=params["tz_name"])
         heatmap_error = None
@@ -862,6 +876,7 @@ def _overview_context(request, conn, rules, params) -> tuple[dict | None, str | 
             "traffic": traffic,
             "resources": resources,
             "browsers": browsers,
+            "countries": countries,
             "heatmap": heatmap,
             "heatmap_error": heatmap_error,
             "heatmap_hours": list(range(24)),
@@ -1048,6 +1063,9 @@ def _filter_options(rules) -> dict:
         "purposes": purposes,
         "methods": list(STANDARD_METHODS),
         "statuses": _standard_statuses(),
+        # Observed ISO codes attach per request below; a selected code
+        # is always retained even when unobserved in the scope.
+        "countries": [],
     }
 
 
@@ -1078,6 +1096,11 @@ def _attach_observed_options(conn, context: dict, filt, rules) -> None:
         statuses.append({"value": filt.status, "label": status_label(filt.status)})
     context["filter_options"]["methods"] = methods
     context["filter_options"]["statuses"] = sorted(statuses, key=lambda e: e["value"])
+    observed_countries = queries.distinct_countries(conn, filt, clf)
+    countries = sorted(set(observed_countries))
+    if filt.country is not None and filt.country != "UNKNOWN" and filt.country not in countries:
+        countries.append(filt.country)
+    context["filter_options"]["countries"] = sorted(countries)
 
 
 def _active_filter_display(matchers: dict, rules=None) -> list[dict[str, str]]:
@@ -1111,6 +1134,8 @@ def _active_filter_display(matchers: dict, rules=None) -> list[dict[str, str]]:
                 shown = status_label(int(value))
             except (TypeError, ValueError):
                 shown = value
+        elif key == "country":
+            shown = t("filter.country_unknown") if value == "UNKNOWN" else value
         elif key in ("timing_available", "upstream_available"):
             shown = t("filter.timing_with") if value is True else t("filter.timing_without")
         elif key in ("timing_min_ms", "timing_max_ms"):

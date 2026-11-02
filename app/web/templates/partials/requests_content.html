@@ -108,6 +108,7 @@
                   <div><dt class="inline text-base-content/70">{{ t("requests.mime_type") }}: </dt><dd class="inline tech">{{ row.mime_type or "—" }}</dd></div>
                   <div><dt class="inline text-base-content/70">{{ t("requests.cache_status") }}: </dt><dd class="inline tech">{{ row.cache_status or "—" }}</dd></div>
                   <div><dt class="inline text-base-content/70">{{ t("requests.tls_protocol") }}: </dt><dd class="inline tech">{{ row.tls_protocol or "—" }}</dd></div>
+                  <div><dt class="inline text-base-content/70">{{ t("filter.country") }}: </dt><dd class="inline tech">{{ t("filter.country_unknown") if not row.country_code else row.country_code }}{% if row.geo_source %} ({{ row.geo_source }}{% if row.geo_release %}, {{ row.geo_release }}{% endif %}){% endif %}</dd></div>
                   <div><dt class="inline text-base-content/70">{{ t("requests.format_id") }}: </dt><dd class="inline tech">{{ row.format_id or "—" }}{% if row.policy_version %} ({{ t("requests.policy_version") }} {{ row.policy_version }}){% endif %}</dd></div>
                   <div><dt class="inline text-base-content/70">{{ t("filter.traffic") }}: </dt><dd class="inline">{{ t("traffic." + row.traffic) if row.traffic else "—" }}</dd></div>
                   {% if row.rule_meta %}
@@ -158,4 +159,5 @@
 
 <div class="mt-6 space-y-2 text-sm text-base-content/70">
   <p>{{ t("data.events", count=summary.coverage.unique_events) }} · {{ t("data.observed", min=summary.coverage.observed_min, max=summary.coverage.observed_max) }}</p>
+  <p><a class="link" href="https://db-ip.com">{{ t("geo.attribution") }}</a></p>
 </div>

@@ -88,6 +88,7 @@ class ChatBody(BaseModel):
     upstream_available: bool | None = Field(default=None)
     timing_min_ms: float | None = Field(default=None, ge=0)
     timing_max_ms: float | None = Field(default=None, ge=0)
+    country: str | None = Field(default=None, min_length=1, max_length=16)
 
 
 def _chat_allowed(session_id: str) -> bool:
@@ -199,6 +200,7 @@ def post_chat(request: Request, body: ChatBody):
                 upstream_available=body.upstream_available,
                 timing_min_ms=body.timing_min_ms,
                 timing_max_ms=body.timing_max_ms,
+                country=body.country,
             )
         except InvestigationError as exc:
             return error_response(_ERROR_STATUS.get(exc.code, 500), exc.code, str(exc), request_id)
