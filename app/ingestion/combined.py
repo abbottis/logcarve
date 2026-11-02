@@ -49,7 +49,7 @@ import ipaddress
 import math
 import re
 from dataclasses import dataclass, field
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta, timezone
 from urllib.parse import urlsplit
 
 # Explicit source presets. Unknown format IDs are rejected, never guessed.
@@ -167,6 +167,48 @@ _PRESET_RES = {
 _METHOD_RE = re.compile(r"^[\x21-\x7e]{1,32}$")
 _VERSION_RE = re.compile(r"^HTTP/\d+(\.\d+)?$")
 _TIME_FORMAT = "%d/%b/%Y:%H:%M:%S %z"
+
+#: Declared custom timestamp modes (T5b1, PAR-01). ``combined`` is the
+#: unchanged NCSA default; ``iso8601`` requires an explicit offset or
+#: ``Z``; ``epoch_s``/``epoch_ms`` carry plain second/millisecond
+#: counts under the declared unit. Anything else is rejected at spec
+#: load, never guessed at parse time.
+COMBINED_TIME = "combined"
+ISO8601_TIME = "iso8601"
+EPOCH_S_TIME = "epoch_s"
+EPOCH_MS_TIME = "epoch_ms"
+TIME_FORMATS = (COMBINED_TIME, ISO8601_TIME, EPOCH_S_TIME, EPOCH_MS_TIME)
+
+#: Strict ISO-8601 shape for the ``iso8601`` mode: calendar date, ``T``
+#: separator, seconds resolution with an optional 1-9 digit fraction,
+#: then a mandatory ``Z`` or numeric offset (``HH:MM`` or ``HHMM``).
+#: Naive (offset-free) values never match, so no host-timezone or
+#: locale guessing can sneak in through this mode.
+_ISO8601_RE = re.compile(
+    r"^([0-9]{4})-([0-9]{2})-([0-9]{2})T"
+    r"([0-9]{2}):([0-9]{2}):([0-9]{2})"
+    r"(?:\.([0-9]{1,9}))?"
+    r"(Z|[+-][0-9]{2}:?[0-9]{2})$"
+)
+
+#: Plain decimal grammar for the epoch modes: ASCII digits with an
+#: optional fraction. No sign, no exponent, no ``inf``/``nan`` — those
+#: never match and reject as malformed instead of parsing.
+_EPOCH_RE = re.compile(r"^([0-9]+)(?:\.([0-9]+))?$")
+
+#: Largest representable UTC instant (9999-12-31T23:59:59.999999) in
+#: epoch microseconds; larger values are out of range, never wrapped.
+_MAX_EPOCH_US = 253402300799999999
+
+#: SQLite signed-64 maximum: the largest storable response size.
+#: Larger values cannot bind and reject at parse time instead.
+MAX_BYTES_VALUE = 2**63 - 1
+
+#: Byte tokens are ASCII digits only (at most 19: the width of the
+#: int64 maximum). Longer tokens reject before any ``int`` conversion,
+#: so hostile digit runs can neither crash the parser nor slip past
+#: the range check.
+_BYTES_RE = re.compile(r"^[0-9]{1,19}$")
 _HOST_RE = re.compile(r"^\S{1,253}$")
 _CACHE_RE = re.compile(r"^[A-Za-z_]{1,32}$")
 _TOKEN_RE = re.compile(r"^[A-Za-z0-9._-]{1,32}$")
@@ -345,6 +387,13 @@ def enrichment_policy(format_id: str, custom_format: object = None) -> str:
     digest.update(b"\x00" + str(source).encode("utf-8"))
     timing = getattr(custom_format, "timing", {})
     digest.update(b"\x00" + _json.dumps(timing, sort_keys=True, default=str).encode("utf-8"))
+    # A declared non-default timestamp mode participates in the
+    # definition fingerprint; absent or ``combined`` modes digest
+    # exactly the legacy bytes, so unchanged definitions keep their
+    # compatible identity.
+    mode = getattr(custom_format, "time_format", COMBINED_TIME) or COMBINED_TIME
+    if mode != COMBINED_TIME:
+        digest.update(b"\x00time:" + str(mode).encode("utf-8"))
     return f"{PARSER_POLICY_VERSION}+custom:{digest.hexdigest()[:16]}"
 
 
@@ -493,9 +542,32 @@ _REJECTION_REASONS = frozenset(
         "invalid_mime",
         "invalid_tls",
         "invalid_timing",
+        "invalid_bytes",
         "custom_timeout",
     }
 )
+
+
+def normalize_bytes_value(value: str) -> int | None:
+    """Validate one response-size token against the SQLite int64 domain.
+
+    ``-`` (the absent marker) yields ``None``; ``0`` stays a valid zero
+    measurement. Anything else must be 1-19 ASCII digits within
+    ``0..2**63 - 1``. Longer digit runs reject before conversion (no
+    ``int``-limit crash, no truncation), non-digit text (signs,
+    decimals, exponents, unicode digits, ``inf``/``nan``) rejects, and
+    values above the int64 maximum reject: they could never bind on
+    insert. Raises ``ValueError("invalid_bytes")``; the message carries
+    the fixed reason only, never the token.
+    """
+    if value == "-":
+        return None
+    if not _BYTES_RE.match(value):
+        raise ValueError("invalid_bytes")
+    number = int(value)
+    if number > MAX_BYTES_VALUE:
+        raise ValueError("invalid_bytes")
+    return number
 
 
 def _excerpt(reason: str, limits: Limits | None = None) -> str:
@@ -603,6 +675,85 @@ def _normalize_time(value: str) -> tuple[datetime, int]:
     offset = moment.utcoffset()
     assert offset is not None  # %z always yields an aware datetime
     return moment.astimezone(UTC), int(offset.total_seconds() // 60)
+
+
+def _normalize_iso8601_time(value: str) -> tuple[datetime, int]:
+    """Normalize one strict ISO-8601 instant to UTC with microsecond precision.
+
+    Requires an explicit ``Z`` or numeric offset; naive values never
+    match and reject. Fractions keep up to 6 digits; longer fractions
+    truncate (floor) to documented microsecond precision. Raises
+    ``ValueError("invalid_time")`` with the fixed reason only.
+    """
+    match = _ISO8601_RE.match(value)
+    if match is None:
+        raise ValueError("invalid_time")
+    year, month, day, hour, minute, second = (int(part) for part in match.groups()[:6])
+    fraction = match.group(7) or ""
+    microsecond = (int(fraction) * 1_000_000) // (10 ** len(fraction)) if fraction else 0
+    zone = match.group(8)
+    try:
+        if zone == "Z":
+            offset_minutes = 0
+            tzinfo = UTC
+        else:
+            sign = 1 if zone[0] == "+" else -1
+            digits = zone[1:].replace(":", "")
+            offset_minutes = sign * (int(digits[:2]) * 60 + int(digits[2:]))
+            if not -1439 <= offset_minutes <= 1439:
+                raise ValueError("invalid_time")
+            tzinfo = timezone(timedelta(minutes=offset_minutes))
+        moment = datetime(year, month, day, hour, minute, second, microsecond, tzinfo=tzinfo)
+    except ValueError as exc:
+        raise ValueError("invalid_time") from exc
+    return moment.astimezone(UTC), offset_minutes
+
+
+def _normalize_epoch_time(value: str, unit: str) -> tuple[datetime, int]:
+    """Normalize one plain epoch count to UTC with microsecond precision.
+
+    ``unit`` is ``epoch_s`` or ``epoch_ms`` under its declared mode:
+    ASCII digits with an optional fraction, never signed, never
+    scientific, never non-finite. Fractions truncate (floor) to
+    microseconds; the instant must fit in ``datetime`` (years
+    1970-9999). Epoch instants are UTC by definition, so the retained
+    offset is ``+0000``. Raises ``ValueError("invalid_time")``.
+    """
+    match = _EPOCH_RE.match(value)
+    if match is None:
+        raise ValueError("invalid_time")
+    whole, fraction = match.group(1), match.group(2) or ""
+    # Bounded token width before any conversion: far above the widest
+    # valid instant, far below the interpreter digit-conversion limit.
+    if len(whole) + len(fraction) > 32:
+        raise ValueError("invalid_time")
+    stripped = whole.lstrip("0") or "0"
+    # Width pre-check before any arithmetic: even the maximum valid
+    # instant needs only 12 (seconds) or 15 (milliseconds) digits.
+    if len(stripped) > (12 if unit == EPOCH_S_TIME else 15):
+        raise ValueError("invalid_time")
+    factor = 1_000_000 if unit == EPOCH_S_TIME else 1_000
+    total_us = int(stripped) * factor
+    if fraction:
+        total_us += (int(fraction) * factor) // (10 ** len(fraction))
+    if total_us > _MAX_EPOCH_US:
+        raise ValueError("invalid_time")
+    try:
+        moment = datetime(1970, 1, 1, tzinfo=UTC) + timedelta(microseconds=total_us)
+    except (OverflowError, ValueError) as exc:
+        raise ValueError("invalid_time") from exc
+    return moment, 0
+
+
+def _normalize_time_with_mode(value: str, mode: str) -> tuple[datetime, int]:
+    """Normalize one timestamp under its declared ``time_format`` mode."""
+    if mode == COMBINED_TIME:
+        return _normalize_time(value)
+    if mode == ISO8601_TIME:
+        return _normalize_iso8601_time(value)
+    if mode in (EPOCH_S_TIME, EPOCH_MS_TIME):
+        return _normalize_epoch_time(value, mode)
+    raise ValueError("invalid_time")
 
 
 def _normalize_request(request: str, limits: Limits) -> RequestLine:
@@ -723,8 +874,10 @@ def parse_line(
     status = int(match.group("status"))
     if not 100 <= status <= 599:
         return reject("invalid_status")
-    size = match.group("size")
-    bytes_sent = int(size) if size != "-" else None
+    try:
+        bytes_sent = normalize_bytes_value(match.group("size"))
+    except ValueError:
+        return reject("invalid_bytes")
 
     # --- timestamp (UTC normalized, original offset retained) ---
     try:

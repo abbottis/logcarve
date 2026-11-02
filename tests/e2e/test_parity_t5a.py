@@ -158,10 +158,16 @@ def test_country_unknown_breakdown_and_drilldown(page, c5_base):
     # Local country chart alongside the accessible table.
     expect(page.locator("#overview-countries-chart")).to_be_visible(timeout=10000)
     assert page.locator("#overview-countries-chart").evaluate("el => el.width > 0 && el.height > 0")
-    # These rows were stored while no database could be read: the
-    # copy names that past fact and never claims the server has no
-    # database configured.
-    expect(page.locator("body")).to_contain_text("stored while no country database could be read")
+    # All four rows are documentation/private addresses, so every
+    # lookup in this selection yielded Unknown with no recorded
+    # source: the copy says exactly that (never a claim about the
+    # configured database, and never the stored-while-unavailable
+    # past fact, since unavailable and legacy counts are both zero).
+    expect(page.locator("body")).to_contain_text("carry no recorded country source")
+    expect(page.locator("body")).to_contain_text(
+        "Coverage: 0 with country \u00b7 4 unknown \u00b7 0 unavailable \u00b7 0 legacy"
+    )
+    assert "stored while no country database could be read" not in page.content()
     assert "No country database is configured" not in page.content()
     drilldown = page.locator('section:has(#country-h) a[href*="country="]')
     assert drilldown.count() >= 1

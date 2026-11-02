@@ -70,6 +70,29 @@ def sqlite_epoch_micros(value: object) -> int | None:
     return epoch_micros(value)
 
 
+#: Split-half byte aggregates. SQLite raises ``integer overflow``
+#: once a plain ``SUM(bytes)`` exceeds int64, so byte totals aggregate
+#: the high/low 32-bit halves instead: each half-sum fits for any
+#: importable dataset (overflowing one half needs exabytes of logged
+#: response bytes), and :func:`combine_bytes_total` joins them into
+#: one exact Python integer — never via float, never raising, never
+#: silently truncated.
+_SUM_BYTES_HALVES = "COALESCE(SUM((bytes) >> 32), 0), COALESCE(SUM((bytes) & 4294967295), 0)"
+
+
+def combine_bytes_total(hi: object, lo: object) -> int | None:
+    """Exact integer byte total from split-half aggregates.
+
+    ``None`` halves (an all-``NULL`` group, never an overflow) stay
+    ``None``: no known bytes. Anything else combines with exact
+    integer arithmetic — ordinary and extreme totals alike, including
+    sums far above int64 that a plain ``SUM`` could never return.
+    """
+    if hi is None or lo is None:
+        return None
+    return int(hi) * 4294967296 + int(lo)
+
+
 def register_time_functions(conn: sqlite3.Connection) -> None:
     """Register the exact-time scalars on one DB-API connection."""
     conn.create_function("epoch_micros", 1, sqlite_epoch_micros, deterministic=True)
@@ -297,17 +320,19 @@ def summary_counts(
         "SELECT COUNT(*),"
         " COUNT(CASE WHEN status BETWEEN 400 AND 499 THEN 1 END),"
         " COUNT(CASE WHEN status BETWEEN 500 AND 599 THEN 1 END),"
-        " COALESCE(SUM(bytes), 0),"
+        f" {_SUM_BYTES_HALVES},"
         " COUNT(bytes)"
         f" FROM requests WHERE {where}",
         params,
     ).fetchone()
+    total = combine_bytes_total(row[3], row[4])
+    assert total is not None  # COALESCE halves never yield NULL
     return {
         "requests": row[0],
         "errors_4xx": row[1],
         "errors_5xx": row[2],
-        "bytes_total": row[3],
-        "bytes_measured": row[4],
+        "bytes_total": total,
+        "bytes_measured": row[5],
     }
 
 
@@ -375,7 +400,9 @@ def distinct_statuses(
 _TOP_PATH_ORDER: dict[str, str] = {
     "requests_desc": "requests DESC, path ASC, method ASC",
     "errors_desc": "errors DESC, requests DESC, path ASC, method ASC",
-    "bytes_desc": "bytes_total DESC, requests DESC, path ASC, method ASC",
+    # Split-half ordering matches exact-total ordering: comparing the
+    # high halves first, then the low halves, is the numeric order.
+    "bytes_desc": "bytes_hi DESC, bytes_lo DESC, requests DESC, path ASC, method ASC",
 }
 
 
@@ -390,7 +417,8 @@ def top_paths(
     rows = conn.execute(
         "SELECT path, method, COUNT(*) AS requests,"
         " COUNT(CASE WHEN status >= 400 THEN 1 END) AS errors,"
-        " COALESCE(SUM(bytes), 0) AS bytes_total"
+        " COALESCE(SUM((bytes) >> 32), 0) AS bytes_hi,"
+        " COALESCE(SUM((bytes) & 4294967295), 0) AS bytes_lo"
         f" FROM requests WHERE {where} GROUP BY path, method ORDER BY {order} LIMIT ? OFFSET ?",
         [*params, query.filt.limit, query.filt.offset],
     ).fetchall()
@@ -401,9 +429,9 @@ def top_paths(
                 "method": method,
                 "requests": count,
                 "errors": errors,
-                "bytes_total": nbytes,
+                "bytes_total": combine_bytes_total(hi, lo),
             }
-            for path, method, count, errors, nbytes in rows
+            for path, method, count, errors, hi, lo in rows
         ],
         total,
     )
@@ -453,13 +481,13 @@ def time_buckets(
     rows = conn.execute(
         f"SELECT substr(ts_utc, 1, {width}), COUNT(*),"
         " COUNT(CASE WHEN status >= 400 THEN 1 END),"
-        " COALESCE(SUM(bytes), 0)"
+        f" {_SUM_BYTES_HALVES}"
         f" FROM requests WHERE {where} GROUP BY substr(ts_utc, 1, {width})",
         params,
     ).fetchall()
     by_key = {
-        key: {"requests": count, "errors": errors, "bytes_total": nbytes}
-        for key, count, errors, nbytes in rows
+        key: {"requests": count, "errors": errors, "bytes_total": combine_bytes_total(hi, lo)}
+        for key, count, errors, hi, lo in rows
     }
     result = []
     for edge in _bucket_edges(filt, bucket):
@@ -777,7 +805,7 @@ def traffic_breakdown(
         f" {case} AS traffic, COUNT(*),"
         " COUNT(CASE WHEN status BETWEEN 400 AND 499 THEN 1 END),"
         " COUNT(CASE WHEN status BETWEEN 500 AND 599 THEN 1 END),"
-        " COALESCE(SUM(bytes), 0)"
+        f" {_SUM_BYTES_HALVES}"
         f" FROM requests WHERE {where} GROUP BY {case}",
         [*case_params, *params, *case_params],
     ).fetchall()
@@ -787,9 +815,9 @@ def traffic_breakdown(
             "requests": count,
             "errors_4xx": e4,
             "errors_5xx": e5,
-            "bytes_total": nbytes,
+            "bytes_total": combine_bytes_total(hi, lo),
         }
-        for traffic, count, e4, e5, nbytes in rows
+        for traffic, count, e4, e5, hi, lo in rows
     ]
 
 
@@ -808,7 +836,7 @@ def country_breakdown(
         "SELECT COALESCE(country_code, 'Unknown') AS country, COUNT(*),"
         " COUNT(CASE WHEN status BETWEEN 400 AND 499 THEN 1 END),"
         " COUNT(CASE WHEN status BETWEEN 500 AND 599 THEN 1 END),"
-        " COALESCE(SUM(bytes), 0)"
+        f" {_SUM_BYTES_HALVES}"
         " FROM requests WHERE"
         f" {where} GROUP BY country ORDER BY COUNT(*) DESC, country ASC",
         params,
@@ -819,9 +847,9 @@ def country_breakdown(
             "requests": int(count),
             "errors_4xx": int(e4),
             "errors_5xx": int(e5),
-            "bytes_total": int(nbytes),
+            "bytes_total": combine_bytes_total(hi, lo),
         }
-        for country, count, e4, e5, nbytes in rows
+        for country, count, e4, e5, hi, lo in rows
     ]
 
 
@@ -907,7 +935,7 @@ def bot_index_rows(
         f"SELECT {_MATCH} AS idx, COUNT(*),"
         " COUNT(CASE WHEN status BETWEEN 400 AND 499 THEN 1 END),"
         " COUNT(CASE WHEN status BETWEEN 500 AND 599 THEN 1 END),"
-        " COALESCE(SUM(bytes), 0),"
+        f" {_SUM_BYTES_HALVES},"
         " COUNT(DISTINCT user_agent), COUNT(DISTINCT path)"
         f" FROM requests WHERE {where} AND {_MATCH} BETWEEN 0 AND {top}"
         " GROUP BY idx",
@@ -919,11 +947,11 @@ def bot_index_rows(
             "requests": count,
             "errors_4xx": e4,
             "errors_5xx": e5,
-            "bytes_total": nbytes,
+            "bytes_total": combine_bytes_total(hi, lo),
             "distinct_agents": agents,
             "distinct_paths": paths,
         }
-        for idx, count, e4, e5, nbytes, agents, paths in rows
+        for idx, count, e4, e5, hi, lo, agents, paths in rows
     ]
 
 
@@ -936,16 +964,18 @@ def bot_rule_stats(
         "SELECT COUNT(*),"
         " COUNT(CASE WHEN status BETWEEN 400 AND 499 THEN 1 END),"
         " COUNT(CASE WHEN status BETWEEN 500 AND 599 THEN 1 END),"
-        " COALESCE(SUM(bytes), 0), COUNT(DISTINCT user_agent)"
+        f" {_SUM_BYTES_HALVES}, COUNT(DISTINCT user_agent)"
         f" FROM requests WHERE {where} AND {_MATCH} = ?",
         [*params, classifier.spec, index],
     ).fetchone()
+    total = combine_bytes_total(row[3], row[4])
+    assert total is not None  # COALESCE halves never yield NULL
     return {
         "requests": row[0],
         "errors_4xx": row[1],
         "errors_5xx": row[2],
-        "bytes_total": row[3],
-        "distinct_agents": row[4],
+        "bytes_total": total,
+        "distinct_agents": row[5],
     }
 
 
@@ -1369,13 +1399,18 @@ def resource_breakdown(
     where, params = _where(filt, classifier)
     rows = conn.execute(
         f"SELECT {_RESOURCE_KIND_CASE} AS kind, COUNT(*),"
-        " COUNT(CASE WHEN status >= 400 THEN 1 END), COALESCE(SUM(bytes), 0)"
+        f" COUNT(CASE WHEN status >= 400 THEN 1 END), {_SUM_BYTES_HALVES}"
         f" FROM requests WHERE {where} GROUP BY kind ORDER BY COUNT(*) DESC, kind ASC",
         params,
     ).fetchall()
     return [
-        {"kind": kind, "requests": count, "errors": errors, "bytes_total": nbytes}
-        for kind, count, errors, nbytes in rows
+        {
+            "kind": kind,
+            "requests": count,
+            "errors": errors,
+            "bytes_total": combine_bytes_total(hi, lo),
+        }
+        for kind, count, errors, hi, lo in rows
     ]
 
 
@@ -2245,7 +2280,10 @@ def ai_only_paths(
     rows = conn.execute(
         "SELECT path,"
         f" SUM(CASE WHEN {cand_sql} THEN 1 ELSE 0 END) AS ai_requests,"
-        f" COALESCE(SUM(CASE WHEN {cand_sql} THEN bytes ELSE 0 END), 0),"
+        " COALESCE(SUM(((CASE"
+        f" WHEN {cand_sql} THEN bytes ELSE 0 END)) >> 32), 0),"
+        " COALESCE(SUM(((CASE"
+        f" WHEN {cand_sql} THEN bytes ELSE 0 END)) & 4294967295), 0),"
         f" GROUP_CONCAT(DISTINCT CASE WHEN {cand_sql} THEN {_MATCH} END)"
         f" FROM requests WHERE {where}"
         " GROUP BY path"
@@ -2253,6 +2291,7 @@ def ai_only_paths(
         f" AND SUM(CASE WHEN {other_sql} THEN 1 ELSE 0 END) = 0"
         " ORDER BY ai_requests DESC, path ASC LIMIT ? OFFSET ?",
         [
+            *cand_params,
             *cand_params,
             *cand_params,
             *cand_params,
@@ -2267,15 +2306,17 @@ def ai_only_paths(
     by_id = {rule_id: rule for rule_id, rule in zip(classifier.rule_ids, classifier.rules)}
     index_to_id = {index: rule_id for index, rule_id in enumerate(classifier.rule_ids)}
     items: list[dict[str, object]] = []
-    for path, count, nbytes, raw_indexes in rows:
+    for path, count, hi, lo, raw_indexes in rows:
         indexes = sorted({int(part) for part in str(raw_indexes).split(",") if part.strip()})
         rules = [index_to_id[i] for i in indexes if i in index_to_id]
         providers = sorted({by_id[r].provider for r in rules if by_id[r].provider})
+        ai_total = combine_bytes_total(hi, lo)
+        assert ai_total is not None  # COALESCE halves never yield NULL
         items.append(
             {
                 "path": path,
                 "ai_requests": int(count),
-                "ai_bytes": int(nbytes),
+                "ai_bytes": ai_total,
                 "rules": rules,
                 "providers": providers,
                 "drilldown": {"path_exact": path, "category": "ai_crawler"},
@@ -2344,7 +2385,8 @@ def seo_status_by_bot_path(
     rule_case, rule_params = rule_id_case_sql(classifier)
     rows = conn.execute(
         "SELECT path,"
-        f" {rule_case} AS rule_id, COUNT(*) AS requests, COALESCE(SUM(bytes), 0) AS bytes_total"
+        f" {rule_case} AS rule_id, COUNT(*) AS requests,"
+        " COALESCE(SUM((bytes) >> 32), 0), COALESCE(SUM((bytes) & 4294967295), 0)"
         f" FROM requests WHERE {match_scoped}"
         " GROUP BY path, rule_id ORDER BY requests DESC, path ASC, rule_id ASC"
         " LIMIT ? OFFSET ?",
@@ -2352,7 +2394,7 @@ def seo_status_by_bot_path(
     ).fetchall()
     by_id = {rule_id: rule for rule_id, rule in zip(classifier.rule_ids, classifier.rules)}
     items: list[dict[str, object]] = []
-    for path, rule_id, count, nbytes in rows:
+    for path, rule_id, count, hi, lo in rows:
         rule = by_id.get(str(rule_id))
         items.append(
             {
@@ -2363,7 +2405,7 @@ def seo_status_by_bot_path(
                 "provider": rule.provider if rule else None,
                 "purpose": rule.purpose if rule else None,
                 "requests": int(count),
-                "bytes_total": int(nbytes),
+                "bytes_total": combine_bytes_total(hi, lo),
                 "drilldown": {"bot": rule_id, "path_exact": path, "status_class": status_class},
             }
         )
@@ -2541,10 +2583,12 @@ def referrer_urls(
             [*params, *relation_params],
         ).fetchone()[0]
     )
+    # Un-COALESCEd halves preserve the all-NULL contract: a group
+    # with no known bytes yields NULL halves, combined to None.
     rows = conn.execute(
         "SELECT referer_host, referer_scheme, referer_path, COUNT(*) AS requests,"
         " SUM(CASE WHEN status >= 400 THEN 1 ELSE 0 END) AS errors,"
-        " SUM(bytes) AS bytes_total, COUNT(bytes) AS bytes_known"
+        " SUM((bytes) >> 32), SUM((bytes) & 4294967295), COUNT(bytes) AS bytes_known"
         f" FROM requests WHERE {scoped}"
         " GROUP BY referer_host, referer_scheme, referer_path"
         " ORDER BY requests DESC, referer_host ASC,"
@@ -2554,7 +2598,7 @@ def referrer_urls(
     ).fetchall()
     lowered_set = set(lowered)
     items: list[dict[str, object]] = []
-    for host, scheme, ref_path, count, errors, nbytes, known in rows:
+    for host, scheme, ref_path, count, errors, hi, lo, known in rows:
         items.append(
             {
                 "referer_host": host,
@@ -2562,7 +2606,7 @@ def referrer_urls(
                 "referer_path": ref_path,
                 "requests": int(count),
                 "errors": int(errors or 0),
-                "bytes_total": int(nbytes) if nbytes is not None else None,
+                "bytes_total": combine_bytes_total(hi, lo),
                 "bytes_known": int(known or 0),
                 "internal": str(host).lower() in lowered_set,
             }

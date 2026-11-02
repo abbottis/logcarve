@@ -135,3 +135,26 @@ application code was imported (70-pattern MIT rule adaptation of
 provider calls, push/main/deploy or release/acceptance claims.
 Independent review stays required; protected E2E recorded BLOCKED in
 this shell sandbox for coordinator execution.
+
+## Parity T5b1 timestamp compatibility + numeric domain, 2 November 2026
+
+Owner-authorized first T5b slice (follow/rotation and
+activation/benchmark helpers explicitly deferred), implemented
+solely by Muse Spark 1.3 Contributor (medium, Contributor ON)
+with sandbox + approval ON. Declared custom timestamp modes
+(`combined` default, `Z`/offset-required ISO-8601, epoch seconds /
+milliseconds with explicit unit; UTC normalization at documented
+microsecond precision; fixed rejections), int64 response-size
+domain enforced before conversion (`invalid_bytes`, no
+conversion-limit crash, no unbindable value), exact split-half
+byte sums end to end (no float, no database overflow), fractional
+journey/window compatibility to the microsecond, plus the two
+frozen-review browser-harness corrections (single phase-aware
+route handler; stored-Unknown vs unavailable expectation). New
+unit (53) and integration (7) tests; full suites green in default
+and AI-enabled configurations; Ruff/format/lock clean. Original
+LogCarve code remains Apache-2.0; no LogWerk application code was
+imported. Synthetic fixtures only; no real logs, keys, provider
+calls, push/main/deploy, follow activation or release/acceptance
+claims. Independent review stays required; protected E2E recorded
+BLOCKED in this shell sandbox for coordinator execution.

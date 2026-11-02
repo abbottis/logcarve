@@ -2860,3 +2860,41 @@ fixtures, 77 rules, core HMAC/auth/usage and prior commits preserved.
 | `npm run build` + `npm run check:external` + `node --test` guard | PASS | Vendor/js/css rebuilt (stale-cancel + accepted-save + country chart shipped to ignored static output, tracked `app.css` rebuilt); no external references; 9/9 guard tests green |
 | `tests/e2e/test_parity_t4c.py` + `tests/e2e/test_parity_t5a.py` (updated reversal + draft-only TZ/country; new every-page credit test) | BLOCKED (environmental) | 12 tests collect cleanly (8 + 4); no new browser launch attempted in this shell sandbox (known `TargetClosedError` block recorded once before, browser sandbox kept ON, no retry/weakening); coordinator runs the protected suite plus the genuine-DB runtime proof after freeze |
 | Genuine MMDB runtime lookup, T5b, release, manual acceptance | NOT RUN | Not implemented or claimed; coordinator-owned mount + protected full rerun and independent review stay pending |
+
+## T5b1 timestamp compatibility + numeric domain — 2026-11-02
+
+Owner-authorized T5b slice 1 (follow/rotation T5b2 and
+activation/benchmark helpers plus documentation closeout T5b3
+explicitly NOT started), implemented solely by Muse Spark 1.3
+Contributor (medium, Contributor ON) with sandbox + approval ON:
+sole writer, no subagents, no extra approval loop, no parent
+files/keys/private history, no product/provider calls, no
+Docker/live activation/push/main/deployment. All application/test
+changes by the implementer on `feature/logwerk-parity-2026-11-01`
+(prior HEAD `016b458` preserved, no reverts, no amend). The 120
+fixtures, 77 bot rules, core HMAC/auth/usage/spent ledger and prior
+commits preserved; no browser import UI, no translations. The two
+frozen-review browser-harness defects were fixed first without
+touching product policy: the T4c error leg now runs under one
+phase-aware route handler (exactly one fulfillment per route, never
+unrouted while a held route is alive; newer-Apply/POST/401/Save/
+canonical/failure-leg assertions unchanged), and the T5a Unknown
+browser test now asserts the actual stored-Unknown
+`no_source_in_selection` copy with the exact `0/4/0/0` coverage
+line (never the stored-while-unavailable past fact, never a claim
+about the configured database). No fake countries, no weakened
+assertions; five application residuals untouched.
+
+| Check | Result | Evidence |
+| --- | --- | --- |
+| Declared custom timestamp modes (`combined`/`iso8601`/`epoch_s`/`epoch_ms`) | PASS | `time_format` validated at spec load (unknown names fail `interrupted:custom_invalid`); strict ISO (`T`, mandatory `Z`/offset, 1–9 fraction digits, truncation to µs documented), plain epoch grammar (no sign/exponent/non-finite, token-width + instant-range bounds, epoch always `+0000`); naive/host-TZ/locale guessing impossible; UTC-canonical storage so equivalent spellings (`Z`/`+00:00`/shifted offsets/epoch units) share one instant; non-default mode joins the definition fingerprint while absent/`combined` digests keep legacy identity (`t1b.1` unchanged) |
+| Byte domain `0..2**63-1` (presets/custom/autodetect/reprocess) | PASS | `normalize_bytes_value` validates ASCII-digit syntax + 19-char bound BEFORE conversion (5000-digit tokens cannot crash or bind; `-`→None, `0`→0, max boundary imports, `2**63`/signed/decimal/unicode/empty reject `invalid_bytes`; absurd tokens trip the pre-existing field budget first with `oversized_field`); no echoed token; single fixed rejection + valid continuation on the same import |
+| Exact split-half byte sums | PASS | Every `SUM(bytes)` site aggregates high/low 32-bit halves and combines them in exact Python integer arithmetic (single scan, no float, SQLite `integer overflow` unreachable for importable data); ordinary totals exact ints end to end, and a true total of `2**64+2**63+4` across max-boundary rows returns exactly (service, API envelope, top-paths, countries, comparison, egress projection all observed); per-row storage still nullable int64; referrer all-NULL groups keep the pre-existing `None` contract |
+| Fractional compatibility (journeys/edges/sorts/windows/reprocess) | PASS | Custom-ingested `1800.000000 s` gap continues one journey while `1800.000001 s` splits into two (exact `epoch_micros` gap/edge/sort, `duration_us` exact); canonical storage + reprocess idempotence verified (mismatch/unparseable zero, stored instants byte-identical); 1 µs evidence window round-trips through the UTC `datetime-local` controls (`value` keeps `.000001`, `step="0.000001"`, canonical URLs) with exact request counts — T4c `_utc_input` preserved, no duplication |
+| `tests/unit/test_parity_t5b1.py` (new, 53) + `tests/integration/test_parity_t5b1_ingest.py` (new, 7) | PASS | Hand-derived instants/offsets/epoch values and int64 edge totals; mode acceptance/rejection matrix, fingerprint identity split, journey 1800±1 µs, reprocess, sums beyond int64 via service + API + comparison + egress, fractional-window web roundtrip |
+| Full suites default AND `AI_ENABLED=true LLM_WARN_AT_USD=999` | PASS | Unit 517 passed + integration 669 passed, 2 skipped (pre-existing live-loopback skips) in EACH configuration, exit codes observed separately via saved status before any tail/echo |
+| `ruff check` + `ruff format --check` repo-wide + `uv lock --check --offline` | PASS | All checks passed; 159 files already formatted; 43 packages resolved, no manifest/lock delta (no new dependencies) |
+| `npm run build` | NOT RUN (not needed) | No authored-asset change in this slice (JS/template revert kept; `app.css` untouched); build stays for the next slice that ships authored assets |
+| Protected browser E2E (`test_parity_t4c.py` reversal, `test_parity_t5a.py` Unknown) | BLOCKED (environmental) | Both harness files compile cleanly and collect; Chromium cannot launch in this shell sandbox (known block, browser sandbox kept ON, no retry/weakening); coordinator reruns the protected suite after freeze, including the two corrected expectations |
+| Gitleaks fresh run here | NOT RUN (no binary) | No `gitleaks` binary in this environment; reviewed independent-review finding recorded: commits `31af5eb..016b458` report ONE reviewed false positive — `generic-api-key` fingerprint `016b45874418397c13381be6c56bbe5a58` at `tests/integration/test_parity_t5a.py:574` is a `monkeypatch.setenv SESSION_SECRET` short local test label inside `test_unavailable_selection_copy_names_stored_rows` (temporary synthetic TestClient), not an actual provider/session credential; existing `docs/technical-spec.md:787` cost-heading false positive historically known; no broad allowlist, no history rewrite. Coordinator runs Gitleaks with fully redacted output before first public push |
+| T5b2 follow/rotation, T5b3 helpers/closeout, release, manual acceptance | NOT RUN | Not implemented or claimed; independent review stays required |

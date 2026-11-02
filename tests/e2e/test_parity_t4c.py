@@ -554,15 +554,22 @@ def test_refresh_inflight_reversal_and_error(page, c4_base):
         # Hold the first two fragment GETs at the network layer: the
         # automatic tick (clean applied state) and the deliberate
         # manual Apply (search/method/status draft) that follows it.
+        # One phase-aware handler serves the whole test: every route
+        # gets exactly one fulfillment action and the handler is never
+        # unrouted while a held route is still alive, so a held route
+        # can always be fulfilled exactly once later.
         held: list = []
+        fail_apply = {"active": False}
 
-        def _hold(route):
-            if len(held) < 2:
+        def _router(route):
+            if fail_apply["active"] and "search=%2Fadmin" in route.request.url:
+                route.fulfill(status=500, body="synthetic failure")
+            elif len(held) < 2:
                 held.append((route, route.fetch()))
             else:
                 route.continue_()
 
-        page.route("**/partials/journeys*", _hold)
+        page.route("**/partials/journeys*", _router)
         try:
             page.clock.fast_forward(31000)
             deadline = time.monotonic() + 15
@@ -650,17 +657,12 @@ def test_refresh_inflight_reversal_and_error(page, c4_base):
             tick2_route, tick2_response = held[0]
             page.fill("#f-search", "/admin")
             page.locator("h1").click()
-            # Answer only the failed Apply at the network layer; the
-            # held tick keeps its fetched clean response.
-            page.unroute("**/partials/journeys*")
-
-            def _fail_apply(route):
-                if "search=%2Fadmin" in route.request.url:
-                    route.fulfill(status=500, body="synthetic failure")
-                else:
-                    route.continue_()
-
-            page.route("**/partials/journeys*", _fail_apply)
+            # Error leg under the same handler: only the failed Apply
+            # (identifiable by its draft query) is answered 500; the
+            # held tick keeps its fetched clean response and is
+            # fulfilled exactly once below. No unroute/re-route while
+            # the held route is alive.
+            fail_apply["active"] = True
             page.click("#filter-bar button[type=submit]")
             expect(page.locator("[data-filter-error]")).to_be_visible(timeout=10000)
             assert "search=%2Fadmin" in partials[-1], partials

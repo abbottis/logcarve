@@ -8,6 +8,13 @@ A custom format is a JSON document validated before use::
      "timing": {"request_time": {"unit": "s"}, "upstream_time": {"unit": "ms", "multi": true}},
      "max_pattern_len": 2048}
 
+``time_format`` declares the timestamp mode: ``combined`` (default,
+NCSA ``[..]``), ``iso8601`` (strict ``YYYY-MM-DDTHH:MM:SS[.frac]``
+with mandatory ``Z``/offset, normalized to UTC at microsecond
+precision), ``epoch_s`` or ``epoch_ms`` (plain second/millisecond
+counts under the declared unit). Non-default modes participate in the
+definition fingerprint; legacy definitions keep their identity.
+
 Only allowlisted named groups may appear, at least the required set must
 appear, and named-group bodies are restricted to nesting-free constructs
 with no backreferences and no stacked or overlapping open quantifiers.
@@ -31,6 +38,8 @@ from dataclasses import dataclass
 from pathlib import Path
 
 import regex as _rx
+
+from app.ingestion.combined import TIME_FORMATS
 
 REQUIRED_GROUPS = frozenset({"host", "time", "request", "status"})
 OPTIONAL_GROUPS = frozenset(
@@ -165,11 +174,18 @@ def _check_body_safe(body: str) -> bool:
 
 @dataclass(frozen=True)
 class CustomFormat:
-    """A validated administrator custom format mapping."""
+    """A validated administrator custom format mapping.
+
+    ``time_format`` is the declared timestamp mode (``combined`` by
+    default; ``iso8601``, ``epoch_s`` or ``epoch_ms`` when the custom
+    layout carries such a value). The mode is part of the definition
+    fingerprint for non-default values only.
+    """
 
     format_id: str
     pattern: "_rx.Pattern[str]"
     timing: dict[str, dict[str, object]]
+    time_format: str = "combined"
 
 
 def _validate_timing(timing: object) -> dict[str, dict[str, object]]:
@@ -208,7 +224,8 @@ def load_spec(data: dict) -> CustomFormat:
         raise CustomFormatError("interrupted:custom_invalid")
     if configured_cap < 1 or len(pattern_text) > min(MAX_PATTERN_LEN, configured_cap):
         raise CustomFormatError("interrupted:custom_invalid")
-    if data.get("time_format", "combined") != "combined":
+    time_format = data.get("time_format", "combined")
+    if time_format not in TIME_FORMATS:
         raise CustomFormatError("interrupted:custom_invalid")
     groups = _GROUP_RE.findall(pattern_text)
     if len(groups) != len(set(groups)):
@@ -253,7 +270,9 @@ def load_spec(data: dict) -> CustomFormat:
     for name in timing:
         if name not in names:
             raise CustomFormatError("interrupted:custom_invalid")
-    return CustomFormat(format_id=format_id, pattern=compiled, timing=timing)
+    return CustomFormat(
+        format_id=format_id, pattern=compiled, timing=timing, time_format=time_format
+    )
 
 
 def load_spec_file(path: Path) -> CustomFormat:
@@ -301,7 +320,8 @@ def parse_custom_line(
         _normalize_referer,
         _normalize_referer_path,
         _normalize_request,
-        _normalize_time,
+        _normalize_time_with_mode,
+        normalize_bytes_value,
         normalize_timing,
         pseudonymize_client,
     )
@@ -354,11 +374,14 @@ def parse_custom_line(
     if not 100 <= status <= 599:
         return reject("invalid_status")
     size_text = captured.get("size", captured.get("bytes", "-")) or "-"
-    bytes_sent = int(size_text) if size_text != "-" and size_text.isdigit() else None
-    if size_text != "-" and bytes_sent is None:
-        return reject("invalid_status")
     try:
-        timestamp_utc, tz_offset_minutes = _normalize_time(captured["time"])
+        bytes_sent = normalize_bytes_value(size_text)
+    except ValueError:
+        return reject("invalid_bytes")
+    try:
+        timestamp_utc, tz_offset_minutes = _normalize_time_with_mode(
+            captured["time"], spec.time_format
+        )
     except ValueError:
         return reject("invalid_time")
     referer = captured.get("referer", "-") or "-"

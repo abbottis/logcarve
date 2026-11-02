@@ -77,3 +77,48 @@ Timing extensions are later work: Nginx seconds → milliseconds; Apache `%D` mi
   counted exactly once; the consumed-bytes digest stays unset.
 - Rejections carry fixed `<withheld>:<reason>` markers only, never raw
   excerpts; foreign logged hosts are withheld the same way.
+
+## T5b1 declared timestamp modes and numeric domain (2026-11-02, PAR-01)
+
+- Custom mappings declare their timestamp mode explicitly via
+  `time_format`: `combined` (default, unchanged NCSA `[..]`),
+  `iso8601` (strict `YYYY-MM-DDTHH:MM:SS[.frac]` with mandatory `Z`
+  or numeric `±HH:MM`/`±HHMM` offset), `epoch_s` or `epoch_ms`
+  (plain second/millisecond counts under the declared unit).
+  Unknown mode names fail spec load (`interrupted:custom_invalid`);
+  there is no naive/host-TZ/locale guessing and no generic
+  permissive parser. Naive values, space separators, lowercase `z`,
+  short offsets, out-of-range fields, signed/scientific/non-finite
+  epoch text and out-of-range instants (before 1970 or past
+  9999-12-31T23:59:59.999999 UTC) all reject with the fixed
+  `invalid_time` code.
+- Accepted instants normalize to UTC at documented microsecond
+  precision: ISO fractions beyond 6 digits and epoch fractions below
+  the microsecond truncate (floor); equivalent spellings (`Z`,
+  `+00:00`, shifted offsets, epoch seconds vs milliseconds) store one
+  canonical `+00:00` instant, so journey gaps, edges, sorts, window
+  comparisons and reprocess identity keep exact microsecond
+  semantics (1800.000000 s continues a journey, 1800.000001 s
+  starts a new one).
+- The declared non-default mode participates in the custom
+  definition/policy fingerprint; absent or `combined` definitions
+  digest exactly the legacy bytes and keep their compatible identity.
+  Regex operation deadlines, global work bounds, source-root/site/
+  host-filter, replay, enrichment, private-IP and GeoIP invariants
+  are unchanged.
+- Response sizes (`size`/`bytes`) validate BEFORE conversion: `-`
+  stays absent (`None`), `0` stays a valid zero, anything else must
+  be 1–19 ASCII digits within `0..2**63 - 1`. Longer digit runs
+  reject before any `int` conversion (no conversion-limit crash);
+  negative, signed, decimal, non-ASCII or out-of-range tokens reject
+  with the fixed `invalid_bytes` code (tokens past the generic
+  captured-field budget abort with `oversized_field` first) — one
+  fixed rejection per line while following valid lines still import,
+  with no echoed token and nothing unbindable reaching SQLite.
+  The same domain applies to presets, custom mappings, autodetect
+  resolution, reprocess and future follow.
+- Byte totals aggregate exact integer halves in SQL and combine them
+  in exact Python integer arithmetic: ordinary and extreme totals
+  (including sums beyond int64) stay exact end to end — never via
+  float, never a database overflow error. Stored per-row values are
+  unaffected (still nullable int64).
