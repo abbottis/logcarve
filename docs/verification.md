@@ -3213,3 +3213,19 @@ Fix (this shell, from clean `e59b675`): native real paths skip the redundant leg
 Tests (this shell, no keys/network): new scripted native regression in `tests/integration/test_assistant_multi_provider.py` — all four providers complete the second native request where six rich tool results exceed legacy 4000 combined while the wire stays far below 65536 (evidence-linked completion, bounded/sanitized bodies with raw source lines absent, exact 1000-in/40-out ledger, provider_calls↔evidence linkage); native wire-oversize still fails closed with the prompt-bound message; legacy fake oversize still blocked (`test_aggregate_history_bound_is_safe_error` green). Results: multi-provider 15 passed; assistant suites (assistant/corrections/stage_b/stage_c/scope/projection) 109 passed; AI unit/settings/allowance/adapters 164 passed; `ruff check` + `ruff format --check` clean on changed files. Prior full 1374+2skip stands; no global/benchmark/browser rerun here.
 
 Status: real-investigation verification stays FAIL — the fix is proven offline only. A fresh owner-authorized live retest is required (remaining allowance 2 investigations / 11 requests; no reset). AI-01/AI-02 real criteria are NOT claimed.
+
+## 2026-11-02 — AI history final docs closeout on frozen `8daf28c48b4823fa312dc06003672806f57f4b28` (coordinator-reported, no new action)
+
+Documentation-only closeout in this public/synthetic workspace. Application source frozen at `8daf28c48b4823fa312dc06003672806f57f4b28`; no tests, providers, Docker, pushes, or app/config/test/asset/instruction edits from this shell. The following is coordinator-reported actual local evidence from `artifacts/task-inputs/ai-history-final-receipt.json`, not a new run here.
+
+- Independent review: PASS — only native/fake history split; exact native wire reservation/check/egress, typed call IDs and evidence replay unchanged; fake 4000-char history cap retained.
+- Focused tests: 6 passed, 33 deselected in 0.58s (rich native second step across all four providers, native wire oversize, fake history oversize).
+- Tracked-source Linux ARM64 image built and activated: `sha256:c330b129bc8986dfff8da0bbc5fe843573a5cfc3b8b9591d0432fcc455d3c3b5`; runtime Linux ARM64, UID 10001, loopback `127.0.0.1:8080`, schema 9, online backup before upgrade.
+- Preservation: 16/16 comparisons unchanged across replacement (120 events, imported data, users/sessions/tokens, encrypted AI settings hash, four server secret hashes, non-AI preferences, historical T8 ledgers, runtime allowance/spend).
+- Activation: Meta / `muse-spark-1.3` / Standard with explicit synthetic-only source; stored encrypted key retained; `MODEL_API_KEY` env empty; settings enabled; health 200, ready 200 schema 9. No second provider request executed.
+- Runtime allowance: used 1 investigation / 1 request / 20798 micro-USD, held 0; remaining 2 / 11 / 979202 micro-USD against caps 3 / 12 / 1000000. No reset, no cap widening.
+- Real completion: NOT VERIFIED — the one original authorized live investigation FAILED (pre-fix redundant history bound after one valid Meta request); the second live retest has NOT been authorized/executed yet. Never claim live PASS.
+- Other providers: native offline/scripted integration PASS for OpenAI/Gemini/Anthropic; account-specific live calls NOT RUN (no owner keys or actual provider calls).
+- Platform gaps: Linux x86-64 NOT RUN; no production deployment or public exposure.
+- Prior evidence retained without re-running: full suite 1374 passed / 2 skipped; protected browser checks stand as recorded above.
+- Publication precheck: 4 new commits `a45507a..8daf28c`, fully redacted incremental Gitleaks 0 leaks; added-line internal authoring-name scan 0; safe branch only; `main` unchanged.
