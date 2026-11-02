@@ -4,7 +4,10 @@ Native ``POST https://api.anthropic.com/v1/messages`` with
 ``Authorization: Bearer`` (key in header, never in URL),
 ``anthropic-version: 2026-10-21`` and JSON content. Non-workspace
 keys may carry the optional bounded ``anthropic-workspace-id`` header
-when the operator configures it. Tools use ``{name, description,
+when the operator configures it. Every request carries explicit
+``service_tier: "standard_only"`` for standard-capacity processing
+(the documented ``"auto"`` default would use Priority capacity when
+available). Tools use ``{name, description,
 input_schema}``; the assistant ``tool_use`` id/input replays as the
 user ``tool_result`` with the matching ``tool_use_id``, preserving
 order. Stateless: every turn carries the system prompt, the user
@@ -50,6 +53,17 @@ ENDPOINT_PATH = "/v1/messages"
 
 #: Required API version header (migration 2026-10-21).
 ANTHROPIC_VERSION = "2026-10-21"
+
+#: Fixed processing tier: explicit ``service_tier: "standard_only"``
+#: uses only standard capacity. The documented default ``"auto"``
+#: would use Priority capacity when available, so omission fails the
+#: dispatch check. The request flag alone does not prove how the
+#: provider actually processed the call; the response usage tier is
+#: checked separately in :func:`validate_usage`.
+SERVICE_TIER = "standard_only"
+
+#: Response usage tier billed at the standard rates enforced here.
+RESPONSE_STANDARD_TIER = "standard"
 
 #: Verified Haiku 5.5 standard API pricing, task reference
 #: 2026-11-02 (https://platform.claude.com/docs/en/about-claude/pricing),
@@ -148,6 +162,10 @@ def build_dispatch_body(
     ``tool_result`` blocks the service hands over. Thinking stays
     disabled; no other history.
 
+    The body carries explicit ``service_tier: "standard_only"`` for
+    standard-capacity processing: the documented default ``"auto"``
+    would use Priority capacity when available.
+
     Decoded values are egress-validated BEFORE evidence is
     JSON-encoded, so forbidden content cannot hide behind escapes.
     """
@@ -211,6 +229,7 @@ def build_dispatch_body(
         "messages": messages,
         "tools": native_tools,
         "thinking": {"type": "disabled"},
+        "service_tier": SERVICE_TIER,
         "max_tokens": max_output_tokens,
     }
 
@@ -236,6 +255,8 @@ def validate_body(wire: bytes, *, expected_model: str) -> None:
         raise ProviderError("The provider dispatch must not stream.")
     if body.get("thinking") != {"type": "disabled"}:
         raise ProviderError("The provider dispatch thinking profile is not allowlisted.")
+    if body.get("service_tier") != SERVICE_TIER:
+        raise ProviderError("The provider dispatch processing tier is not allowlisted.")
     messages = body.get("messages")
     if not isinstance(messages, list) or not messages:
         raise ProviderError("The provider dispatch is malformed.")
@@ -331,11 +352,20 @@ def validate_usage(payload: object, *, max_output_tokens: int, input_upper: int)
     Top-level ``cache_creation_5m_input_tokens`` /
     ``cache_creation_1h_input_tokens`` fields are not native and are
     rejected.
+
+    The native ``usage.service_tier`` is an optional
+    standard/priority/batch enum: an absent or null field stays
+    compatible with older payloads, an explicit ``"standard"`` is
+    billed at the standard rates below, and any other explicit tier
+    fails closed instead of being accounted at standard rates.
     """
     if not isinstance(payload, dict):
         raise ProviderError("The provider usage is malformed.")
     if "cache_creation_5m_input_tokens" in payload or "cache_creation_1h_input_tokens" in payload:
         raise ProviderError("The provider usage is malformed.")
+    reported_tier = payload.get("service_tier", None)
+    if reported_tier is not None and reported_tier != RESPONSE_STANDARD_TIER:
+        raise ProviderError("The provider response processing tier is not standard.")
     base = payload.get("input_tokens")
     created = payload.get("cache_creation_input_tokens", 0)
     read = payload.get("cache_read_input_tokens", 0)

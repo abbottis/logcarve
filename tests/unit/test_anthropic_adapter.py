@@ -4,6 +4,7 @@ Pure offline tests (mocked transport only): no key file, no network,
 no provider account. Synthetic values throughout.
 """
 
+import json
 import threading
 
 import pytest
@@ -11,6 +12,7 @@ import pytest
 from app.ai.egress import MAX_WIRE_BYTES
 from app.ai.providers.anthropic_messages import (
     ANTHROPIC_VERSION,
+    SERVICE_TIER,
     AnthropicMessagesAdapter,
     build_dispatch_body,
     cost_micro_usd,
@@ -498,3 +500,66 @@ def test_adapter_headers_and_optional_workspace():
 
     plain = AnthropicMessagesAdapter(endpoint=ENDPOINT, model=MODEL, api_key=KEY)
     assert plain._workspace_id == ""
+
+
+def test_dispatch_body_carries_explicit_standard_only_tier():
+    assert SERVICE_TIER == "standard_only"
+    body = build_dispatch_body(
+        model=MODEL,
+        max_output_tokens=2048,
+        instructions="sys",
+        user_text="hi",
+        exchanges=[],
+        tools=_tools(),
+    )
+    assert body["service_tier"] == "standard_only"
+    validate_body(serialize_body(body), expected_model=MODEL)
+    # Missing or auto (the documented default, which may use Priority
+    # capacity) fails the dispatch check.
+    for tampered in ("auto", "priority", None):
+        mutated = json.loads(json.dumps(body))
+        if tampered is None:
+            del mutated["service_tier"]
+        else:
+            mutated["service_tier"] = tampered
+        with pytest.raises(ProviderError):
+            validate_body(
+                json.dumps(mutated, sort_keys=True, separators=(",", ":")).encode("utf-8"),
+                expected_model=MODEL,
+            )
+
+
+def test_usage_rejects_non_standard_reported_tier():
+    def _usage(**extra):
+        base = {"input_tokens": 10, "output_tokens": 2}
+        base.update(extra)
+        return base
+
+    # Absent, null and explicit standard stay compatible.
+    for tier in ("absent", None, "standard"):
+        usage_in = _usage()
+        if tier == "absent":
+            usage_in.pop("service_tier", None)
+        else:
+            usage_in["service_tier"] = tier
+        usage = validate_usage(usage_in, max_output_tokens=2048, input_upper=5000)
+        assert usage["input_tokens"] == 10
+    # Explicit priority/batch/unknown tiers fail closed instead of
+    # being accounted at standard rates.
+    for tier in ("priority", "batch", "auto", "unknown-tier"):
+        with pytest.raises(ProviderError):
+            validate_usage(_usage(service_tier=tier), max_output_tokens=2048, input_upper=5000)
+
+
+def test_parse_response_rejects_priority_usage_tier():
+    payload = {
+        "id": "msg_1",
+        "type": "message",
+        "model": MODEL,
+        "role": "assistant",
+        "stop_reason": "end_turn",
+        "content": [{"type": "text", "text": "hi"}],
+        "usage": {"input_tokens": 10, "output_tokens": 2, "service_tier": "priority"},
+    }
+    with pytest.raises(ProviderError):
+        parse_response(payload, expected_model=MODEL, max_output_tokens=2048, input_upper=5000)

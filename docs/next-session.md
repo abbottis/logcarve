@@ -1,6 +1,12 @@
-# Next session checkpoint (2 Nov 2026, Meta live final receipt PASS — docs-only closeout)
+# Next session checkpoint (2 Nov 2026, adapter final cost-profile closeout — source freeze for root runtime update)
 
-## Where things stand
+## Current source closeout (2 Nov 2026, this pass)
+
+- Sole-writer scoped pass on `feature/logwerk-parity-ready-2026-11-02`: native OpenAI (`service_tier: "default"`) and Anthropic (`service_tier: "standard_only"`) cost-profile correction with fail-closed request/response tier validation (Gemini omission confirmed Standard, unchanged; Meta runtime/code unchanged), plus README/repo doc polish. No full-suite rerun, no browser rerun (no UI changes), no live calls. Scoped tests: 74 unit + 16 multi-provider integration PASS. Commit SHA recorded in `artifacts/task-inputs/adapter-final-cost-delivery.json`. Source is FROZEN after this commit; no blanket QA/release PASS is claimed.
+- Upcoming root runtime update (NOT this shell): root will build/preserve/activate/review/scan/push the actual new image after this source freeze. No claims about that image are made here.
+- Owner Meta allowance untouched: caps 3 investigations / 12 requests / USD 1; used 2 / 4 / 76974 micro-USD; remaining 1 / 8 / 923026 reserved for the owner video. The other three providers' keys were last checked absent; their live checks remain NOT RUN. No extra live budget granted. This shell did not read actual runtime keys, stores, or parent context.
+
+## Where things stand (preserved history)
 
 > Current AI state (2 Nov 2026, supersedes older "AI-off" lines below):
 > owner-authorized Meta Standard synthetic investigation completed with

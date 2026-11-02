@@ -268,6 +268,80 @@ def test_wire_tools_carry_explicit_strict_false_without_mutating_shared():
     validate_body(wire, expected_model="gpt-6-luna")
 
 
+def test_dispatch_body_carries_explicit_default_tier():
+    from app.ai.providers.openai_responses import SERVICE_TIER
+
+    assert SERVICE_TIER == "default"
+    body = build_dispatch_body(
+        model="gpt-6-luna",
+        max_output_tokens=2048,
+        instructions="sys",
+        user_text="hi",
+        exchanges=[],
+        tools=_tools(),
+    )
+    assert body["service_tier"] == "default"
+    validate_body(serialize_body(body), expected_model="gpt-6-luna")
+
+
+def test_validate_body_rejects_missing_or_non_default_tier():
+    body = build_dispatch_body(
+        model="gpt-6-luna",
+        max_output_tokens=2048,
+        instructions="sys",
+        user_text="hi",
+        exchanges=[],
+        tools=_tools(),
+    )
+
+    def _encode(mutated):
+        return json.dumps(mutated, sort_keys=True, separators=(",", ":")).encode("utf-8")
+
+    for tampered in ("auto", "priority", "flex", "", None):
+        mutated = json.loads(json.dumps(body))
+        if tampered is None:
+            del mutated["service_tier"]
+        else:
+            mutated["service_tier"] = tampered
+        with pytest.raises(ProviderError):
+            validate_body(_encode(mutated), expected_model="gpt-6-luna")
+
+
+def test_parse_response_rejects_non_default_reported_tier():
+    def _payload(**extra):
+        base = {
+            "id": "resp_1",
+            "model": "gpt-6-luna",
+            "status": "completed",
+            "output": [{"type": "message", "content": [{"type": "output_text", "text": "hi"}]}],
+            "usage": {"input_tokens": 10, "output_tokens": 2, "total_tokens": 12},
+        }
+        base.update(extra)
+        return base
+
+    # Absent, null and explicit default stay compatible.
+    for tier in ("absent", None, "default"):
+        payload = _payload()
+        if tier == "absent":
+            payload.pop("service_tier", None)
+        else:
+            payload["service_tier"] = tier
+        response = parse_response(
+            payload, expected_model="gpt-6-luna", max_output_tokens=2048, input_upper=5000
+        )
+        assert response.text == "hi"
+    # An explicitly reported non-default tier fails closed instead of
+    # being accounted at standard rates.
+    for tier in ("auto", "priority", "flex", "unknown-tier"):
+        with pytest.raises(ProviderError):
+            parse_response(
+                _payload(service_tier=tier),
+                expected_model="gpt-6-luna",
+                max_output_tokens=2048,
+                input_upper=5000,
+            )
+
+
 def test_validate_body_rejects_tampered_strict_profile():
     body = build_dispatch_body(
         model="gpt-6-luna",

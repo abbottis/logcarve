@@ -69,7 +69,7 @@ Then open the fixed window covering all 120 synthetic rows:
 
 [Open the Requests explorer (same window)](http://127.0.0.1:8080/requests?site=default&range=custom&from=2026-10-26T00:00:00%2B00:00&to=2026-11-01T00:00:00%2B00:00&tz=Europe%2FBerlin&source=example-combined)
 
-Log in as `demo-admin`. The generated password is in `artifacts/local-demo-secrets/demo.env` (`LOGCARVE_ADMIN_PASSWORD`). Never publish that file. The demo forces AI off with an empty model key, mounts sources read-only, runs as a non-root user and publishes only on `127.0.0.1:8080`.
+Log in as `demo-admin`. The generated password is in `artifacts/local-demo-secrets/demo.env` (`LOGCARVE_ADMIN_PASSWORD`). Never publish that file. A fresh demo starts with AI off by default (empty model key), mounts sources read-only, runs as a non-root user and publishes only on `127.0.0.1:8080`. An owner-enabled assistant profile is supported after configuring provider/model selection, key, data policy and a separate runtime usage grant (see [AI providers](docs/ai-providers.md)).
 
 The seeded dataset holds 120 synthetic rows on source `example-combined`: 30 legacy rows (26–28 Oct 2026) plus 90 enriched rows (29–31 Oct 2026). The fixed window above covers both, so it stays complete after the default seven-day window has moved past the fixture dates. `reset.sh` replays the same verified fixtures without touching auth or usage state.
 
@@ -114,7 +114,7 @@ Host and storage settings come from the environment; see [.env.example](.env.exa
 - `ORIGINAL_IP_KEY` — separate key for the optional encrypted original-IP store; empty keeps originals uncaptured.
 - `GEOIP_DB_PATH` — optional path of the operator-mounted genuine country database; empty keeps lookups honestly `unavailable`.
 - `AI_SETTINGS_KEY` — dedicated key encrypting the per-provider model keys stored via backend Settings; never shared with other secrets.
-- `AI_ENABLED=false` with an empty `MODEL_API_KEY` — the safe default; enabling chat additionally requires a verified provider, data mode, budget settings and an explicit runtime usage grant (no grant exists initially).
+- `AI_ENABLED=false` with an empty `MODEL_API_KEY` — AI off by default; enabling chat additionally requires selecting a provider/model, a verified data mode, budget settings, an explicit runtime usage grant (no grant exists initially) and saving backend Settings (see [AI providers](docs/ai-providers.md)).
 
 ## Repository map
 
@@ -126,7 +126,16 @@ Host and storage settings come from the environment; see [.env.example](.env.exa
 
 ## Optional assistant
 
-An internal assistant is available server-side from Meta, OpenAI, Google Gemini or Anthropic Claude when explicitly enabled with your own account, API access, data mode and usage limits. Providers and models are configured in the backend Settings page with per-provider encrypted keys, explicit data-policy acknowledgment and a separate explicit runtime usage grant. It uses bounded read-only analytics tools and reports evidence IDs, filters, coverage and limitations with every finding. The dashboard and the API work fully without it, and the synthetic demo keeps it disabled. Model failure never takes deterministic analytics offline. Setup, per-provider policy, and troubleshooting are covered in the [AI providers guide](docs/ai-providers.md).
+An internal assistant is available server-side from Meta, OpenAI, Google Gemini or Anthropic Claude when explicitly enabled with your own account, API access, data mode and usage limits. Providers and models are configured in the backend Settings page with per-provider encrypted keys, explicit data-policy acknowledgment and a separate explicit runtime usage grant. It uses bounded read-only analytics tools and reports evidence IDs, filters, coverage and limitations with every finding. The dashboard and the API work fully without it, and a fresh demo starts with AI off by default. Model failure never takes deterministic analytics offline. Setup, per-provider policy, and troubleshooting are covered in the [AI providers guide](docs/ai-providers.md).
+
+| Provider | Model | Processing tier | Verification |
+|---|---|---|---|
+| Meta | `muse-spark-1.3` | Standard | Owner-authorized synthetic run PASS |
+| OpenAI | `gpt-6-luna` | Standard (`service_tier: "default"`) | Offline tests PASS; live NOT RUN |
+| Google Gemini | `gemini-3.5-flash-lite` | Paid API (Standard by omission) | Offline tests PASS; live NOT RUN |
+| Anthropic Claude | `claude-haiku-5-5` | API (`service_tier: "standard_only"`) | Offline tests PASS; live NOT RUN |
+
+See the [AI providers guide](docs/ai-providers.md) for endpoints, pricing provenance and onboarding.
 
 ## Documentation
 

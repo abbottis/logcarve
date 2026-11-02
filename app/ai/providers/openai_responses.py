@@ -2,7 +2,9 @@
 
 Native ``POST https://api.openai.com/v1/responses`` with
 ``Authorization: Bearer`` (key in header, never in URL), ``store:
-false``, explicit ``strict: false`` on the direct function tools
+false``, explicit ``service_tier: "default"`` for standard
+pricing/performance (omission would inherit the Project's configured
+tier), explicit ``strict: false`` on the direct function tools
 (deliberate non-strict opt-out) and explicit ``call_id`` correlation. Stateless: every turn
 carries the user message plus the prior typed
 ``function_call``/``function_call_output`` pairs the service hands
@@ -60,6 +62,14 @@ CALL_ID_MAX_LEN = 64
 #: investigations cheap while preserving function calling.
 REASONING_EFFORT = "none"
 
+#: Fixed processing tier: explicit ``service_tier: "default"`` uses
+#: standard model pricing/performance. An omitted field would inherit
+#: the Project's configured tier instead, so omission fails the
+#: dispatch check. The request flag alone does not prove how the
+#: provider actually processed the call; the response tier is checked
+#: separately in :func:`parse_response`.
+SERVICE_TIER = "default"
+
 #: Bound on server response IDs kept in safe metadata (opaque, short).
 RESPONSE_ID_MAX_LEN = 128
 
@@ -113,6 +123,10 @@ def build_dispatch_body(
     non-strict default. The flag is set on per-dispatch copies —
     the shared tool schemas (also used by Meta/Gemini/Claude) are
     never mutated.
+
+    The body carries explicit ``service_tier: "default"`` for
+    standard pricing/performance: omitting the field would inherit
+    the Project's configured tier instead.
     """
     from app.ai.egress import check_wire_values
 
@@ -174,6 +188,7 @@ def build_dispatch_body(
         "tools": wire_tools,
         "reasoning": {"effort": REASONING_EFFORT},
         "store": False,
+        "service_tier": SERVICE_TIER,
         "max_output_tokens": max_output_tokens,
     }
 
@@ -199,6 +214,8 @@ def validate_body(wire: bytes, *, expected_model: str) -> None:
         raise ProviderError("The provider dispatch must be stateless.")
     if body.get("reasoning") != {"effort": REASONING_EFFORT}:
         raise ProviderError("The provider dispatch reasoning profile is not allowlisted.")
+    if body.get("service_tier") != SERVICE_TIER:
+        raise ProviderError("The provider dispatch processing tier is not allowlisted.")
     wire_tools = body.get("tools")
     if not isinstance(wire_tools, list) or not wire_tools:
         raise ProviderError("The provider dispatch tools are malformed.")
@@ -273,13 +290,23 @@ REASONING_SUMMARY_MAX_ITEMS = 100
 def parse_response(
     payload: object, *, expected_model: str, max_output_tokens: int, input_upper: int
 ) -> ProviderResponse:
-    """Parse one Responses body into text, correlated calls and usage."""
+    """Parse one Responses body into text, correlated calls and usage.
+
+    The response ``service_tier`` reports how the call was actually
+    processed and may differ from the requested tier. An absent or
+    null field stays compatible with older payloads; an explicit
+    non-default tier fails closed instead of being accounted at
+    standard rates.
+    """
     if not isinstance(payload, dict):
         raise ProviderError("The provider answer is malformed.")
     if payload.get("status") != "completed":
         raise ProviderError("The provider response is not complete.")
     if payload.get("model") != expected_model:
         raise ProviderError("The provider response model is not allowlisted.")
+    reported_tier = payload.get("service_tier", None)
+    if reported_tier is not None and reported_tier != SERVICE_TIER:
+        raise ProviderError("The provider response processing tier is not standard.")
     response_id = payload.get("id", "")
     if not isinstance(response_id, str) or not 1 <= len(response_id) <= RESPONSE_ID_MAX_LEN:
         raise ProviderError("The provider answer is malformed.")

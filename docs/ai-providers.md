@@ -24,8 +24,12 @@ Tiers are labeled honestly: Gemini Paid/API and Anthropic API are
 never presented as Meta Standard. Pricing provenance per model:
 Meta 2026-10-31 (`dev.meta.ai`), OpenAI/Gemini/Anthropic 2026-11-02
 (`developers.openai.com`, `ai.google.dev`, `platform.claude.com`).
-Integer micro-USD arithmetic lives in each adapter; cached-input
-counts are a subset of input and are never added on top.
+Integer micro-USD arithmetic lives in each adapter. OpenAI and
+Gemini cached-input counts are a subset of input and are never added
+on top of the input total. Anthropic counts differ: base input,
+cache-creation and cache-read tokens are disjoint components that
+are summed once into the billed input total, never double-counted
+and never dropped.
 
 Native wire profiles (enforced before any send):
 
@@ -42,44 +46,73 @@ Native wire profiles (enforced before any send):
   `FunctionResponse.id` echoes the exact provided id. The opaque
   `thoughtSignature` is preserved as a sibling part in order and is
   never reconstructed.
+- OpenAI Responses requests carry explicit `service_tier: "default"`
+  for standard pricing/performance: omitting the field would inherit
+  the Project's configured tier, so a missing or non-default tier
+  fails dispatch. A response that explicitly reports a non-default
+  tier fails closed instead of being accounted at standard rates.
+- Anthropic Messages requests carry explicit
+  `service_tier: "standard_only"` for standard-capacity processing:
+  the documented `"auto"` default would use Priority capacity when
+  available, so omission fails dispatch. A usage report with an
+  explicit non-standard tier fails closed instead of being accounted
+  at standard rates.
+- Gemini requests carry no processing-tier field: omission means
+  Standard under the `generateContent` priority/flex inference
+  documentation, so the adapter leaves the field unset.
+
+Processing-tier flags describe the request LogCarve sends; they do
+not prove how the provider actually processed a call or which
+privacy mode applied. Response-tier checks above are accounting
+guards, not provider handling proofs. Official tier references:
+[OpenAI service tiers](https://developers.openai.com/api/docs/guides/service-tiers),
+[Anthropic service tiers](https://platform.claude.com/docs/en/api/service-tiers),
+[Gemini priority inference](https://ai.google.dev/gemini-api/docs/generate-content/priority-inference),
+[Gemini flex inference](https://ai.google.dev/gemini-api/docs/generate-content/flex-inference).
 
 Primary API references used for the native transports:
 
-- OpenAI function calling and Responses migration:
+- OpenAI function calling, Responses migration and Responses reference:
   [function-calling](https://developers.openai.com/api/docs/guides/function-calling),
-  [migrate-to-responses](https://developers.openai.com/api/docs/guides/migrate-to-responses)
-- Gemini thought signatures and Gemini 3.5 notes:
-  [thought-signatures](https://ai.google.dev/gemini-api/docs/thought-signatures),
-  [whats-new-gemini-3.5](https://ai.google.dev/gemini-api/docs/whats-new-gemini-3.5)
+  [migrate-to-responses](https://developers.openai.com/api/docs/guides/migrate-to-responses),
+  [responses-cancel](https://developers.openai.com/api/reference/resources/responses/methods/cancel)
+- Gemini thought signatures, function calling and Gemini 3.5 notes:
+  [thought-signatures](https://ai.google.dev/gemini-api/docs/generate-content/thought-signatures),
+  [function-calling](https://ai.google.dev/gemini-api/docs/generate-content/function-calling),
+  [whats-new-gemini-3.5](https://ai.google.dev/gemini-api/docs/generate-content/whats-new-3.5)
 - Anthropic API overview and Messages:
   [overview](https://platform.claude.com/docs/en/api/overview),
-  [messages](https://platform.claude.com/docs/http/messages)
+  [messages](https://platform.claude.com/docs/en/api/http/messages)
 
 ## Setup
 
 All provider configuration lives in the backend Settings page (local
-admin session + CSRF). There is no browser file import and no shipped
-translation of these settings.
+admin session + CSRF).
 
 1. Generate a dedicated `AI_SETTINGS_KEY` (32 random bytes, base64 or
    hex) and preserve it separately from every other secret. Stored
-   provider keys are AES-256-GCM ciphertext bound to their provider;
-   backups hold ciphertext only and are useless without this key.
-   See [backup and restore](backup-restore.md) for the key's
+   provider keys are AES-256-GCM ciphertext bound to their provider.
+   Without this key only the saved provider keys become unreadable
+   (dispatches fail closed); analytics and data backups still restore
+   normally. See [backup and restore](backup-restore.md) for the key's
    persistence/backup role.
-2. Enter each provider key in Settings, or mount per-provider env
+2. In Settings, select the provider and its vetted model and enable
+   the assistant. Entering a key alone does not activate anything;
+   Save settings once all steps below are complete.
+3. Enter each provider key in Settings, or mount per-provider env
    fallbacks (`MODEL_API_KEY`, `OPENAI_API_KEY`, `GEMINI_API_KEY`,
    `ANTHROPIC_API_KEY`). Blank keeps the stored key, explicit remove
    deletes it; removal while an env fallback exists reports
    env-managed.
-3. Acknowledge the data policy per provider (real-data or
+4. Acknowledge the data policy per provider (real-data or
    synthetic-only demo mode). Synthetic mode additionally requires
    the operator `AI_SYNTHETIC_SOURCE` assertion. Acknowledgments never
    transfer between providers.
-4. Anthropic only: non-workspace-scoped keys may additionally carry
-   the optional bounded `anthropic-workspace-id` header when the
-   operator configures it. Workspace-scoped keys do not need it.
-5. Create the explicit bounded runtime usage grant before any paid
+5. Anthropic only: a workspace ID is REQUIRED alongside a
+   non-workspace-scoped key (sent as the bounded
+   `anthropic-workspace-id` header); it is optional only for an
+   already workspace-scoped key, which needs none.
+6. Create the explicit bounded runtime usage grant before any paid
    call (initially there is no grant — fail-closed):
 
    ```bash
@@ -123,9 +156,10 @@ below are what the service records (see `app/ai/service.py`).
 |---|---|---|
 | Assistant unavailable before any provider contact | `usage_not_authorized` | No runtime usage grant yet; create the bounded grant above |
 | Assistant unavailable before any provider contact | `egress_blocked` | Policy/acknowledgment missing (e.g. real-data policy not acknowledged, synthetic source not asserted, unknown provider/tier) |
-| Assistant unavailable after dispatch | `provider_unavailable` | Refused/auth/rate-limit/server reply, timeout, malformed or oversized answer; no automatic retries — check key, endpoint reachability and policy, then retry once |
+| Assistant unavailable after dispatch | `provider_unavailable` | Refused/auth/rate-limit/server reply, timeout, malformed or oversized answer, or a non-standard reported processing tier; never retried automatically — check key, endpoint reachability and policy, then retry manually only while budget and the runtime usage grant still cover it (every retry spends allowance) |
 | Investigation stopped with a bound message | `output_limit_reached` | Prompt, history, evidence, or answer bound exceeded; narrow the window or reduce output |
-| Settings-backed dispatch refused | `ai_store_error` / `store_unavailable` | AI settings store missing, corrupt, or unreadable; dispatch fails closed while analytics stay online |
+| Settings-backed dispatch refused | `ai_unavailable` (HTTP 503) | AI settings store missing, corrupt, or unreadable: `ai_store_error` is the internal settings attribute (not a returned code), mapped by the chat route from `BackendUnavailable` before dispatch to 503 `ai_unavailable`; dispatch fails closed while analytics stay online |
+| Analytics store unreadable during scoping | `store_unavailable` (HTTP 503) | The genuine local `InvestigationError` code for an unreadable analytics data store during scope validation — emitted by the API handler, distinct from the settings-store attribute above |
 | Answer cannot be shown | (evidence filter) | Provider answer failed the safe-text check; deterministic pages are unaffected |
 
 Other-provider account live checks are NOT RUN in this repository:
