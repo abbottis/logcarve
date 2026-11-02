@@ -2510,3 +2510,43 @@ exit status visible, no tail-masking) plus focused suites below.
 | 120-row fixture / HMAC / 77-rule catalog | PASS | Untouched: no fixture, rule or config changes in tree; new tests use tmp stores only |
 | Protected E2E incl. new chat-POST capture test | BLOCKED (environmental) | Chromium fails at launch in this shell sandbox (`TargetClosedError`, Mach IPC `Permission denied` — identical for the two pre-existing tests, so not caused by this change); coordinator executes `uv run --locked pytest tests/e2e/test_parity_t4a.py -q` with the browser sandbox ON (updated `client=` redirect assertion plus new `test_ask_posts_full_trusted_scope` capturing the stubbed outgoing POST with native false/0) |
 | Real AI / real acceptance / release | NOT RUN | No production transport, key, account or paid call; no native Linux/release claim; no overall parity/T4 claim; stopping for independent review before T4b1 |
+
+## 2026-11-02 — Parity T4b1 report UI (implementer run)
+
+Owner-authorized bounded T4b1 after reviewed T4a on
+`feature/logwerk-parity-2026-11-01` (frozen anchor `6d92231` clean,
+prior HEAD preserved, no amend), exact model
+`muse-spark-1.3-contributor` / medium / Contributor ON; sandbox +
+approval ON, sole writer, no subagents, no new approval loop, no
+private parent files/logs/keys/history, no provider/product calls, no
+live activation/push/main/deploy/allowance reset. Public synthetic
+fixtures only; prior work, 120-row fixtures, 77 bot rules, core HMAC,
+auth/usage, no-browser-imports/no-translations preserved.
+
+Review-prelude residuals were reproduced against the real code first:
+the rendered IP-search form action dropped the selected explorer sort
+(backend already preserved it when explicitly supplied), and bounded
+`get_report` journeys/journey_entries hit the 1600-char evidence bound
+on an ordinary 1-client/1-journey imported fixture while the other 8
+reports passed. Both are closed inside this bounded stage: the form
+action now carries the allowlisted sort (shared navigation stays
+sort-free), and the model-facing quality carries compact journey
+limitation notes while full service/API payloads keep the exact
+long-form sentences and the 1600-char/65KB bounds are unchanged (no
+blanket limit increase, no filter/field loss).
+
+`uv run --locked --offline pytest tests/unit tests/integration`
+(1005 passed, 2 skipped — same pre-existing live-loopback category —
+exit status visible, no tail-masking) plus focused suites below.
+
+| Check | Result | Evidence |
+| --- | --- | --- |
+| New `tests/integration/test_parity_t4b1_web.py` | PASS | 12 passed: IP-search form action preserves oldest/path_asc sort (parsed query, never leaked into side nav), POST via the rendered action keeps sort with safe pseudonym redirect and no raw IP in the followed page, bounded journeys/journey_entries fit 1600 chars with exact client scope/counts/coverage/limitations while the full service payload keeps the long-form 1800s notes, performance page agrees with service + Bearer API on slow-endpoint totals with server-side avg/p95 ranking and paging through the filtered scope, shared `timing_available=no` filter empties timing honestly, SEO 3xx/4xx/5xx views with exact path/bot drilldowns and supporting-data links, AI-only view with universe counts and absence-not-proof caveat, referrer internal/external SQL narrowing with sanitized full paths and exact-target drilldown, htmx partials serve the same context, and a central-locale-key audit over all six new templates |
+| New `tests/e2e/test_parity_t4b1.py` | BLOCKED (environmental) | 2 protected tests collect cleanly (navigation/chart/table/filter/detail, 390/1440 widths, dark theme, keyboard focus, no external requests/console errors); Chromium fails at launch in this shell sandbox (`TargetClosedError` — identical for the pre-existing T4a tests, so not caused by this change); coordinator executes `uv run --locked pytest tests/e2e/test_parity_t4b1.py -q` with the browser sandbox ON |
+| Neighbor suites (T4a web/corrections, assistant, traffic) | PASS | 64 passed across `test_parity_t4b1_web.py`, `test_parity_t4a_web.py`, `test_parity_t4a_corrections.py`; full assistant stage-C and export suites green inside the 1005 |
+| `ruff check` over `app` + `tests`, `ruff format --check` | PASS | Both clean (unused journey-limitations import removed, implicit-concat parenthesized, touched files formatted); `en.json` kept to new `perf`/`seo`/`ref`/`nav` keys only |
+| `uv lock --check --offline` | PASS | No manifest/lock delta: no new dependencies |
+| Assets | PASS | `assets/src/js/overview.js` extended with a generic theme-aware bar renderer for the 8 new report charts (every chart keeps a table alternative); served `app/web/static/js/overview.js` synced by the exact `build:js` copy step and `node --check` clean; `node scripts/check_no_external.mjs` reports no external references (served tree is gitignored build output, not committed, `.gitignore` unchanged); two authored lucide-style nav icons (`search.svg`, `link.svg`) |
+| 120-row fixture / HMAC / 77-rule catalog | PASS | Untouched: no fixture, rule or config changes in tree; new tests use tmp stores only |
+| Gitleaks | NOT RUN | `gitleaks` is not installed in this environment and installs are out of scope (no network, no user-wide changes); the diff adds no secrets, keys, tokens or real logs (synthetic `synthetic-test-*` values only, matching the existing test pattern) |
+| Journeys UI (T4b2), saved views/comparison/refresh/Help (T4c), follow/GeoIP (T5), release | NOT RUN | No UI added for journeys/entry paths/security rate sequences, saved views, comparison controls, refresh or comprehensive Help; genuine country UI stays T5a; no overall T4 claim; stopping for independent review |

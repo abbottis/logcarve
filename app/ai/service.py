@@ -61,7 +61,6 @@ from app.analytics.classification import build_classifier, resolve_selector_inde
 from app.analytics.contracts import TimeWindow
 from app.analytics.service import (
     LIMITATIONS_BOT,
-    LIMITATIONS_JOURNEYS,
     LIMITATIONS_LOGS,
     LIMITATIONS_PERFORMANCE,
     LIMITATIONS_SECURITY,
@@ -1417,7 +1416,22 @@ def _projection_quality(tool_name: str, envelope: dict) -> dict:
         ):
             quality["limitations"] = [*LIMITATIONS_SEO, *LIMITATIONS_LOGS]
         elif report in ("journeys", "journey_entries"):
-            quality["limitations"] = [*LIMITATIONS_JOURNEYS, *LIMITATIONS_LOGS]
+            # Compact model-facing limitation notes: the full service
+            # and API envelopes keep the exact long-form sentences, but
+            # the 1600-char bounded evidence line carries these shorter
+            # equivalents so a 1-client/1-journey read still fits with
+            # its exact scope, counts, coverage and observation intact.
+            quality["limitations"] = [
+                (
+                    "journeys group stored requests by HMAC client plus sanitized UA "
+                    "with a 30-minute split: never visitors, people, sessions or clicks"
+                ),
+                "a gap over 1800 seconds starts a new journey: exactly 1800 continues",
+                "filters hide rows but never move journey boundaries: unfiltered stream",
+                "edge partial journeys stay flagged: never read outside the window",
+                "coverage describes observed events only: not proven completeness",
+                "missing timing stays unavailable, never zero",
+            ]
         elif report == "comparison":
             quality["limitations"] = [*LIMITATIONS_BOT, *LIMITATIONS_LOGS]
         else:

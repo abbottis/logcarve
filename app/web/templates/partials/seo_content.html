@@ -1,0 +1,112 @@
+{% if oob_notice %}<p id="filter-times-notice" hx-swap-oob="true" class="w-full text-sm text-base-content/70">{{ t("filter.times_in", tz=tz_name) }} ({{ tz_offset }}; {{ t("filter.offset_note", date=window_start_date) }})</p>{% endif %}
+<p class="tech mb-4 text-sm text-base-content/70" data-observation-window>{{ window_from }} → {{ window_to }}</p>
+{% include "partials/filter_oob.html" %}
+{% include "partials/active_matchers.html" %}
+{% if summary.warnings %}
+<div class="mb-4 space-y-2" role="status">
+  {% for warning in summary.warnings %}
+  <p class="alert alert-warning text-sm">{% include "icons/triangle-alert.svg" %}{{ warning }}</p>
+  {% endfor %}
+</div>
+{% endif %}
+
+<nav class="mb-4 flex flex-wrap gap-2 text-sm" aria-label="{{ t("seo.title") }}">
+  <a class="btn btn-outline btn-xs" href="{{ page_url("/seo", view="redirects", offset=0) }}" {% if seo_view == "redirects" %}aria-current="page"{% endif %}>{{ t("seo.view_redirects") }}</a>
+  <a class="btn btn-outline btn-xs" href="{{ page_url("/seo", view="client_errors", offset=0) }}" {% if seo_view == "client_errors" %}aria-current="page"{% endif %}>{{ t("seo.view_client") }}</a>
+  <a class="btn btn-outline btn-xs" href="{{ page_url("/seo", view="server_errors", offset=0) }}" {% if seo_view == "server_errors" %}aria-current="page"{% endif %}>{{ t("seo.view_server") }}</a>
+  <a class="btn btn-outline btn-xs" href="{{ page_url("/seo", view="ai_only", offset=0) }}" {% if seo_view == "ai_only" %}aria-current="page"{% endif %}>{{ t("seo.view_ai") }}</a>
+</nav>
+<p class="mb-4 text-sm text-base-content/70">{{ t("bot.identity_note") }}</p>
+<p class="mb-4 text-sm text-base-content/70">{{ t("seo.indexing_note") }}</p>
+
+{% if groups is not none %}
+<section class="card bg-base-100 shadow" aria-labelledby="seo-groups-h">
+  <div class="card-body">
+    <h2 id="seo-groups-h" class="card-title text-base">{{ t("seo.groups_title") }}</h2>
+    {% if groups["items"] %}
+    <div class="chart-frame"><canvas id="seo-groups-chart" aria-label="{{ t("seo.groups_title") }}" role="img"></canvas></div>
+    <script id="seo-groups-chart-data" type="application/json">{{ {"rows": groups["items"], "requestsLabel": t("table.requests")} | tojson }}</script>
+    <div class="table-scroll overflow-x-auto">
+      <table class="table table-sm">
+        <caption class="sr-only">{{ t("seo.groups_title") }}</caption>
+        <thead><tr><th scope="col">{{ t("table.path") }}</th><th scope="col">{{ t("table.rule") }}</th><th scope="col">{{ t("crawlers.provider") }}</th><th scope="col" class="text-right">{{ t("table.requests") }}</th><th scope="col" class="text-right">{{ t("table.bytes") }}</th><th scope="col"><span class="sr-only">{{ t("table.detail") }}</span></th></tr></thead>
+        <tbody>
+          {% for item in groups["items"] %}
+          <tr>
+            <td class="tech break-all"><a class="link" href="{{ page_url("/seo", view=seo_view, path_exact=item.path, offset=0) }}" title="{{ t("seo.view_rows") }}">{{ item.path }}</a></td>
+            <td class="bot-name"><a class="link font-medium" href="{{ page_url("/seo", view=seo_view, bot=item.drilldown.bot, offset=0) }}" title="{{ t("seo.view_bot") }}">{{ bot_titles.get(item.rule_id, item.rule_id) }}</a> <span class="tech text-sm text-base-content/70">{{ item.rule_id }}</span></td>
+            <td class="bot-name">{{ provider_label(item.provider) }}</td>
+            <td class="text-right tech">{{ item.requests }}</td>
+            <td class="text-right tech" title="{{ item.bytes_total }}">{{ human_bytes(item.bytes_total) }}</td>
+            <td class="text-right"><a class="link text-sm" href="{{ page_url("/requests", path_exact=item.drilldown.path_exact, bot=item.drilldown.bot, status_class=item.drilldown.status_class, offset=0) }}">{{ t("finding.supporting_data") }}</a></td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+    <p class="mt-2 text-sm text-base-content/70">{{ t("paging.showing", start=offset + 1, end=offset + groups["items"]|length, total=groups.total_groups) }}</p>
+    {% include "partials/paging.html" %}
+    {% else %}
+    <p class="text-sm text-base-content/70" role="status">{{ t("seo.no_groups") }}</p>
+    {% endif %}
+  </div>
+</section>
+{% endif %}
+
+{% if ai_only is not none %}
+<section class="card bg-base-100 shadow" aria-labelledby="seo-ai-h">
+  <div class="card-body">
+    <h2 id="seo-ai-h" class="card-title text-base">{{ t("seo.ai_title") }}</h2>
+    <p class="text-sm text-base-content/70">{{ t("seo.ai_note") }}</p>
+    {% if ai_only.vacuous %}
+    <p class="alert alert-info mt-2 text-sm" role="status">{{ t("seo.ai_vacuous") }}</p>
+    {% endif %}
+    <dl class="mt-2 flex flex-wrap gap-x-8 gap-y-2">
+      <div><dt class="text-sm text-base-content/70">{{ t("seo.universe") }}</dt><dd class="tech text-lg">{{ ai_only.comparison.universe_requests }}</dd></div>
+      <div><dt class="text-sm text-base-content/70">{{ t("seo.view_ai") }}</dt><dd class="tech text-lg">{{ ai_only.comparison.ai_observed_paths }}</dd></div>
+      <div><dt class="text-sm text-base-content/70">{{ t("seo.other_paths") }}</dt><dd class="tech text-lg">{{ ai_only.comparison.other_observed_paths }}</dd></div>
+    </dl>
+    {% if ai_only["items"] %}
+    <div class="table-scroll overflow-x-auto">
+      <table class="table table-sm">
+        <caption class="sr-only">{{ t("seo.ai_title") }}</caption>
+        <thead><tr><th scope="col">{{ t("table.path") }}</th><th scope="col" class="text-right">{{ t("table.requests") }}</th><th scope="col"><span class="sr-only">{{ t("table.detail") }}</span></th></tr></thead>
+        <tbody>
+          {% for item in ai_only["items"] %}
+          <tr>
+            <td class="tech break-all"><a class="link" href="{{ page_url("/seo", view="ai_only", path_exact=item.path, offset=0) }}" title="{{ t("seo.view_rows") }}">{{ item.path }}</a></td>
+            <td class="text-right tech">{{ item.ai_requests }}</td>
+            <td class="text-right"><a class="link text-sm" href="{{ page_url("/requests", path_exact=item.path, offset=0) }}">{{ t("finding.supporting_data") }}</a></td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+    <p class="mt-2 text-sm text-base-content/70">{{ t("paging.showing", start=offset + 1, end=offset + ai_only["items"]|length, total=ai_only.total_paths) }}</p>
+    {% include "partials/paging.html" %}
+    {% else %}
+    <p class="text-sm text-base-content/70" role="status">{{ t("seo.no_groups") }}</p>
+    {% endif %}
+    {% if ai_only.warnings %}
+    <ul class="mt-2 space-y-1" role="status">
+      {% for warning in ai_only.warnings %}
+      <li class="alert alert-warning text-sm">{{ warning }}</li>
+      {% endfor %}
+    </ul>
+    {% endif %}
+  </div>
+</section>
+{% endif %}
+
+<div class="mt-6 space-y-2 text-sm text-base-content/70">
+  <p>{{ t("data.events", count=summary.coverage.unique_events) }} · {{ t("data.observed", min=summary.coverage.observed_min, max=summary.coverage.observed_max) }}</p>
+  {% set limitations = (groups.limitations if groups is not none else (ai_only.limitations if ai_only is not none else [])) %}
+  {% if limitations %}
+  <h2 class="font-medium">{{ t("finding.limitations") }}</h2>
+  <ul class="list-disc space-y-1 pl-5">
+    {% for limitation in limitations %}
+    <li>{{ limitation }}</li>
+    {% endfor %}
+  </ul>
+  {% endif %}
+</div>

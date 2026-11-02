@@ -19,7 +19,7 @@
   <div class="card-body">
     <h2 id="ip-search-h" class="card-title text-base">{{ t("privacy.ip_search_title") }}</h2>
     <p class="text-sm text-base-content/70">{{ t("privacy.ip_search_hint") }}</p>
-    <form method="post" action="/requests/ip-search{{ nav_query }}" class="mt-2 flex flex-wrap items-end gap-3">
+    <form method="post" action="{{ ip_search_action }}" class="mt-2 flex flex-wrap items-end gap-3">
       <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
       <div class="form-control">
         <label class="label py-1" for="f-exact-ip"><span class="label-text">{{ t("privacy.ip_search_title") }}</span></label>

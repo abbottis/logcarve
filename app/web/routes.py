@@ -28,6 +28,7 @@ from app.analytics.contracts import (
     AnalyticsFilter,
     BotTableQuery,
     ExplorerQuery,
+    SlowEndpointsQuery,
     TimeWindow,
     TopPathsQuery,
     TopReferrersQuery,
@@ -1281,6 +1282,188 @@ def _errors_context(request: Request, conn, params):
     return context, None
 
 
+#: Allowlisted slow-endpoint rankings for the Performance page. Every
+#: option maps to one fixed server ORDER BY over the whole filtered
+#: scope (never a page-only reorder); ties break deterministically.
+SLOW_SORTS = ("avg_desc", "p95_desc", "requests_desc", "max_desc")
+
+#: Allowlisted SEO report views for the SEO page (page-local, like a
+#: sort: never part of the shared navigation scope).
+SEO_VIEWS = ("redirects", "client_errors", "server_errors", "ai_only")
+
+#: Allowlisted referrer-relation selector for the Referrers page
+#: (page-local SQL narrowing with matching totals).
+REFERRER_RELATIONS = ("all", "internal", "external")
+
+
+def _performance_context(request: Request, conn, params):
+    site, sites, error = _site_or_error(conn, params)
+    if error is not None:
+        return None, error
+    error = _source_or_error(conn, site, params["source"])
+    if error is not None:
+        return None, error
+    try:
+        context = _base_context(
+            request, params, site, sites, "/performance", request.app.state.rules
+        )
+    except _InvalidFilter:
+        return None, "error.bad_params"
+    filt = context["filt"]
+    slow_sort, error = _parse_sort(request.query_params, SLOW_SORTS, "avg_desc")
+    if error is not None:
+        return None, error
+    page_filt = filt.model_copy(update={"limit": params["limit"], "offset": params["offset"]})
+    try:
+        overview = service.performance_overview(conn, filt, request.app.state.rules)
+        slow = service.slow_endpoints(
+            conn, SlowEndpointsQuery(filt=page_filt, sort=slow_sort), request.app.state.rules
+        )
+    except ValueError:
+        return None, "error.bad_params"
+    summary = service.summarize(conn, filt, request.app.state.rules)
+    _attach_observed_options(conn, context, filt, request.app.state.rules)
+    context.update(
+        {
+            "summary": summary,
+            "totals": summary["totals"],
+            "overview": overview,
+            "latency": overview["latency_ms"],
+            "latency_available": overview["latency_available"],
+            "upstream": overview["upstream_ms"],
+            "cache": overview["cache"],
+            "mime": overview["mime_vs_resource"],
+            "versions": overview["http_versions"],
+            "protocols": overview["tls_protocols"],
+            "hosts": overview["logged_hosts"],
+            "percentile_definition": overview["percentile_definition"],
+            "slow": slow,
+            "slow_items": slow["items"],
+            "slow_sort": slow_sort,
+            "paging": _paging_nav(
+                "/performance", params, site, slow["total_paths"], {"sort": slow_sort}
+            ),
+            "fragment_url": "/partials/performance",
+        }
+    )
+    return context, None
+
+
+def _seo_context(request: Request, conn, params):
+    site, sites, error = _site_or_error(conn, params)
+    if error is not None:
+        return None, error
+    error = _source_or_error(conn, site, params["source"])
+    if error is not None:
+        return None, error
+    try:
+        context = _base_context(request, params, site, sites, "/seo", request.app.state.rules)
+    except _InvalidFilter:
+        return None, "error.bad_params"
+    filt = context["filt"]
+    raw_view = (request.query_params.get("view") or "").strip() or "client_errors"
+    if raw_view not in SEO_VIEWS:
+        return None, "error.bad_params"
+    page_filt = filt.model_copy(update={"limit": params["limit"], "offset": params["offset"]})
+    groups: dict[str, object] | None = None
+    ai_only: dict[str, object] | None = None
+    try:
+        if raw_view == "ai_only":
+            ai_only = service.ai_only_paths(conn, page_filt, request.app.state.rules)
+        else:
+            status_class = {"redirects": "3xx", "client_errors": "4xx", "server_errors": "5xx"}[
+                raw_view
+            ]
+            groups = service.seo_status_groups(
+                conn,
+                page_filt,
+                request.app.state.rules,
+                status_class=status_class,  # type: ignore[arg-type]
+            )
+    except ValueError:
+        return None, "error.bad_params"
+    summary = service.summarize(conn, filt, request.app.state.rules)
+    _attach_observed_options(conn, context, filt, request.app.state.rules)
+    bot_rules = {
+        rule.id: rule for rule in request.app.state.rules if rule.ua_contains or rule.ua_regex
+    }
+    bot_titles = {rule_id: display_bot_title(rule.title) for rule_id, rule in bot_rules.items()}
+    total = (
+        groups["total_groups"]
+        if isinstance(groups, dict)
+        else (ai_only["total_paths"] if isinstance(ai_only, dict) else 0)
+    )
+    context.update(
+        {
+            "summary": summary,
+            "totals": summary["totals"],
+            "seo_view": raw_view,
+            "groups": groups,
+            "ai_only": ai_only,
+            "bot_titles": bot_titles,
+            "paging": _paging_nav("/seo", params, site, int(total), {"view": raw_view}),
+            "fragment_url": "/partials/seo",
+        }
+    )
+    return context, None
+
+
+def _referrers_context(request: Request, conn, params):
+    site, sites, error = _site_or_error(conn, params)
+    if error is not None:
+        return None, error
+    error = _source_or_error(conn, site, params["source"])
+    if error is not None:
+        return None, error
+    try:
+        context = _base_context(request, params, site, sites, "/referrers", request.app.state.rules)
+    except _InvalidFilter:
+        return None, "error.bad_params"
+    filt = context["filt"]
+    raw_relation = (request.query_params.get("relation") or "").strip() or "all"
+    if raw_relation not in REFERRER_RELATIONS:
+        return None, "error.bad_params"
+    page_filt = filt.model_copy(update={"limit": params["limit"], "offset": params["offset"]})
+    try:
+        report = service.referrer_404s(
+            conn,
+            page_filt,
+            request.app.state.rules,
+            relation=raw_relation,  # type: ignore[arg-type]
+        )
+    except ValueError:
+        return None, "error.bad_params"
+    summary = service.summarize(conn, filt, request.app.state.rules)
+    _attach_observed_options(conn, context, filt, request.app.state.rules)
+    items = []
+    for row in report["items"]:  # type: ignore[union-attr]
+        assert isinstance(row, dict)
+        scheme, host, ref_path = (
+            row.get("referer_scheme"),
+            row.get("referer_host"),
+            row.get("referer_path"),
+        )
+        if scheme and host:
+            full = f"{scheme}://{host}{ref_path or ''}"
+        else:
+            full = str(host or ref_path or "")
+        items.append({**row, "referrer": full})
+    context.update(
+        {
+            "summary": summary,
+            "totals": summary["totals"],
+            "report": report,
+            "targets": items,
+            "relation": raw_relation,
+            "paging": _paging_nav(
+                "/referrers", params, site, int(report["total_groups"]), {"relation": raw_relation}
+            ),  # type: ignore[arg-type]
+            "fragment_url": "/partials/referrers",
+        }
+    )
+    return context, None
+
+
 #: Allowlisted explorer sorts for the Requests page, in front-column
 #: order (Action is never sortable; Access is a derived display).
 EXPLORER_SORTS = (
@@ -1483,6 +1666,11 @@ def _requests_context(request: Request, conn, params, ip_search_error: str | Non
             ),
             "paging": _paging_nav("/requests", params, site, total_rows, {"sort": sort}),
             "fragment_url": "/partials/requests",
+            # The exact-IP search POST rebuilds its redirect from this
+            # action's query string, so the current allowlisted explorer
+            # sort travels here. Page-local sort stays out of the shared
+            # navigation query used by every other link.
+            "ip_search_action": "/requests/ip-search" + _nav_query(params, site) + f"&sort={sort}",
             "ip_mode": display_state.get("mode"),
             "ip_corrupt": bool(display_state.get("corrupt")),
             "ip_key_configured": key is not None,
@@ -1828,6 +2016,120 @@ def crawlers_partial(request: Request):
         )
     context["oob_notice"] = True
     response = templates.TemplateResponse(request, "partials/crawlers_content.html", context)
+    response.headers["HX-Push-Url"] = context["canonical_url"]
+    return response
+
+
+@router.get("/performance", response_class=HTMLResponse)
+def performance_page(request: Request):
+    params, gate = _data_page(request)
+    if gate == "redirect":
+        return _redirect_to_login(request)
+    if gate is not None:
+        return _error_page(request, gate, 400)
+    with read_store(request) as conn:
+        context, error = _performance_context(request, conn, params)
+    if error is not None:
+        return _error_page(request, error, 400 if error != "error.unknown_site" else 404)
+    return templates.TemplateResponse(request, "pages/performance.html", context)
+
+
+@router.get("/partials/performance", response_class=HTMLResponse)
+def performance_partial(request: Request):
+    if _session_or_none(request) is None:
+        return HTMLResponse(
+            f'<p class="alert alert-warning" role="alert">{t("auth.login.title")}</p>',
+            status_code=401,
+        )
+    params, gate = _data_page(request)
+    if gate is not None:
+        return HTMLResponse(
+            f'<p class="alert alert-error" role="alert">{t(gate)}</p>', status_code=400
+        )
+    with read_store(request) as conn:
+        context, error = _performance_context(request, conn, params)
+    if error is not None:
+        return HTMLResponse(
+            f'<p class="alert alert-error" role="alert">{t(error)}</p>', status_code=400
+        )
+    context["oob_notice"] = True
+    response = templates.TemplateResponse(request, "partials/performance_content.html", context)
+    response.headers["HX-Push-Url"] = context["canonical_url"]
+    return response
+
+
+@router.get("/seo", response_class=HTMLResponse)
+def seo_page(request: Request):
+    params, gate = _data_page(request)
+    if gate == "redirect":
+        return _redirect_to_login(request)
+    if gate is not None:
+        return _error_page(request, gate, 400)
+    with read_store(request) as conn:
+        context, error = _seo_context(request, conn, params)
+    if error is not None:
+        return _error_page(request, error, 400 if error != "error.unknown_site" else 404)
+    return templates.TemplateResponse(request, "pages/seo.html", context)
+
+
+@router.get("/partials/seo", response_class=HTMLResponse)
+def seo_partial(request: Request):
+    if _session_or_none(request) is None:
+        return HTMLResponse(
+            f'<p class="alert alert-warning" role="alert">{t("auth.login.title")}</p>',
+            status_code=401,
+        )
+    params, gate = _data_page(request)
+    if gate is not None:
+        return HTMLResponse(
+            f'<p class="alert alert-error" role="alert">{t(gate)}</p>', status_code=400
+        )
+    with read_store(request) as conn:
+        context, error = _seo_context(request, conn, params)
+    if error is not None:
+        return HTMLResponse(
+            f'<p class="alert alert-error" role="alert">{t(error)}</p>', status_code=400
+        )
+    context["oob_notice"] = True
+    response = templates.TemplateResponse(request, "partials/seo_content.html", context)
+    response.headers["HX-Push-Url"] = context["canonical_url"]
+    return response
+
+
+@router.get("/referrers", response_class=HTMLResponse)
+def referrers_page(request: Request):
+    params, gate = _data_page(request)
+    if gate == "redirect":
+        return _redirect_to_login(request)
+    if gate is not None:
+        return _error_page(request, gate, 400)
+    with read_store(request) as conn:
+        context, error = _referrers_context(request, conn, params)
+    if error is not None:
+        return _error_page(request, error, 400 if error != "error.unknown_site" else 404)
+    return templates.TemplateResponse(request, "pages/referrers.html", context)
+
+
+@router.get("/partials/referrers", response_class=HTMLResponse)
+def referrers_partial(request: Request):
+    if _session_or_none(request) is None:
+        return HTMLResponse(
+            f'<p class="alert alert-warning" role="alert">{t("auth.login.title")}</p>',
+            status_code=401,
+        )
+    params, gate = _data_page(request)
+    if gate is not None:
+        return HTMLResponse(
+            f'<p class="alert alert-error" role="alert">{t(gate)}</p>', status_code=400
+        )
+    with read_store(request) as conn:
+        context, error = _referrers_context(request, conn, params)
+    if error is not None:
+        return HTMLResponse(
+            f'<p class="alert alert-error" role="alert">{t(error)}</p>', status_code=400
+        )
+    context["oob_notice"] = True
+    response = templates.TemplateResponse(request, "partials/referrers_content.html", context)
     response.headers["HX-Push-Url"] = context["canonical_url"]
     return response
 

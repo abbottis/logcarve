@@ -192,6 +192,81 @@
         options: baseOptions(false),
       }));
     }
+    // Parity report charts (performance, SEO, referrers): server-provided
+    // JSON only, same theme handling; every chart has a table alternative.
+    renderBar("perf-slow-chart", "perf-slow-chart-data", "path", null);
+    renderBar("perf-cache-chart", "perf-cache-chart-data", "value", null);
+    renderBar("perf-mime-chart", "perf-mime-chart-data", "mime", null);
+    renderBar("perf-http-chart", "perf-http-chart-data", "value", null);
+    renderBar("perf-tls-chart", "perf-tls-chart-data", "value", null);
+    renderBar("perf-hosts-chart", "perf-hosts-chart-data", "value", null);
+    renderBar("seo-groups-chart", "seo-groups-chart-data", "path", null);
+    renderBar("ref-targets-chart", "ref-targets-chart-data", "target_path", null);
+  }
+
+  function shortLabel(value, maxLen) {
+    var text = String(value == null ? "" : value);
+    if (text.length > maxLen) return text.slice(0, maxLen - 1) + "…";
+    return text;
+  }
+
+  function renderBar(canvasId, dataId, labelKey, valueKey) {
+    var canvas = document.getElementById(canvasId);
+    var data = readData(dataId);
+    if (!canvas || !data) return;
+    var rows = data.rows || [];
+    var key = valueKey || data.valueKey || "requests";
+    var colors = palette();
+    charts.push(new window.Chart(canvas, {
+      type: "bar",
+      data: {
+        labels: rows.map(function (r) {
+          if (labelKey === "mime") {
+            return shortLabel(r.mime_type + " (" + r.resource_kind + ")", 42);
+          }
+          return shortLabel(r[labelKey], 42);
+        }),
+        datasets: [
+          {
+            label: data.requestsLabel || "Requests",
+            data: rows.map(function (r) {
+              var v = key === "requests" ? r.requests : r[key];
+              return typeof v === "number" && isFinite(v) ? v : 0;
+            }),
+            backgroundColor: colors.line,
+          },
+        ],
+      },
+      options: barOptions(),
+    }));
+  }
+
+  function barOptions() {
+    var colors = palette();
+    return {
+      responsive: true,
+      maintainAspectRatio: false,
+      plugins: {
+        legend: { display: false, labels: { color: colors.tick } },
+      },
+      scales: {
+        x: {
+          ticks: {
+            color: colors.tick,
+            maxRotation: 45,
+            minRotation: 0,
+            autoSkip: true,
+            maxTicksLimit: 8,
+          },
+          grid: { color: colors.grid },
+        },
+        y: {
+          beginAtZero: true,
+          ticks: { precision: 0, color: colors.tick },
+          grid: { color: colors.grid },
+        },
+      },
+    };
   }
 
   // Re-render on viewport changes: a canvas sized for a wide layout
