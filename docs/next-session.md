@@ -1,8 +1,8 @@
-# Next session checkpoint (2 Nov 2026, parity final receipts + AI history final docs closeout)
+# Next session checkpoint (2 Nov 2026, Meta live final receipt PASS — docs-only closeout)
 
 ## Where things stand
 
-- AI history final docs closeout 2 Nov 2026 (this checkout, docs-only, no new action): application source frozen at `8daf28c48b4823fa312dc06003672806f57f4b28` on `feature/logwerk-parity-ready-2026-11-02`. Coordinator-reported actual local evidence per `artifacts/task-inputs/ai-history-final-receipt.json`: history fix independently reviewed PASS; 6 focused tests pass; tracked-source Linux ARM64 image `sha256:c330b129bc8986dfff8da0bbc5fe843573a5cfc3b8b9591d0432fcc455d3c3b5` built and activated (loopback `127.0.0.1:8080`, schema 9, online backup before upgrade); all 16 preservation checks passed (120 events, secrets, ledgers, allowance/spend unchanged); Meta `muse-spark-1.3` Standard enabled with stored encrypted key, `MODEL_API_KEY` env empty, health/ready 200. Allowance used 1 investigation / 1 request / 20798 micro-USD, remaining 2 / 11 / 979202; no reset. One original live investigation FAILED; second live retest NOT authorized/executed. Successful live completion NOT VERIFIED; other-provider account live calls NOT RUN; x86-64 NOT RUN. Prior full-suite (1374 passed / 2 skipped) and browser evidence retained without re-running. See `docs/verification.md` final entry.
+- Meta live final receipt 2 Nov 2026 (this checkout, docs-only, no new action): application source frozen at `8daf28c48b4823fa312dc06003672806f57f4b28` on `feature/logwerk-parity-ready-2026-11-02`. Coordinator-reported actual local evidence per `artifacts/task-inputs/ai-live-final-receipt.json`: Meta local enabled (`muse-spark-1.3` Standard, synthetic-only, image `sha256:c330b129bc8986dfff8da0bbc5fe843573a5cfc3b8b9591d0432fcc455d3c3b5`); owner-authorized additional investigation genuinely completed — `POST /api/v1/chat/ask` HTTP 200 with visible actual Meta answer and seven evidence links (`b1c8550a-tc1` … `b1c8550a-tc7`), 3 provider requests / 56176 micro-USD this investigation; independent scoped external API match (28 HTTP 404, 4992 bytes). Recorder harness FAIL is a harness artifact (waited on preceding 403 CSRF `response.json()`), NOT app failure; raw 200 JSON NOT captured, evidence-link click NOT completed. Screenshot + full original browser recording saved; first 36 s exported as `artifacts/presentation/LogCarve-Meta-Echtlauf-36s.mp4`. Current bounded real completion now PASS by HTTP/browser/ledger/independent-API evidence; previous failures preserved as history; no blanket release/QA01 approval. Allowance used 2 / 4 / 76974 micro-USD, remaining 1 / 8 / 923026, held 0; caps 3 / 12 / 1000000 unchanged; historical T8 unchanged. Other-provider account live calls NOT RUN; x86-64 NOT RUN. Prior full-suite (1374 passed / 2 skipped) and browser evidence retained without re-running. See `docs/verification.md` final entry.
 - LogWerk-parity closeout 2 Nov 2026: all authorized implementation is
   complete and ACTUAL local demo activation has occurred at clean code
   anchor `84f440f2c593c9c32f4608e608c3530ad1cfed61` (canonical
@@ -92,19 +92,18 @@
    merge to `main`, production deployment or GitHub push without
    explicit owner approval; never publish the canonical private
    graph blindly.
-3. Real AI proof only if desired: the one owner-authorized
-   runtime investigation was attempted 2026-11-02 and FAILED closed
-   with HTTP 422 (legacy history bound on a real native path; see
-   `docs/verification.md`). The native history-bypass fix is
-   implemented, independently reviewed, and proven offline only
-   (6 focused tests pass; ARM64 image activated with 16/16
-   preservation; Meta stored key enabled) — successful live
-   completion stays NOT VERIFIED until a fresh owner-authorized
-   retest, NOT yet authorized/executed. Allowance: used
-   1 / 1 / 20798 micro-USD, remaining 2 investigations /
-   11 requests / 979202 micro-USD; no allowance reset/recreate/
+3. Real AI proof: the owner-authorized additional investigation
+   completed 2026-11-02 with bounded PASS (HTTP 200 visible Meta
+   answer, seven evidence links, independent scoped-API match;
+   see `docs/verification.md` final entry). The recorder-harness
+   FAIL, missing raw 200 JSON capture, and unclicked evidence
+   links stay recorded as limitations — no new paid retry from
+   this shell. No additional live calls authorized; the owner
+   retains the last investigation for their own video. Allowance:
+   used 2 / 4 / 76974 micro-USD, remaining 1 investigation /
+   8 requests / 923026 micro-USD; no allowance reset/recreate/
    restore. Other-provider account live calls NOT RUN; x86-64
-   NOT RUN.
+   NOT RUN. No blanket release/QA01 approval.
 4. Platform gap: Linux x86-64 install verification (for a full
    install claim) plus current Official Rules/materials check when
    available.
@@ -121,7 +120,7 @@
   runtime, credentials, traces, `demo.env`, token files, real usage
   ledgers or provider keys. Keep `.env`, databases, logs, tokens,
   session exports and provider traces out of version control.
-- Product AI stays off in the demo except for the coordinator-owned local activation recorded above (synthetic-only, stored Meta key; no action from this shell). No new real, paid or provider calls are authorized; allowance is used 1 / 1 / 20798 micro-USD with 2 / 11 / 979202 remaining, and caps are never weakened, widened, or reset.
+- Product AI stays off in the demo except for the coordinator-owned local activation recorded above (synthetic-only, stored Meta key; no action from this shell). No new real, paid or provider calls are authorized; allowance is used 2 / 4 / 76974 micro-USD with 1 / 8 / 923026 remaining (held 0; caps 3 / 12 / 1000000 unchanged), and caps are never weakened, widened, or reset.
 - No push, `main` merge, production deployment or public exposure
   without explicit owner approval. Do not stop or reset the running
   persistent demo without owner say-so.
