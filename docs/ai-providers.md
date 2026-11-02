@@ -16,7 +16,7 @@ per-model pricing with provenance.
 | Provider | Model | Native endpoint | Tier | Live verification |
 |---|---|---|---|---|
 | Meta | `muse-spark-1.3` | `https://api.meta.ai:443/v1/responses` | Standard | Owner-authorized synthetic run PASS (see [verification](verification.md)) |
-| OpenAI | `gpt-6.1-terra` | `https://api.openai.com:443/v1/responses` | Standard | Offline tests PASS and model metadata access 200; real generation BLOCKED by account quota (429), not validated successful (see [verification](verification.md)) |
+| OpenAI | `gpt-6.1-terra` | `https://api.openai.com:443/v1/responses` | Standard | Owner-authorized synthetic tool-to-evidence retest PASS on 2026-11-02 (see [verification](verification.md)) |
 | Google Gemini | `gemini-3.8-flash` | `https://generativelanguage.googleapis.com:443/v1beta/models/gemini-3.8-flash:generateContent` | Paid API | Owner-authorized synthetic tool-to-evidence tests PASS on 2026-11-02 (see [verification](verification.md)) |
 | Anthropic Claude | `claude-sonnet-5-5` | `https://api.anthropic.com:443/v1/messages` | API | Owner-authorized synthetic tool-to-evidence tests PASS on 2026-11-02 (see [verification](verification.md)) |
 
@@ -184,12 +184,13 @@ thinking and signature contents never change; execution still uses
 server-overridden args, and opaque thinking never reaches
 answer/UI/DB/log/evidence.
 
-Gemini and Sonnet owner-authorized synthetic tool-to-evidence runs
-completed PASS on 2026-11-02; OpenAI real generation remains
-BLOCKED by account quota (429) and is not validated successful —
-no further OpenAI calls without resolved quota. Meta is restored
-active/synthetic. See [verification](verification.md) for the
-dated operational closeout. See [deployment](deployment.md) for host operation,
+Gemini, Sonnet and OpenAI owner-authorized synthetic tool-to-evidence
+runs completed PASS on 2026-11-02. The earlier OpenAI 429
+`credit_balance_exhausted` was an account funding block, resolved by
+the owner; the successful later retest supersedes the current block.
+Historical failure records remain in [verification](verification.md).
+Meta is restored active/synthetic. See [verification](verification.md)
+for the dated operational closeout. See [deployment](deployment.md) for host operation,
 [privacy and data egress](privacy-and-security.md) for the full
 boundary, and [ADR 0004](decisions/0004-multi-provider-ai.md) for the
 accepted scope.

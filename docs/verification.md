@@ -3295,3 +3295,12 @@ Docs-only closeout on frozen application source `133467677a63fc38410a3d8e1b0512d
 - OpenAI `gpt-6.1-terra`: exact model metadata access 200; real generation 429 `credit_balance_exhausted` — account BLOCKED, not application/model success; no further OpenAI calls without resolved quota.
 - Meta `muse-spark-1.3` restored active/synthetic. No spend counters reset and no grant widening; no new blanket QA/release claim; x86-64 NOT RUN.
 - Secret scan: Gitleaks raw exit 1 with the same 3 reviewed false positives only, no real credentials.
+
+## 2026-11-02 — OpenAI funded retest: synthetic PASS (coordinator-observed, docs-only)
+
+Docs-only closeout on frozen application source `133467677a63fc38410a3d8e1b0512d93b1b0a18`; no application/config/test/asset/instruction edits and no rebuild. Coordinator-observed actual evidence per `artifacts/model-upgrade-2026-11-02/funded-retest-receipt.json`; prior failure history above is retained unchanged.
+
+- OpenAI `gpt-6.1-terra` (Standard): coordinator observed actual POST `/api/v1/chat/ask` HTTP 200 with 2 provider requests including 1 `get_summary`, correct totals 120 requests / 28 HTTP 4xx with matching evidence ID and real 200 evidence link; estimated model cost 0.024629 USD — synthetic fixture PASS.
+- The owner resolved the account quota; the earlier 429 `credit_balance_exhausted` stays recorded above as history, and the successful later retest supersedes the current block.
+- App source/image unchanged; no repeated source tests needed. Meta restored active/synthetic; normal demo limit restored with no counters reset and no allowance increase; data, keys and historical T8 preserved; health 200.
+- This verification covers the synthetic fixture only, not production data, provider privacy or account-wide coverage. No new QA or x86_64 claim.

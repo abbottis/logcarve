@@ -172,7 +172,10 @@ implemented solely by Muse Spark 1.3 Contributor (medium,
 Contributor ON) with safeguards ON and no subagents; synthetic
 fixtures only; no new dependencies or third-party code. Gemini and
 Sonnet owner-authorized synthetic tool-to-evidence runs PASS on
-2026-11-02; OpenAI real generation BLOCKED by account quota (429
-`credit_balance_exhausted`), not validated successful — see the
-dated operational closeout in `verification.md`. Original LogCarve
+2026-11-02; the OpenAI account quota block (429
+`credit_balance_exhausted`) was the INITIAL historical result, not
+validated successful at that time — see the
+dated operational closeout in `verification.md`. A later owner-funded
+synthetic retest on 2026-11-02 also PASS. Implementation provenance
+remains Muse only. Original LogCarve
 code remains Apache-2.0.
