@@ -91,11 +91,14 @@
    merge to `main`, production deployment or GitHub push without
    explicit owner approval; never publish the canonical private
    graph blindly.
-3. Real AI proof only if desired, with a new explicit bounded
-   authorization (no allowance reset/recreate/restore). The offline
-   context-minimization (4000-char bound), exact settled-cost
-   display and citation/observation corrections are already complete
-   and verified; the third real investigation was not rerun.
+3. Real AI proof only if desired: the one owner-authorized
+   runtime investigation was attempted 2026-11-02 and FAILED closed
+   with HTTP 422 (legacy history bound on a real native path; see
+   `docs/verification.md`). The native history-bypass fix is
+   implemented and proven offline only — real verification stays
+   FAIL until a fresh owner-authorized retest (remaining allowance:
+   2 investigations / 11 requests; no allowance reset/recreate/
+   restore).
 4. Platform gap: Linux x86-64 install verification (for a full
    install claim) plus current Official Rules/materials check when
    available.

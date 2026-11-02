@@ -947,7 +947,12 @@ def run_investigation(
     for _ in range(max_steps):
         if cancel_event.is_set():
             raise InvestigationError("cancelled", "The investigation was cancelled.")
-        if sum(len(entry) for entry in history) > HISTORY_MAX_CHARS:
+        # Legacy text-history bound: fake/legacy providers only. Native
+        # real paths replay typed exchanges on the wire (own decoded
+        # egress plus the MAX_WIRE_BYTES cap), so the redundant legacy
+        # history is neither accumulated nor composed nor bound-checked
+        # there (see below); rich native evidence must not trip this.
+        if not is_real and sum(len(entry) for entry in history) > HISTORY_MAX_CHARS:
             raise InvestigationError(
                 "output_limit_reached", "The investigation outgrew its history bound."
             )
@@ -958,38 +963,45 @@ def run_investigation(
             )
         decision, _step_synthetic = _gate_decision(live_settings)
         model = decision.model
-        prompt = _compose_prompt(
-            system_prompt,
-            question,
-            scope.site_id,
-            scope.source_id,
-            scope.time_from,
-            scope.time_to,
-            history,
-            method=scope.method,
-            status=scope.status,
-            status_class=scope.status_class,
-            path_prefix=scope.path_prefix,
-            path_exact=scope.path_exact,
-            referer_host=scope.referer_host,
-            traffic=scope.traffic,
-            bot=scope.bot,
-            category=scope.category,
-            provider_claim=scope.provider_claim,
-            purpose=scope.purpose,
-            search=scope.search,
-            client=scope.client,
-            server_host=scope.server_host,
-            http_version=scope.http_version,
-            mime_type=scope.mime_type,
-            cache_status=scope.cache_status,
-            tls_protocol=scope.tls_protocol,
-            timing_available=scope.timing_available,
-            upstream_available=scope.upstream_available,
-            timing_min_ms=scope.timing_min_ms,
-            timing_max_ms=scope.timing_max_ms,
-            country=scope.country,
-        )
+        if is_real:
+            # Native real dispatch: no legacy text prompt is composed
+            # from history on this path (typed exchanges replay below
+            # instead). The fake/legacy branch keeps its prompt with
+            # the HISTORY_MAX_CHARS safeguard.
+            prompt = ""
+        else:
+            prompt = _compose_prompt(
+                system_prompt,
+                question,
+                scope.site_id,
+                scope.source_id,
+                scope.time_from,
+                scope.time_to,
+                history,
+                method=scope.method,
+                status=scope.status,
+                status_class=scope.status_class,
+                path_prefix=scope.path_prefix,
+                path_exact=scope.path_exact,
+                referer_host=scope.referer_host,
+                traffic=scope.traffic,
+                bot=scope.bot,
+                category=scope.category,
+                provider_claim=scope.provider_claim,
+                purpose=scope.purpose,
+                search=scope.search,
+                client=scope.client,
+                server_host=scope.server_host,
+                http_version=scope.http_version,
+                mime_type=scope.mime_type,
+                cache_status=scope.cache_status,
+                tls_protocol=scope.tls_protocol,
+                timing_available=scope.timing_available,
+                upstream_available=scope.upstream_available,
+                timing_min_ms=scope.timing_min_ms,
+                timing_max_ms=scope.timing_max_ms,
+                country=scope.country,
+            )
         if is_real:
             # Real dispatch: decoded body from already-gated values,
             # recursive decoded validation, exact immutable bytes, and
@@ -1073,7 +1085,7 @@ def run_investigation(
                     "invalid_response", "The provider usage is malformed."
                 ) from exc
             dispatch_request = ProviderRequest(
-                prompt_text=prompt, max_output_tokens=MAX_OUTPUT_TOKENS, body=wire
+                prompt_text=user_text, max_output_tokens=MAX_OUTPUT_TOKENS, body=wire
             )
         else:
             input_upper = estimate_input_tokens_upper(prompt)
@@ -1268,7 +1280,8 @@ def run_investigation(
                         observation_time=observed,
                     )
                     evidence.append(result["envelope"])
-                    history.append(result["history_line"])
+                    if not is_real:
+                        history.append(result["history_line"])
                     if is_real:
                         provider_calls.append(
                             {

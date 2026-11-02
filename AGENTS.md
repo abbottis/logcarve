@@ -73,6 +73,7 @@ Accepted exception 2026-11-01 (ADR 0003): local authenticated admin may view ori
 - CLI flags and `MODEL_SERVICE_TIER=standard` express intent; verify the effective account/provider data mode separately.
 - Until verified, use synthetic, nonconfidential data only. Do not replay sensitive history into Contributor services.
 - Product inference is server-side via an allowlisted provider/model and a fail-closed data-egress gate.
+- Multi-provider scope is accepted ADR 0004: default Meta plus OpenAI, Gemini and Anthropic Claude native transports with provider-specific verified modes; per-provider encrypted keys and a separate explicit runtime usage authorization apply.
 - Unknown providers/tiers or a Contributor switch must block real-data transmission before any request.
 - Give the product assistant only bounded, typed read-only analytics tools; no arbitrary HTTP, files, shell or SQL.
 - Apply permission, site/time limits, output limits, timeouts, step limits and budget checks on the server.

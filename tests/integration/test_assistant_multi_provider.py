@@ -21,12 +21,19 @@ import pytest
 from app.ai import allowance as allowance_mod
 from app.ai import budget as budget_mod
 from app.ai import registry
+from app.ai.egress import MAX_WIRE_BYTES
 from app.ai.providers.anthropic_messages import AnthropicMessagesAdapter
 from app.ai.providers.base import BackendUnavailable
 from app.ai.providers.gemini_generate import GeminiGenerateContentAdapter
 from app.ai.providers.meta_responses import MetaResponsesAdapter
 from app.ai.providers.openai_responses import OpenAIResponsesAdapter
-from app.ai.service import Actor, InvestigationError, run_investigation, select_provider
+from app.ai.service import (
+    HISTORY_MAX_CHARS,
+    Actor,
+    InvestigationError,
+    run_investigation,
+    select_provider,
+)
 from app.analytics.rules import load_rules
 from app.config import Settings
 from app.db.importer import run_import
@@ -118,8 +125,13 @@ def _settings(provider):
     )
 
 
-def _scripted_transport(provider, calls):
-    """Native stub backend per provider; asserts exact native headers."""
+def _scripted_transport(provider, calls, first_payload=None):
+    """Native stub backend per provider; asserts exact native headers.
+
+    ``first_payload`` optionally overrides the first-turn tool payload
+    (a ``(provider, model) -> dict`` builder); later turns keep the
+    shared final-text payload.
+    """
     model, _ = PROVIDERS[provider]
     endpoint = registry.endpoint_for(provider, model)
 
@@ -145,6 +157,8 @@ def _scripted_transport(provider, calls):
             payload = json.loads(body.decode("utf-8"))
             assert payload["thinking"] == {"type": "disabled"}
         calls.append(body)
+        if len(calls) == 1 and first_payload is not None:
+            return first_payload(provider, model)
         return _native_payload(provider, model, body, len(calls))
 
     return transport
@@ -457,3 +471,251 @@ def test_limits_are_global_across_provider_switches(menv, no_network):
     grants = allowance_mod.status(menv["db"])
     assert grants["used_requests"] == 4
     assert grants["used_investigations"] == 2
+
+
+# ---------------------------------------------------------------------------
+# Native history-bypass regression (ai-history fix, 2026-11-02)
+# ---------------------------------------------------------------------------
+
+#: Six legitimate rich tools: each evidence projection is ~750-1050
+#: chars on the shared fixture, so the combined text exceeds the legacy
+#: HISTORY_MAX_CHARS (4000) while the typed native replay stays far
+#: below MAX_WIRE_BYTES (65536). This mirrors the owner-verified live
+#: failure where two rich 404/referrer reports tripped the legacy
+#: history bound before the second native request.
+RICH_TOOL_CALLS = (
+    ("get_summary", {"limit": 100}),
+    ("get_top_paths", {"limit": 50}),
+    ("get_top_referrers", {"limit": 50}),
+    ("get_crawler_claims", {"limit": 50}),
+    ("get_security_findings", {"limit": 50}),
+    ("get_error_groups", {"limit": 50}),
+)
+
+
+def _rich_tool_payload(provider, model):
+    """First-turn native payload: six legitimate rich tool calls."""
+    if provider in ("meta", "openai"):
+        return {
+            "id": "resp_rich",
+            "model": model,
+            "status": "completed",
+            "output": [
+                {
+                    "type": "function_call",
+                    "name": name,
+                    "arguments": json.dumps(args, sort_keys=True),
+                    "call_id": f"call_1_{index}",
+                    "status": "completed",
+                }
+                for index, (name, args) in enumerate(RICH_TOOL_CALLS)
+            ],
+            "usage": {
+                "input_tokens": 400,
+                "output_tokens": 20,
+                "total_tokens": 420,
+                "input_tokens_details": {"cached_tokens": 0},
+            },
+        }
+    if provider == "gemini":
+        return {
+            "responseId": "resp_rich",
+            "modelVersion": model,
+            "candidates": [
+                {
+                    "finishReason": "STOP",
+                    "content": {
+                        "role": "model",
+                        "parts": [
+                            (
+                                {
+                                    "functionCall": {
+                                        "name": name,
+                                        "args": dict(args),
+                                        "id": f"call_1_{index}",
+                                    },
+                                    # Sibling position per native shape; the
+                                    # replay requires the first part's
+                                    # signature (never nested, never forged).
+                                    "thoughtSignature": "opaque-test-sig",
+                                }
+                                if index == 0
+                                else {
+                                    "functionCall": {
+                                        "name": name,
+                                        "args": dict(args),
+                                        "id": f"call_1_{index}",
+                                    }
+                                }
+                            )
+                            for index, (name, args) in enumerate(RICH_TOOL_CALLS)
+                        ],
+                    },
+                }
+            ],
+            "usageMetadata": {
+                "promptTokenCount": 400,
+                "candidatesTokenCount": 15,
+                "thoughtsTokenCount": 5,
+                "totalTokenCount": 420,
+            },
+        }
+    return {
+        "id": "msg_rich",
+        "type": "message",
+        "model": model,
+        "role": "assistant",
+        "stop_reason": "tool_use",
+        "content": [
+            {
+                "type": "tool_use",
+                "id": f"toolu_1_{index}",
+                "name": name,
+                "input": dict(args),
+            }
+            for index, (name, args) in enumerate(RICH_TOOL_CALLS)
+        ],
+        "usage": {"input_tokens": 400, "output_tokens": 20},
+    }
+
+
+def _wire_summaries(body):
+    """Every replayed evidence summary carried by one native wire body."""
+    payload = json.loads(body.decode("utf-8"))
+    found = []
+
+    def _walk(node):
+        if isinstance(node, dict):
+            for key, value in node.items():
+                if key == "summary" and isinstance(value, str):
+                    found.append(value)
+                else:
+                    _walk(value)
+        elif isinstance(node, list):
+            for item in node:
+                _walk(item)
+        elif isinstance(node, str):
+            text = node.strip()
+            if text.startswith("{") and '"summary"' in text:
+                try:
+                    _walk(json.loads(text))
+                except ValueError:
+                    pass
+
+    _walk(payload)
+    return found
+
+
+@pytest.mark.parametrize("provider", ["meta", "openai", "gemini", "anthropic"])
+def test_native_rich_history_completes_second_request(menv, no_network, provider):
+    """Native paths must not trip the legacy text-history bound.
+
+    The six rich tool results carry more than HISTORY_MAX_CHARS of
+    evidence text combined, yet the actual second-turn native wire
+    stays far below MAX_WIRE_BYTES. Pre-fix this raised
+    output_limit_reached (history bound) before the second native
+    request; post-fix the investigation completes with evidence-linked
+    typed replay, bounded/sanitized bodies and an exact ledger.
+    """
+    calls = []
+    adapter = _adapter(
+        provider, _scripted_transport(provider, calls, first_payload=_rich_tool_payload)
+    )
+    result = _investigate(menv, provider, adapter)
+    assert result.answer_text == "Evidence-backed answer."
+    assert result.tool_calls == len(RICH_TOOL_CALLS)
+    assert len(result.evidence) == len(RICH_TOOL_CALLS)
+    # The second native request happened: the pre-fix history bound
+    # would have failed the investigation before this dispatch.
+    assert len(calls) == 2
+    for body in calls:
+        assert 0 < len(body) <= MAX_WIRE_BYTES
+    # The legacy-equivalent text on the second turn exceeds the old
+    # bound, proving this scenario is a genuine regression for it.
+    summaries = _wire_summaries(calls[1])
+    assert len(summaries) == len(RICH_TOOL_CALLS)
+    assert sum(len(text) for text in summaries) > HISTORY_MAX_CHARS
+    # Raw source lines never travel on the native wire.
+    raw_first = FIXTURE.read_bytes().splitlines()[0]
+    assert raw_first not in calls[0]
+    assert raw_first not in calls[1]
+    # Exact per-step ledger across both native steps (400+600 in,
+    # 20+20 out for every provider under the shared scripted usage).
+    assert result.usage["input_tokens"] == 1000
+    assert result.usage["output_tokens"] == 40
+    assert len(result.response_ids) == 2
+    assert len(result.provider_calls) == len(RICH_TOOL_CALLS)
+    linked = {entry["tool_call_id"] for entry in result.provider_calls}
+    assert linked == {envelope["tool_call_id"] for envelope in result.evidence}
+    model, tier = PROVIDERS[provider]
+    assert result.provider == adapter.name
+    assert result.model == model
+    assert result.usage["tier"] == tier
+    assert result.usage["pricing_version"] == registry.entry_for(provider)["pricing_version"]
+
+
+def _oversize_tool_payload(provider, model, turn):
+    """Eight rich tool calls with per-turn unique call IDs."""
+    if provider in ("meta", "openai"):
+        return {
+            "id": f"resp_big_{turn}",
+            "model": model,
+            "status": "completed",
+            "output": [
+                {
+                    "type": "function_call",
+                    "name": name,
+                    "arguments": json.dumps(args, sort_keys=True),
+                    "call_id": f"call_{turn}_{index}",
+                    "status": "completed",
+                }
+                for index, (name, args) in enumerate(_oversize_calls())
+            ],
+            "usage": {
+                "input_tokens": 400,
+                "output_tokens": 20,
+                "total_tokens": 420,
+                "input_tokens_details": {"cached_tokens": 0},
+            },
+        }
+    raise AssertionError("oversize guard test uses the meta wire shape only")
+
+
+def _oversize_calls():
+    return RICH_TOOL_CALLS + (
+        ("get_timeseries", {"bucket": "hour"}),
+        ("get_report", {"report": "slow_endpoints", "limit": 5}),
+    )
+
+
+def test_native_wire_oversize_still_blocked(menv, no_network):
+    """An actual oversized native wire still fails closed (meta shape).
+
+    Enough rich turns push the replayed wire past MAX_WIRE_BYTES: the
+    service must raise output_limit_reached with the prompt-bound
+    message (the wire guard), never the removed legacy history bound
+    and never a silent truncation. Complements the fake-history guard
+    in test_assistant_corrections.py::test_aggregate_history_bound_is_safe_error.
+    """
+    from app.ai.providers.meta_responses import MetaResponsesAdapter
+
+    model, _ = PROVIDERS["meta"]
+    endpoint = registry.endpoint_for("meta", model)
+    calls = []
+    turn = {"n": 0}
+
+    def transport(*, url, headers, body, timeout_s, max_response_bytes, max_wire_bytes=None):
+        assert url == endpoint
+        assert headers["Content-Type"] == "application/json"
+        calls.append(body)
+        turn["n"] += 1
+        return _oversize_tool_payload("meta", model, turn["n"])
+
+    adapter = MetaResponsesAdapter(
+        endpoint=endpoint, model=model, api_key="synthetic-test-key", transport=transport
+    )
+    with pytest.raises(InvestigationError) as excinfo:
+        _investigate(menv, "meta", adapter)
+    assert excinfo.value.code == "output_limit_reached"
+    assert "prompt bound" in str(excinfo.value)
+    assert len(calls) >= 2

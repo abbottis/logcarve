@@ -4,7 +4,8 @@ Read the root rules, `docs/privacy-and-security.md` and AI/PRIV/COST acceptance 
 
 - This module is a consumer of analytics; it must not be imported as a prerequisite for external REST queries.
 - Keep provider adapters, typed tool definitions, prompts and evidence serialization separate.
-- Use the configured allowed Meta Standard model; validate provider/model/tier before transmitting data.
+- Use the configured allowlisted provider/model (default Meta Standard; OpenAI, Gemini Paid and Anthropic API per accepted ADR 0004 with provider-specific verified modes); validate provider/model/tier before transmitting data.
+- Per-provider keys are encrypted separately and runtime usage needs its own explicit authorization (no implicit grant); see ADR 0004.
 - An account flag or model ID alone cannot prove effective Standard service. Unknown mode fails closed for real data.
 - Apply the data-egress gate to prompts, tool outputs, retries, history and cached/replayed context.
 - Limit payloads to needed aggregates and sanitized evidence; never forward raw rows/logs or original IPs.
