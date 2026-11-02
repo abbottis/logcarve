@@ -178,6 +178,7 @@ def coverage_summary(
         "observed_max": cov["observed_max"],
         "sources": cov["sources"],
         "import_attempts": cov["import_attempts"],
+        "imports_truncated": cov.get("imports_truncated", False),
         "imports": [
             {
                 "import_id": i["import_id"],
@@ -206,6 +207,11 @@ def _warnings(
             )
         if imp["error_summary"] and "source_changed" in imp["error_summary"]:
             notes.append(f"import {imp['import_id']}: source changed during import")
+    if cov.get("imports_truncated"):
+        notes.append(
+            "import history shows the oldest attempts only:"
+            " aggregates stay exact, see the import log for full provenance"
+        )
     if truncated:
         notes.append("distinct-value scan hit its bound: rare values may be missing")
     return notes

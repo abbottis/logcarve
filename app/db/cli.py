@@ -387,6 +387,347 @@ def cmd_reprocess(args: argparse.Namespace) -> int:
     return 0 if overall == "completed" else 1
 
 
+def _follow_payload(result) -> dict:
+    """Follow JSON payload: counts and fixed codes only, never raw bytes."""
+    return {
+        "status": result.status,
+        "source_id": result.source_id,
+        "polls": result.polls,
+        "empty_polls": result.empty_polls,
+        "generations_started": result.generations_started,
+        "active_generation": result.active_generation,
+        "sealed_generations": result.sealed_generations,
+        "drain_truncated": result.drain_truncated,
+        "lines_accepted": result.lines_accepted,
+        "lines_rejected": result.lines_rejected,
+        "records_inserted": result.records_inserted,
+        "records_replayed": result.records_replayed,
+        "records_skipped_foreign": result.lines_skipped_foreign,
+        "originals_captured": result.originals_captured,
+        "originals_skipped_mismatch": result.originals_skipped_mismatch,
+        "rejected_by_reason": result.rejected_by_reason,
+        "error_summary": result.error_summary,
+        "guidance": result.guidance,
+    }
+
+
+def _archive_payload(result) -> dict:
+    """Archive-replay JSON payload: counts and fixed codes only."""
+    return {
+        "status": result.status,
+        "source_id": result.source_id,
+        "archive_path": result.archive_path,
+        "generation_seq": result.generation_seq,
+        "lines_accepted": result.lines_accepted,
+        "lines_rejected": result.lines_rejected,
+        "records_inserted": result.records_inserted,
+        "records_replayed": result.records_replayed,
+        "records_skipped_foreign": result.lines_skipped_foreign,
+        "originals_captured": result.originals_captured,
+        "originals_skipped_mismatch": result.originals_skipped_mismatch,
+        "rejected_by_reason": result.rejected_by_reason,
+        "error_summary": result.error_summary,
+        "guidance": result.guidance,
+    }
+
+
+def _follow_source_args(parser) -> None:
+    """Shared source/binding arguments for follow and replay-archive."""
+    parser.add_argument("--source-id", required=True)
+    parser.add_argument("--format", required=True, choices=list(_FORMAT_CHOICES))
+    parser.add_argument("--format-config", default=None, help="Validated custom-format JSON file")
+    parser.add_argument("--root", required=True, help="Approved source root directory")
+    parser.add_argument(
+        "--host-filter",
+        action="append",
+        default=None,
+        help="Explicit replacement host set (repeatable/comma-separated); --site-hostname is NOT added",
+    )
+    parser.add_argument(
+        "--host-alias",
+        action="append",
+        default=None,
+        help="Extra hosts extending --site-hostname (repeatable/comma-separated)",
+    )
+    parser.add_argument("--site-id", default="default")
+    parser.add_argument("--site-name", default="Example site")
+    parser.add_argument("--site-hostname", default="example.org")
+    parser.add_argument("--server-type", default="nginx")
+    parser.add_argument("--batch-size", type=int, default=1000)
+    parser.add_argument("--max-line-bytes", type=int, default=65536)
+    parser.add_argument("--max-diagnostics", type=int, default=20)
+    parser.add_argument("--max-compressed-bytes", type=int, default=1073741824)
+    parser.add_argument("--max-uncompressed-bytes", type=int, default=1073741824)
+    parser.add_argument("--max-compression-ratio", type=float, default=100.0)
+    parser.add_argument("--max-gzip-members", type=int, default=64)
+    parser.add_argument("--autodetect-sample-lines", type=int, default=32)
+    parser.add_argument(
+        "--capture-original-ips",
+        action="store_true",
+        default=False,
+        help="Store validated client addresses encrypted (requires ORIGINAL_IP_KEY)",
+    )
+    parser.add_argument(
+        "--geoip-db",
+        default=None,
+        help="Mounted offline country database (DB-IP Country Lite MMDB);"
+        " defaults to GEOIP_DB_PATH; empty stores unavailable markers",
+    )
+    parser.add_argument(
+        "--geoip-required",
+        action="store_true",
+        default=False,
+        help="Fail before any write when the country database is missing/unreadable",
+    )
+
+
+def _follow_common_kwargs(args: argparse.Namespace):
+    """Validate shared follow flags; return kwargs or an exit code."""
+    from app.db.follow import DEFAULT_MAX_BYTES_PER_POLL
+
+    custom_format = None
+    if args.format == CUSTOM or args.format_config is not None:
+        if args.format_config is None:
+            print("error: --format custom requires --format-config", file=sys.stderr)
+            return 2, None
+        try:
+            custom_format = load_spec_file(Path(args.format_config))
+        except CustomFormatError as exc:
+            print(f"error: invalid custom format ({exc.code})", file=sys.stderr)
+            return 2, None
+    has_custom_vhost = custom_format is not None and "vhost" in custom_format.pattern.groupindex
+    explicit_hosts = _resolve_explicit_hosts(
+        site_hostname=args.site_hostname,
+        host_filter=args.host_filter,
+        host_alias=args.host_alias,
+        vhost_bearing=(
+            args.format in (APACHE_VHOST_COMBINED, NGINX_EXTENDED, AUTO) or has_custom_vhost
+        ),
+    )
+    host_filter = None
+    if explicit_hosts:
+        try:
+            host_filter = HostFilter(explicit_hosts)
+        except ValueError:
+            print("error: invalid host filter", file=sys.stderr)
+            return 2, None
+    try:
+        limits = Limits(
+            max_line_bytes=args.max_line_bytes,
+            max_diagnostics=args.max_diagnostics,
+        )
+        gzip_limits = GzipLimits(
+            max_compressed_bytes=args.max_compressed_bytes,
+            max_uncompressed_bytes=args.max_uncompressed_bytes,
+            max_compression_ratio=args.max_compression_ratio,
+            max_gzip_members=args.max_gzip_members,
+        )
+    except ValueError:
+        print("error: invalid resource limits", file=sys.stderr)
+        return 2, None
+    if (
+        isinstance(args.batch_size, bool)
+        or not isinstance(args.batch_size, int)
+        or args.batch_size < 1
+    ):
+        print("error: invalid batch size", file=sys.stderr)
+        return 2, None
+    if (
+        isinstance(args.autodetect_sample_lines, bool)
+        or not isinstance(args.autodetect_sample_lines, int)
+        or not 1 <= args.autodetect_sample_lines <= 1024
+    ):
+        print("error: invalid autodetect sample size", file=sys.stderr)
+        return 2, None
+    return 0, {
+        "custom_format": custom_format,
+        "host_filter": host_filter,
+        "limits": limits,
+        "gzip_limits": gzip_limits,
+        "max_bytes_default": DEFAULT_MAX_BYTES_PER_POLL,
+    }
+
+
+def cmd_follow(args: argparse.Namespace) -> int:
+    from app.db import follow as follow_mod
+    from app.db.private import PrivateUnavailable
+    from app.db.repositories import SourceBindingError
+    from app.ingestion.geoip import GeoipError
+
+    code, common = _follow_common_kwargs(args)
+    if code != 0:
+        return code
+    if (
+        isinstance(args.max_polls, bool)
+        or not isinstance(args.max_polls, int)
+        or not 1 <= args.max_polls <= 100000
+    ):
+        print("error: invalid max polls", file=sys.stderr)
+        return 2
+    try:
+        poll_interval = float(args.poll_interval_s)
+    except (TypeError, ValueError):
+        print("error: invalid poll interval", file=sys.stderr)
+        return 2
+    if not 0 <= poll_interval <= 3600:
+        print("error: invalid poll interval", file=sys.stderr)
+        return 2
+    if (
+        isinstance(args.max_bytes_per_poll, bool)
+        or not isinstance(args.max_bytes_per_poll, int)
+        or not 1024 <= args.max_bytes_per_poll <= 1024**3
+    ):
+        print("error: invalid max bytes per poll", file=sys.stderr)
+        return 2
+    if (
+        isinstance(args.max_writer_retries, bool)
+        or not isinstance(args.max_writer_retries, int)
+        or not 0 <= args.max_writer_retries <= 100
+    ):
+        print("error: invalid max writer retries", file=sys.stderr)
+        return 2
+    try:
+        source = SourceConfig(
+            source_id=args.source_id,
+            format_id=args.format,
+            allowed_root=Path(args.root),
+            relative_path=args.path,
+            allowed_hosts=(
+                sorted(common["host_filter"].hosts) if common["host_filter"] is not None else None
+            ),
+        )
+    except ValueError:
+        print("error: invalid source configuration", file=sys.stderr)
+        return 2
+    try:
+        with _country_lookup(args) as lookup:
+            result = follow_mod.run_follow(
+                Path(args.db),
+                source=source,
+                site_id=args.site_id,
+                site_name=args.site_name,
+                site_hostname=args.site_hostname,
+                server_type=args.server_type,
+                path_alias=args.path,
+                hmac_key=_hmac_key(),
+                batch_size=args.batch_size,
+                max_polls=args.max_polls,
+                poll_interval_s=poll_interval,
+                max_bytes_per_poll=args.max_bytes_per_poll,
+                capture_originals=args.capture_original_ips,
+                country_lookup=lookup,
+                geoip_required=args.geoip_required,
+                host_filter=common["host_filter"],
+                custom_format=common["custom_format"],
+                limits=common["limits"],
+                gzip_limits=common["gzip_limits"],
+                max_writer_retries=args.max_writer_retries,
+                fresh_start=args.fresh_start,
+            )
+    except follow_mod.FollowRefused as exc:
+        print(f"error: {exc.code}: {exc.guidance}", file=sys.stderr)
+        return 2
+    except PrivateUnavailable as exc:
+        print(f"error: {exc.code}", file=sys.stderr)
+        return 1
+    except GeoipError as exc:
+        print(f"error: {exc.code}", file=sys.stderr)
+        return 1
+    except SourceBindingError as exc:
+        print(f"error: {exc.code}", file=sys.stderr)
+        return 1
+    except (CustomFormatError, ValueError) as exc:
+        print(f"error: invalid follow configuration ({exc})", file=sys.stderr)
+        return 2
+    print(json.dumps(_follow_payload(result)))
+    return 0 if result.status in ("completed", "cancelled") else 1
+
+
+def cmd_replay_archive(args: argparse.Namespace) -> int:
+    from app.db import follow as follow_mod
+    from app.db.private import PrivateUnavailable
+    from app.db.repositories import SourceBindingError
+    from app.ingestion.geoip import GeoipError
+
+    code, common = _follow_common_kwargs(args)
+    if code != 0:
+        return code
+    generation_seq = None
+    if args.generation_seq is not None:
+        if (
+            isinstance(args.generation_seq, bool)
+            or not isinstance(args.generation_seq, int)
+            or args.generation_seq < 1
+        ):
+            print("error: invalid generation sequence", file=sys.stderr)
+            return 2
+        generation_seq = args.generation_seq
+    try:
+        # Validated for intent only: the replay reads the archive, while
+        # --path names the live file the generation followed.
+        _live_source = SourceConfig(
+            source_id=args.source_id,
+            format_id=args.format,
+            allowed_root=Path(args.root),
+            relative_path=args.path,
+            allowed_hosts=(
+                sorted(common["host_filter"].hosts) if common["host_filter"] is not None else None
+            ),
+        )
+        archive = SourceConfig(
+            source_id=args.source_id,
+            format_id=args.format,
+            allowed_root=Path(args.root),
+            relative_path=args.archive_path,
+            allowed_hosts=(
+                sorted(common["host_filter"].hosts) if common["host_filter"] is not None else None
+            ),
+        )
+    except ValueError:
+        print("error: invalid source configuration", file=sys.stderr)
+        return 2
+    try:
+        with _country_lookup(args) as lookup:
+            result = follow_mod.replay_archive(
+                Path(args.db),
+                archive=archive,
+                site_id=args.site_id,
+                site_name=args.site_name,
+                site_hostname=args.site_hostname,
+                server_type=args.server_type,
+                path_alias=args.archive_path,
+                hmac_key=_hmac_key(),
+                batch_size=args.batch_size,
+                generation_seq=generation_seq,
+                capture_originals=args.capture_original_ips,
+                country_lookup=lookup,
+                geoip_required=args.geoip_required,
+                host_filter=common["host_filter"],
+                custom_format=common["custom_format"],
+                limits=common["limits"],
+                gzip_limits=common["gzip_limits"],
+            )
+    except follow_mod.FollowRefused as exc:
+        print(f"error: {exc.code}: {exc.guidance}", file=sys.stderr)
+        return 2
+    except PrivateUnavailable as exc:
+        print(f"error: {exc.code}", file=sys.stderr)
+        return 1
+    except GeoipError as exc:
+        print(f"error: {exc.code}", file=sys.stderr)
+        return 1
+    except SourceBindingError as exc:
+        print(f"error: {exc.code}", file=sys.stderr)
+        return 1
+    except (CustomFormatError, ValueError) as exc:
+        print(f"error: invalid replay configuration ({exc})", file=sys.stderr)
+        return 2
+    print(json.dumps(_archive_payload(result)))
+    if result.status == "completed":
+        return 0
+    return 1 if result.status == "failed" else 2
+
+
 def cmd_retention(args: argparse.Namespace) -> int:
     migrate(Path(args.db))
     conn = connect(Path(args.db))
@@ -546,6 +887,45 @@ def build_parser() -> argparse.ArgumentParser:
         help="Fail before any write when the country database is missing/unreadable",
     )
     reprocess.set_defaults(func=cmd_reprocess)
+
+    follow = sub.add_parser(
+        "follow",
+        help="Opt-in tail of one source file with durable checkpoints (bounded polls)",
+    )
+    _follow_source_args(follow)
+    follow.add_argument("--path", required=True, help="Relative path inside the approved root")
+    follow.add_argument("--max-polls", type=int, default=60)
+    follow.add_argument("--poll-interval-s", type=float, default=1.0)
+    follow.add_argument("--max-bytes-per-poll", type=int, default=8388608)
+    follow.add_argument("--max-writer-retries", type=int, default=5)
+    follow.add_argument(
+        "--fresh-start",
+        action="store_true",
+        default=False,
+        help="Abandon taint/ambiguity guards and follow from offset 0 (may duplicate)",
+    )
+    follow.set_defaults(func=cmd_follow)
+
+    replay_archive = sub.add_parser(
+        "replay-archive",
+        help="Replay a rotated archive under its sealed follow generation",
+    )
+    _follow_source_args(replay_archive)
+    replay_archive.add_argument(
+        "--path", required=True, help="Live relative path the generation followed"
+    )
+    replay_archive.add_argument(
+        "--archive-path",
+        required=True,
+        help="Rotated archive relative path inside the approved root",
+    )
+    replay_archive.add_argument(
+        "--generation-seq",
+        type=int,
+        default=None,
+        help="Sealed generation (default: latest sealed)",
+    )
+    replay_archive.set_defaults(func=cmd_replay_archive)
 
     retention = sub.add_parser("retention", help="Delete owned events older than N days (UTC)")
     retention.add_argument("--days", type=int, default=30)

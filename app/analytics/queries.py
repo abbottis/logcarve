@@ -400,9 +400,19 @@ def distinct_statuses(
 _TOP_PATH_ORDER: dict[str, str] = {
     "requests_desc": "requests DESC, path ASC, method ASC",
     "errors_desc": "errors DESC, requests DESC, path ASC, method ASC",
-    # Split-half ordering matches exact-total ordering: comparing the
-    # high halves first, then the low halves, is the numeric order.
-    "bytes_desc": "bytes_hi DESC, bytes_lo DESC, requests DESC, path ASC, method ASC",
+    # Split-half ordering matches exact-total ordering only after the
+    # low-half carry is normalized: the true total is
+    # ``bytes_hi * 2**32 + bytes_lo`` and the raw low sum can exceed one
+    # word (cross-carry), so ordering compares the normalized high word
+    # ``bytes_hi + (bytes_lo >> 32)`` first and the normalized low word
+    # ``bytes_lo & 4294967295`` second. Both operands stay int64 for any
+    # importable dataset (overflowing one half needs exabytes of logged
+    # response bytes); no REAL cast, no Python regrouping, no page-only
+    # ranking. Audited 2026-11-02: this is the only grouped byte ranking
+    # that orders by split halves; every other byte aggregate only sums
+    # (exact ``combine_bytes_total``) or orders by request counts.
+    "bytes_desc": "(bytes_hi + (bytes_lo >> 32)) DESC, (bytes_lo & 4294967295) DESC,"
+    " requests DESC, path ASC, method ASC",
 }
 
 
@@ -749,14 +759,33 @@ def coverage(
         ]
     imports: list[dict[str, object]] = []
     attempts = {"lines_total": 0, "lines_accepted": 0, "lines_rejected": 0, "records_replayed": 0}
+    imports_truncated = False
     if source_ids:
         placeholders = ", ".join("?" for _ in source_ids)
-        for imp in conn.execute(
+        # Exact aggregates come from bounded SQL SUM, never from the
+        # capped sample below, so follow generations and archive
+        # attempts stay fully counted however long the history grows.
+        totals = conn.execute(
+            "SELECT COALESCE(SUM(lines_total), 0), COALESCE(SUM(lines_accepted), 0),"
+            " COALESCE(SUM(lines_rejected), 0), COALESCE(SUM(records_replayed), 0),"
+            f" COUNT(*) FROM imports WHERE source_id IN ({placeholders})",
+            source_ids,
+        ).fetchone()
+        attempts = {
+            "lines_total": int(totals[0]),
+            "lines_accepted": int(totals[1]),
+            "lines_rejected": int(totals[2]),
+            "records_replayed": int(totals[3]),
+        }
+        sample = conn.execute(
             "SELECT id, source_id, file_fingerprint, lines_total, lines_accepted,"
             " lines_rejected, records_inserted, records_replayed, status, error_summary"
-            f" FROM imports WHERE source_id IN ({placeholders}) ORDER BY id",
+            f" FROM imports WHERE source_id IN ({placeholders}) ORDER BY id"
+            f" LIMIT {IMPORT_HISTORY_SAMPLE_LIMIT}",
             source_ids,
-        ).fetchall():
+        ).fetchall()
+        imports_truncated = int(totals[4]) > len(sample)
+        for imp in sample:
             imports.append(
                 {
                     "import_id": imp[0],
@@ -774,20 +803,23 @@ def coverage(
                     "error_summary": sanitize_error_summary(imp[9]),
                 }
             )
-    attempts = {
-        "lines_total": sum(i["lines_total"] for i in imports),
-        "lines_accepted": sum(i["lines_accepted"] for i in imports),
-        "lines_rejected": sum(i["lines_rejected"] for i in imports),
-        "records_replayed": sum(i["records_replayed"] for i in imports),
-    }
     return {
         "unique_events": row[0],
         "observed_min": row[1],
         "observed_max": row[2],
         "sources": sources,
         "imports": imports,
+        "imports_truncated": imports_truncated,
         "import_attempts": attempts,
     }
+
+
+#: Bound on the import-history sample served inside coverage: history
+#: grows with every batch/generation/archive attempt, so a long-lived
+#: source must never force an unbounded ``fetchall`` into responses.
+#: Exact aggregate accounting always comes from bounded SQL ``SUM``
+#: queries; only the displayed sample is capped, with an explicit flag.
+IMPORT_HISTORY_SAMPLE_LIMIT = 200
 
 
 def traffic_breakdown(
