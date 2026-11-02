@@ -79,11 +79,13 @@ def ai_base(tmp_path, monkeypatch):
 
 
 def _login(page, base):
-    page.goto(f"{base}/login")
+    # The fixture seeds no site/source, so "/" would 404 after login:
+    # land directly on the settings page under test instead.
+    page.goto(f"{base}/login?next=/settings")
     page.fill("#username", "admin")
     page.fill("#password", "s3cret-pw")
     page.click("button[type=submit]")
-    page.wait_for_url(f"{base}/", timeout=10000)
+    page.wait_for_url(f"{base}/settings*", timeout=10000)
 
 
 def _watch(page):
@@ -169,8 +171,13 @@ def test_ai_settings_themes_and_narrow_viewport(page, ai_base):
     base = ai_base
     _login(page, base)
     for theme, width in (("light", 1280), ("dark", 1280), ("dark", 390)):
-        page.emulate_media(color_scheme=theme)
         page.set_viewport_size({"width": width, "height": 800})
         page.goto(f"{base}/settings")
         expect(page.locator("#set-ai-h")).to_be_visible()
         expect(page.locator("text=Save assistant settings")).to_be_visible()
+        # Drive the real persisted theme switcher and assert the app
+        # really paints the requested theme on <html>.
+        page.select_option("#theme-select", theme)
+        expect(page.locator("html")).to_have_attribute("data-theme", theme)
+        # No horizontal overflow at desktop or narrow widths.
+        assert page.evaluate("document.documentElement.scrollWidth") <= width

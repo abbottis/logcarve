@@ -91,28 +91,23 @@ class EffectiveAISettings:
 
 
 def _overlay(db_path: Path) -> dict:
-    """Read the raw DB overlay; empty only when genuinely absent.
+    """Read the raw DB overlay; empty only when genuinely never managed.
 
-    A missing store file or a store without the settings table means
-    "no admin overlay was ever saved" and resolves to ``{}``. Any
-    other failure (corrupt DB, I/O error) raises a fixed-code
-    :class:`SettingsStoreError`: callers fail AI closed while
-    deterministic analytics stay online. A broad catch that returns
-    ``{}`` here would silently re-enable the env base after a
-    configured backend disable/revocation becomes unreadable.
+    ``{}`` is returned ONLY for an existing, readable store whose
+    settings table exists but holds no ``ai.*`` rows (the backend was
+    genuinely never managed). A missing store file, a missing
+    settings table, or any corrupt/unreadable store raises a
+    fixed-code :class:`SettingsStoreError`: callers fail AI closed
+    while deterministic analytics stay online. Returning ``{}`` for a
+    missing/deleted store or table would silently re-enable the env
+    base after a configured backend disable/revocation became
+    unreadable, so no ``except`` path here resolves to empty.
     """
     try:
         from app.db.database import connect
 
         conn = connect(Path(db_path), read_only=True)
-    except OSError as exc:
-        raise SettingsStoreError(
-            "settings_unavailable", "The AI settings store is unavailable."
-        ) from exc
-    except Exception as exc:  # sqlite open failures fail closed
-        message = str(exc).lower()
-        if "unable to open" in message or "no such file" in message:
-            return {}
+    except Exception as exc:  # missing/unreadable store fails closed
         raise SettingsStoreError(
             "settings_unavailable", "The AI settings store is unavailable."
         ) from exc
@@ -141,10 +136,7 @@ def _overlay(db_path: Path) -> dict:
         return out
     except SettingsStoreError:
         raise
-    except Exception as exc:  # corrupt tables fail closed, never empty
-        message = str(exc).lower()
-        if "no such table" in message:
-            return {}
+    except Exception as exc:  # corrupt/missing tables fail closed, never empty
         raise SettingsStoreError(
             "settings_unavailable", "The AI settings store is unavailable."
         ) from exc
@@ -213,16 +205,21 @@ def resolve(db_path: Path, base) -> EffectiveAISettings:
     except SettingsStoreError as exc:
         return _fail_closed(base, store_error=exc.code)
     base_provider = str(getattr(base, "model_provider", "meta") or "meta")
-    provider = overlay.get(settings_store.PROVIDER_SETTING, base_provider)
-    provider = provider.strip() or base_provider
-    # An unknown persisted provider is kept verbatim so the gate
-    # rejects it: silently replacing it with the env Meta default
-    # would grant a different provider's handling to stored config.
+    if settings_store.PROVIDER_SETTING in overlay:
+        # A persisted provider row is authoritative verbatim — even
+        # empty or unknown — so the gate rejects it: silently
+        # replacing it with the env default would grant a different
+        # provider's handling to stored config.
+        provider = overlay[settings_store.PROVIDER_SETTING].strip()
+    else:
+        provider = base_provider
     provider_known = provider in catalog.CATALOG
 
-    stored_model = overlay.get(settings_store.MODEL_SETTING, "").strip()
-    if stored_model:
-        model = stored_model
+    if settings_store.MODEL_SETTING in overlay:
+        # A persisted model row is authoritative verbatim — even
+        # empty — so a corrupt/blank row fails closed instead of
+        # falling back to the env base model.
+        model = overlay[settings_store.MODEL_SETTING].strip()
     elif provider_known and provider != base_provider:
         model = catalog.default_model(provider)
     elif provider == base_provider:
@@ -237,9 +234,22 @@ def resolve(db_path: Path, base) -> EffectiveAISettings:
     else:
         enabled = bool(getattr(base, "ai_enabled", False))
 
-    policy = overlay.get(settings_store.POLICY_SETTING_PREFIX + provider, "").strip()
-    if policy not in ("", settings_store.POLICY_SYNTHETIC, settings_store.POLICY_REAL):
+    policy_key = settings_store.POLICY_SETTING_PREFIX + provider
+    if policy_key in overlay:
+        # A persisted policy row is authoritative: a present-but-empty
+        # or invalid value is explicit UNACKNOWLEDGED (or corrupt) and
+        # fails closed — it is never normalized away to resurrect the
+        # legacy env permission below.
+        raw_policy = overlay[policy_key].strip()
+        if raw_policy in (settings_store.POLICY_SYNTHETIC, settings_store.POLICY_REAL):
+            policy = raw_policy
+        else:
+            policy = ""
+    else:
+        # No policy row was ever saved for this provider: only then
+        # may the backwards-compatible Meta env flags apply.
         policy = ""
+        raw_policy = None
 
     synthetic_source_asserted = False
     if "ai.synthetic_source" in overlay:
@@ -251,9 +261,10 @@ def resolve(db_path: Path, base) -> EffectiveAISettings:
         verified, allow_real = True, True
     elif policy == settings_store.POLICY_SYNTHETIC:
         verified, allow_real = False, False
-    elif provider == "meta" and provider == base_provider:
+    elif raw_policy is None and provider == "meta" and provider == base_provider:
         # Backwards-compatible Meta env flags (existing demo setup).
-        # Only for the same provider the operator configured: a
+        # Only when no policy row was ever saved for this provider
+        # and only for the same provider the operator configured: a
         # per-provider stored acknowledgment never transfers, and it
         # never overrides the effective service-tier mode (the gate
         # still requires the tier to match the catalog entry).

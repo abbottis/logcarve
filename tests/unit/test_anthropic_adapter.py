@@ -184,12 +184,50 @@ def test_validate_usage_preserves_creation_and_read_details():
         )
 
 
+def test_validate_usage_native_nested_breakdown_example():
+    # Native API example shape: aggregate at usage level, TTL split
+    # nested under ``cache_creation``.
+    usage = validate_usage(
+        {
+            "input_tokens": 0,
+            "output_tokens": 0,
+            "cache_creation_input_tokens": 1000,
+            "cache_creation": {
+                "ephemeral_5m_input_tokens": 1000,
+                "ephemeral_1h_input_tokens": 0,
+            },
+        },
+        max_output_tokens=2048,
+        input_upper=5000,
+    )
+    assert usage["input_tokens"] == 1000
+    assert usage["cache_creation_tokens"] == 0
+    assert usage["cache_creation_5m_tokens"] == 1000
+    assert usage["cache_creation_1h_tokens"] == 0
+    # The native 5-minute bucket bills at 1.25x: 1000 tokens cost 125
+    # micro-USD, not 200 at the conservative unknown rate.
+    assert (
+        cost_micro_usd(
+            input_tokens=0,
+            cache_creation_tokens=0,
+            cache_read_tokens=0,
+            output_tokens=0,
+            cache_creation_5m_tokens=usage["cache_creation_5m_tokens"],
+            cache_creation_1h_tokens=usage["cache_creation_1h_tokens"],
+        )
+        == 125
+    )
+
+
 def test_validate_usage_breakdown_buckets_are_disjoint():
     usage = validate_usage(
         {
             "input_tokens": 700,
-            "cache_creation_5m_input_tokens": 100,
-            "cache_creation_1h_input_tokens": 100,
+            "cache_creation_input_tokens": 200,
+            "cache_creation": {
+                "ephemeral_5m_input_tokens": 100,
+                "ephemeral_1h_input_tokens": 100,
+            },
             "cache_read_input_tokens": 100,
             "output_tokens": 25,
         },
@@ -207,6 +245,23 @@ def test_validate_usage_breakdown_buckets_are_disjoint():
             {
                 "input_tokens": 700,
                 "cache_creation_input_tokens": 150,
+                "cache_creation": {
+                    "ephemeral_5m_input_tokens": 100,
+                    "ephemeral_1h_input_tokens": 100,
+                },
+                "cache_read_input_tokens": 100,
+                "output_tokens": 25,
+            },
+            max_output_tokens=2048,
+            input_upper=5000,
+        )
+    # The invented top-level breakdown fields are not native and are
+    # rejected even when their sum matches the aggregate.
+    with pytest.raises(ProviderError):
+        validate_usage(
+            {
+                "input_tokens": 700,
+                "cache_creation_input_tokens": 200,
                 "cache_creation_5m_input_tokens": 100,
                 "cache_creation_1h_input_tokens": 100,
                 "cache_read_input_tokens": 100,
@@ -215,6 +270,49 @@ def test_validate_usage_breakdown_buckets_are_disjoint():
             max_output_tokens=2048,
             input_upper=5000,
         )
+    # Malformed breakdowns fail closed: null counts, wrong types,
+    # negative counts, unexpected keys and non-object breakdowns.
+    for bad_breakdown in (
+        {"ephemeral_5m_input_tokens": None, "ephemeral_1h_input_tokens": 0},
+        {"ephemeral_5m_input_tokens": "100", "ephemeral_1h_input_tokens": 0},
+        {"ephemeral_5m_input_tokens": True, "ephemeral_1h_input_tokens": 0},
+        {"ephemeral_5m_input_tokens": -1, "ephemeral_1h_input_tokens": 0},
+        {
+            "ephemeral_5m_input_tokens": 100,
+            "ephemeral_1h_input_tokens": 100,
+            "ephemeral_2h_input_tokens": 50,
+        },
+        [100, 100],
+        "100",
+    ):
+        with pytest.raises(ProviderError):
+            validate_usage(
+                {
+                    "input_tokens": 700,
+                    "cache_creation_input_tokens": 200,
+                    "cache_creation": bad_breakdown,
+                    "cache_read_input_tokens": 100,
+                    "output_tokens": 25,
+                },
+                max_output_tokens=2048,
+                input_upper=5000,
+            )
+    # A null breakdown means unknown TTL: the aggregate stays
+    # conservative at the 1-hour rate instead of failing.
+    null_usage = validate_usage(
+        {
+            "input_tokens": 700,
+            "cache_creation_input_tokens": 200,
+            "cache_creation": None,
+            "cache_read_input_tokens": 100,
+            "output_tokens": 25,
+        },
+        max_output_tokens=2048,
+        input_upper=5000,
+    )
+    assert null_usage["cache_creation_tokens"] == 200
+    assert null_usage["cache_creation_5m_tokens"] == 0
+    assert null_usage["cache_creation_1h_tokens"] == 0
 
 
 def _tools():

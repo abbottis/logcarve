@@ -8,7 +8,10 @@ Administrative overlay stored in the existing ``admin_settings`` table:
   demo mode) or ``"real"`` (provider-specific explicit real-data policy
   acknowledgment). Unset blocks real data. Acknowledgments never
   transfer across providers: switching provider resolves only the new
-  provider's own record.
+  provider's own record. A present-but-empty row is an explicit
+  unacknowledged tombstone (a cleared/revoked policy): it also blocks
+  real data and, unlike a never-saved row, never falls back to legacy
+  operator env permission.
 - ``ai.key.<provider>``: AES-256-GCM ciphertext (base64 nonce plus
   ciphertext) bound to the provider as associated data. Blank input
   keeps the stored key; explicit removal deletes it.

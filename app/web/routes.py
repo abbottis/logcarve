@@ -2134,7 +2134,12 @@ def _settings_context(request: Request, conn, settings_error: str | None = None)
     db_path = request.app.state.db_path
     effective = ai_effective.resolve(db_path, settings)
     key_states = ai_effective.key_statuses(db_path, settings)
-    overlay = ai_effective._overlay(db_path)
+    try:
+        overlay = ai_effective._overlay(db_path)
+    except ai_settings_store.SettingsStoreError:
+        # Display-only fallback: the settings page stays readable
+        # while dispatch fails closed via effective.ai_store_error.
+        overlay = {}
     ai_providers = []
     for provider_id in ai_catalog.provider_ids():
         state = key_states.get(provider_id, {})
@@ -2995,7 +3000,12 @@ async def settings_ai_update(request: Request):
             if policy:
                 ai_settings_store.set_setting(conn, policy_key, policy)
             else:
-                ai_settings_store.delete_setting(conn, policy_key)
+                # Explicit unacknowledged tombstone: a cleared policy
+                # persists as a present-but-empty row so resolution
+                # treats it as UNACKNOWLEDGED (fail closed) instead of
+                # confusing it with a never-saved row that would
+                # resurrect the legacy Meta env permission.
+                ai_settings_store.set_setting(conn, policy_key, "")
             ai_settings_store.set_setting(
                 conn, "ai.synthetic_source", "1" if synthetic_source else "0"
             )

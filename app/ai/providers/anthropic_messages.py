@@ -297,39 +297,62 @@ def cost_micro_usd(
     return max(1, (total + MICRO_PER_TOKEN_UNIT - 1) // MICRO_PER_TOKEN_UNIT)
 
 
+def _native_breakdown_counts(breakdown: object) -> tuple[int, int]:
+    """Extract native 5-minute / 1-hour creation counts.
+
+    The native ``cache_creation`` object carries
+    ``ephemeral_5m_input_tokens`` / ``ephemeral_1h_input_tokens``; both
+    default to zero when absent. Null values, non-integer counts or
+    unexpected keys are malformed.
+    """
+    if not isinstance(breakdown, dict):
+        raise ProviderError("The provider usage is malformed.")
+    five = breakdown.get("ephemeral_5m_input_tokens", 0)
+    one_h = breakdown.get("ephemeral_1h_input_tokens", 0)
+    for tokens in (five, one_h):
+        if isinstance(tokens, bool) or not isinstance(tokens, int) or tokens < 0:
+            raise ProviderError("The provider usage is malformed.")
+    for key in breakdown:
+        if key not in ("ephemeral_5m_input_tokens", "ephemeral_1h_input_tokens"):
+            raise ProviderError("The provider usage is malformed.")
+    return five, one_h
+
+
 def validate_usage(payload: object, *, max_output_tokens: int, input_upper: int) -> dict:
     """Validate a Messages ``usage`` object into safe counts.
 
-    Accepts the standard ``cache_creation_input_tokens`` total
-    (unknown TTL: priced conservatively at the 1-hour write rate) or
-    the explicit ``cache_creation_5m_input_tokens`` /
-    ``cache_creation_1h_input_tokens`` breakdown — never both for the
-    same report (a report carrying the total alongside a breakdown
-    must state the total exactly as the breakdown sum, otherwise it
-    is rejected instead of double-counted).
+    Accepts the aggregate ``cache_creation_input_tokens`` total plus
+    the native nested ``cache_creation`` breakdown
+    (``ephemeral_5m_input_tokens`` / ``ephemeral_1h_input_tokens``).
+    A present breakdown must sum exactly to the aggregate total,
+    otherwise the report is rejected instead of double-counted. An
+    absent or null breakdown leaves the aggregate as unknown-TTL
+    creation, priced conservatively at the 1-hour write rate.
+    Top-level ``cache_creation_5m_input_tokens`` /
+    ``cache_creation_1h_input_tokens`` fields are not native and are
+    rejected.
     """
     if not isinstance(payload, dict):
         raise ProviderError("The provider usage is malformed.")
+    if "cache_creation_5m_input_tokens" in payload or "cache_creation_1h_input_tokens" in payload:
+        raise ProviderError("The provider usage is malformed.")
     base = payload.get("input_tokens")
     created = payload.get("cache_creation_input_tokens", 0)
-    created_5m = payload.get("cache_creation_5m_input_tokens", 0)
-    created_1h = payload.get("cache_creation_1h_input_tokens", 0)
     read = payload.get("cache_read_input_tokens", 0)
     output = payload.get("output_tokens")
-    for tokens in (base, created, created_5m, created_1h, read, output):
+    for tokens in (base, created, read, output):
         if isinstance(tokens, bool) or not isinstance(tokens, int) or tokens < 0:
             raise ProviderError("The provider usage is malformed.")
-    breakdown_present = (
-        "cache_creation_5m_input_tokens" in payload or "cache_creation_1h_input_tokens" in payload
-    )
-    if breakdown_present:
-        if "cache_creation_input_tokens" in payload and created != created_5m + created_1h:
-            raise ProviderError("The provider usage is malformed.")
-        created_unknown = 0
-    else:
+    breakdown = payload.get("cache_creation")
+    if breakdown is None:
         created_unknown = created
         created_5m = 0
         created_1h = 0
+    else:
+        created_5m, created_1h = _native_breakdown_counts(breakdown)
+        if created != created_5m + created_1h:
+            raise ProviderError("The provider usage is malformed.")
+        created_unknown = 0
     created_total = created_unknown + created_5m + created_1h
     total_input = base + created_total + read
     usage = {

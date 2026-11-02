@@ -282,6 +282,63 @@ def test_provider_switch_does_not_inherit_policy(web, key_env):
     assert missing is not None and missing[0] == "synthetic"
 
 
+def test_clearing_policy_persists_tombstone_and_blocks_legacy_env(web, key_env, monkeypatch):
+    # A user clear/revocation persists an explicit unacknowledged
+    # tombstone (not a deletion), so permissive legacy Meta env flags
+    # cannot resurrect a real-data permission from the cleared row.
+    client, db = web
+    csrf = _login(client)
+    assert (
+        _post_ai(
+            client,
+            csrf,
+            _valid_fields(
+                ai_provider="meta",
+                ai_model="muse-spark-1.3",
+                ai_policy="real",
+                ai_synthetic_source="0",
+            ),
+        ).status_code
+        == 303
+    )
+    assert (
+        _post_ai(
+            client,
+            csrf,
+            _valid_fields(
+                ai_provider="meta",
+                ai_model="muse-spark-1.3",
+                ai_policy="",
+                ai_synthetic_source="0",
+            ),
+        ).status_code
+        == 303
+    )
+    from app.db.database import connect
+
+    conn = connect(db, read_only=True)
+    try:
+        row = conn.execute(
+            "SELECT value FROM admin_settings WHERE key = 'ai.policy.meta'"
+        ).fetchone()
+    finally:
+        conn.close()
+    assert row is not None and row[0] == ""
+    monkeypatch.setenv("MODEL_API_KEY", "synthetic-env-key")
+    monkeypatch.setenv("MODEL_DATA_POLICY_VERIFIED", "true")
+    monkeypatch.setenv("MODEL_ALLOW_REAL_DATA", "true")
+    from app.ai.providers.base import BackendUnavailable
+    from app.ai.service import select_provider
+    from app.config import load_settings
+
+    resolved = ai_effective.resolve(db, load_settings())
+    assert resolved.ai_policy == ""
+    assert resolved.model_data_policy_verified is False
+    assert resolved.model_allow_real_data is False
+    with pytest.raises(BackendUnavailable):
+        select_provider(resolved)
+
+
 def test_restart_persistence_rereads_same_overlay(web, key_env):
     client, db = web
     csrf = _login(client)
