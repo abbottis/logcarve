@@ -54,6 +54,7 @@ replays the verified synthetic fixture without resetting auth or usage.
 
 - Bounded Nginx/Apache NCSA Combined parsing with privacy minimization.
 - SQLite migrations, replay-safe batch imports, retention and online backups.
+- Opt-in incremental follow with durable checkpoints, generation identity and rotation handling (`logcarve-import follow` / `replay-archive`); schema-gated `/readyz` readiness.
 - One deterministic analytics layer shared by the dashboard, API and tools.
 - Server-side admin sessions and separate scoped, site-bound API tokens.
 - Overview, Security, Crawlers, Errors, Requests, Ask AI, Settings and Data Sources.
@@ -99,8 +100,7 @@ native Linux x86-64 installation and standalone Linux host install are
 **NOT RUN**, and no full release, hackathon or all-project QA approval
 is claimed.
 
-Deferred scope stays deferred: gzip, custom formats, live ingestion,
-GeoIP, sessions, export/import UX, webhooks and the MCP product server.
+Deferred scope stays deferred: sessions, export/import UX, webhooks and the MCP product server. The LogWerk-parity branch additionally implements gzip ingest with presets and custom formats, genuine offline GeoIP and opt-in command-line follow/rotation (PAR-01–10); continuous ingestion beyond bounded opt-in follow, shipped translations and a browser file-import UI stay excluded.
 The product AI path stays off in the demo (AI disabled, empty model key,
 no Internet in offline proof); the separately authorized real Meta test
 completed two investigations with tool evidence while the third stopped at

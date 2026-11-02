@@ -28,3 +28,20 @@ Example host locations from the spec are `/opt/logcarve`, `/var/lib/logcarve`, `
 Plesk/HostEurope support must fit an existing reverse proxy without editing production webserver configuration as an installation prerequisite. Do not mount real logs into a development-agent workspace.
 
 Before release: fresh synthetic install, health/readiness, restart persistence, backup/restore, read-only source verification, network/asset inspection and measured 100k/1M-row runs. Record OPS-01–03. Deployment/public exposure and production configuration changes require explicit user authorization.
+
+Operator helpers (coordinator-executed, never installed as services):
+`scripts/upgrade_demo.py` performs the in-place store upgrade with a
+protected online backup first and hash proofs that all core event
+tuples, auth/token/session state and spent allowance survive unchanged
+(`--help`/`--dry-run`; posture: AI off, empty model key, non-root,
+read-only sources; rollback is image-only, never an automatic backup
+restore). `scripts/benchmark_synthetic.py` runs the reproducible
+100k/1M synthetic benchmark outside Git (expected-vs-observed counts,
+import/replay/RSS/DB/query timings, complete export counts or an
+explicit 413 above the cap). `logcarve-import follow` /
+`replay-archive` provide opt-in incremental follow with durable
+checkpoints, generation identity and rotation handling; the browser
+starts no watcher. `/readyz` rejects unsupported schemas (fixed
+`not_ready` envelope, no file creation); current supported migration
+MAX is 8. Native Linux x86-64 stays NOT RUN; ARM-host amd64 image runs
+are EMULATED proof only, with distinct architecture-tagged images.

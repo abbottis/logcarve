@@ -40,7 +40,7 @@ unchanged. A client-address country estimate computed locally describes
 where an observed address is registered, never visitor identity, residence
 or proof of bot origin.
 | `GET /healthz` | Minimal liveness |
-| `GET /readyz` | Restricted/internal DB readiness |
+| `GET /readyz` | Restricted/internal DB readiness: rejects outdated or structurally incomplete schemas (migration MAX plus required tables/columns) with a fixed 503 `not_ready` envelope; no file creation, no full scan |
 
 `POST /api/v1/chat/ask` is a separately authorized model operation; it is not part of the analytics-read contract. Admin imports are also separate. There is no raw-log export or general model-relay endpoint.
 
@@ -48,7 +48,7 @@ or proof of bot origin.
 
 Authenticate via `Authorization: Bearer <token>` with `analytics:read` and authorized site. Enforce `site_id`, `from`, `to`, timezone, maximum window, bounded pagination/limit and stable sort on the server. Document exact defaults/field types in OpenAPI when implementing; no generated OpenAPI file exists yet.
 
-Responses carry `site_id`, `time_range`, `generated_at`, `source_coverage`, `sample_size`, `filters`, `data_quality` and `warnings`. Findings include rule/evidence references. Use structured `code`, `message`, `request_id` errors without internal paths/SQL/secrets. Tokens are not URL parameters or browser JS settings.
+Responses carry `site_id`, `time_range`, `generated_at`, `source_coverage`, `sample_size`, `filters`, `data_quality` and `warnings`. Findings include rule/evidence references. Use structured `code`, `message`, `request_id` errors without internal paths/SQL/secrets. Tokens are not URL parameters or browser JS settings. Analytics `coverage` carries an explicit `imports_truncated` flag: the displayed import history is a bounded oldest-first sample (200 attempts) while `import_attempts` aggregates stay exact via SQL sums, so long-lived follow sources never force unbounded history into responses.
 
 ## Integration examples
 

@@ -145,6 +145,11 @@ def main() -> int:
             if "admin_users" in tables
             else 0
         )
+        schema_version = (
+            conn.execute("SELECT MAX(version) FROM schema_migrations").fetchone()[0]
+            if "schema_migrations" in tables
+            else 0
+        )
         tokens = (
             conn.execute("SELECT COUNT(*) FROM api_tokens WHERE name = 'demo-client'").fetchone()[0]
             if "api_tokens" in tables
@@ -184,6 +189,7 @@ def main() -> int:
             "rich_rows": rich_rows,
             "users": users,
             "demo_token": tokens,
+            "schema_version": schema_version,
             "fixture_sha": FIXTURE_SHA256,
             "rich_sha": RICH_SHA256,
         }

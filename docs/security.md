@@ -1,6 +1,6 @@
 # Security implementation and review checklist
 
-Status: requirements for future implementation; no controls are claimed operational.
+Status: controls implemented per the acceptance criteria; parser/auth/tool/retention/authorization changes still need independent review before release.
 
 | Boundary | Required control | Verification |
 | --- | --- | --- |
@@ -17,3 +17,19 @@ Treat URL, User-Agent and Referer prompt injection as data. Requests to run scan
 Keep secrets, real logs, dumps, retained session exports and provider traces outside the repository and build context. A `.gitignore` is not a secret scanner; add an appropriate scan when CI/runtime dependencies are established. Never print a secret to prove configuration.
 
 Independent review is required for parser, auth, tool-calling, retention and authorization changes. Record severity, file/line evidence, impact and remediation; do not turn a read-only review into unrequested changes. See [privacy/data egress](privacy-and-security.md) and [acceptance criteria](acceptance-criteria.md).
+
+## Known secret-scan findings (reviewed, not allowlisted)
+
+Gitleaks history scans report exactly two findings, both reviewed false
+positives; neither is a blanket rule, and history is never rewritten.
+
+- `docs/technical-spec.md:787`: a cost-heading line in the supplied
+  German requirements snapshot matches a generic rule. The file is a
+  read-only requirement source, never executed or imported.
+- `016b458744e33713980b081e7c31c6c56bbe5a58:tests/integration/test_parity_t5a.py:generic-api-key:574`
+  (commit SHA verified via `git rev-parse 016b458`; earlier notes
+  transcribing this fingerprint differ and are superseded):
+  a synthetic pytest `SESSION_SECRET` fixture value in
+  `test_unavailable_selection_copy_names_stored_rows`. Root AST review
+  confirms test-only dataflow (environment fixture, never a
+  credential); no secret value is printed here or elsewhere.

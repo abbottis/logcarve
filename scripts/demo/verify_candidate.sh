@@ -24,6 +24,24 @@ set -eu
 PROJECT="logcarve-demo-candidate"
 PORT="8091"
 BASE_URL="http://127.0.0.1:$PORT"
+# Optional explicit platform (coordinator-owned emulation proof only):
+# empty means the native build host; the two allowlisted values build
+# distinctly tagged images. amd64 on an ARM host is EMULATED execution,
+# never native x86-64 proof; the persistent demo always uses its tested
+# native image explicitly, never an architecture-overwritten shared tag.
+PLATFORM="${PLATFORM:-}"
+case "$PLATFORM" in
+  "") SUFFIX="";;
+  linux/arm64) SUFFIX="-arm64";;
+  linux/amd64) SUFFIX="-amd64";;
+  *) echo "refusing unallowlisted PLATFORM: $PLATFORM (want linux/arm64 or linux/amd64)" >&2; exit 1;;
+esac
+if [ -n "$PLATFORM" ]; then
+  echo "platform override: $PLATFORM (distinct arch tag, see below)"
+  case "$(uname -m):$PLATFORM" in
+    arm64:linux/amd64) echo "note: amd64 image on ARM host runs EMULATED, not native x86-64 proof";;
+  esac
+fi
 ENTRY_URL="$BASE_URL/?site=default&range=custom&from=2026-10-26T00:00:00%2B00:00&to=2026-11-01T00:00:00%2B00:00&tz=Europe%2FBerlin&source=example-combined"
 ROOT=$(CDPATH= cd -- "$(dirname -- "$0")/../.." && pwd)
 WORK=$(mktemp -d -t logcarve-candidate.XXXXXX)
@@ -43,6 +61,8 @@ docker info >/dev/null
 docker compose version
 HEAD_SHA=$(git -C "$ROOT" rev-parse HEAD)
 echo "HEAD: $HEAD_SHA"
+IMAGE="logcarve-candidate:$HEAD_SHA$SUFFIX"
+echo "image: $IMAGE"
 if [ -n "$(docker ps -aq --filter "label=com.docker.compose.project=$PROJECT")" ]; then
   echo "refusing: preexisting containers for $PROJECT (running or stopped)" >&2; exit 1
 fi
@@ -93,12 +113,14 @@ try:
 finally:
     os.close(fd)
 EOF
+BUILD_PLATFORM=""
+if [ -n "$PLATFORM" ]; then BUILD_PLATFORM="--platform $PLATFORM"; fi
 cat >"$WORK/compose.candidate.yml" <<EOF
 name: $PROJECT
 services:
   app:
     build: $WORK/export
-    image: logcarve-candidate:$HEAD_SHA
+    image: $IMAGE
     ports:
       - "127.0.0.1:$PORT:8080"
     env_file:
@@ -120,8 +142,13 @@ services:
 volumes:
   candidate-data:
 EOF
-compose build
+# shellcheck disable=SC2086 -- intentionally unquoted: empty means no flag
+compose build $BUILD_PLATFORM
 compose up -d
+if [ -n "$PLATFORM" ]; then
+  actual_arch=$(compose run --rm --no-deps -T app uname -m)
+  echo "container arch: $actual_arch (requested $PLATFORM)"
+fi
 deadline=$(( $(date +%s) + 90 ))
 until curl -sf "$BASE_URL/healthz" >/dev/null 2>&1; do
   if [ "$(date +%s)" -ge "$deadline" ]; then
@@ -153,8 +180,8 @@ echo "$import_json" | python3 -c 'import json,sys; d = json.load(sys.stdin); ass
 good "rich import 90 rows, completed (T8 import completed before it)"
 seeded=$(probe)
 echo "seeded: $seeded"
-echo "$seeded" | python3 -c 'import json,sys; d = json.load(sys.stdin); assert (d["verdict"], d["rows"], d["t8_rows"], d["rich_rows"]) == ("SEEDED", 120, 30, 90), d'
-good "probe SEEDED with 120 combined rows (30 T8 + 90 rich)"
+echo "$seeded" | python3 -c 'import json,sys; d = json.load(sys.stdin); assert (d["verdict"], d["rows"], d["t8_rows"], d["rich_rows"], d["schema_version"]) == ("SEEDED", 120, 30, 90, 8), d'
+good "probe SEEDED with 120 combined rows (30 T8 + 90 rich) at schema v8"
 
 echo "== replay-zero and restart =="
 for spec in "demo-access.log 0 30" "demo-rich-access.log 0 90"; do
@@ -176,8 +203,8 @@ until curl -sf "$BASE_URL/healthz" >/dev/null 2>&1; do
   sleep 2
 done
 after=$(probe)
-echo "$after" | python3 -c 'import json,sys; d = json.load(sys.stdin); assert (d["verdict"], d["rows"]) == ("SEEDED", 120), d'
-good "120 rows survive restart (probe re-verified)"
+echo "$after" | python3 -c 'import json,sys; d = json.load(sys.stdin); assert (d["verdict"], d["rows"], d["schema_version"]) == ("SEEDED", 120, 8), d'
+good "120 rows survive restart at schema v8 (probe re-verified)"
 
 echo "== candidate teardown (owned resources only) =="
 compose down -v >/dev/null 2>&1

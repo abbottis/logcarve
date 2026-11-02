@@ -53,7 +53,7 @@ SOFTWARE.
 | Chart.js (served `vendor/js/chart.umd.min.js`) | MIT | 4.6.1, pinned and vendored |
 | Inter Variable (`fonts/inter-latin-wght-normal.woff2`) | SIL OFL 1.1 | 5.3.0 via fontsource; `fonts/INTER-OFL.txt` retained |
 | JetBrains Mono Variable (`fonts/jetbrains-mono-latin-wght-normal.woff2`) | SIL OFL 1.1 | 5.3.0 via fontsource; `fonts/JETBRAINS-MONO-OFL.txt` retained |
-| Lucide icons (18-icon subset in `icons/`) | ISC | 1.66.0 via lucide-static; `icons/LUCIDE-ISC.txt` retained |
+| Lucide icons (20-icon subset in `icons/`) | ISC | 1.66.0 via lucide-static; `icons/LUCIDE-ISC.txt` retained |
 | Jinja2 + MarkupSafe (Python runtime) | BSD-3-Clause | 3.1.6 + 3.0.4, pinned in `uv.lock` |
 | `regex` (Python runtime, custom-format engine timeout) | Apache-2.0 AND CNRI-Python | 2026.9.29, pinned in `pyproject.toml`/`uv.lock`/`requirements.txt`; installed METADATA confirms `License-Expression: Apache-2.0 AND CNRI-Python`, `Requires-Python: >=3.10` |
 | `cryptography` (Python runtime, T1b AES-256-GCM original-IP store) | Apache-2.0 OR BSD-3-Clause | 50.0.2, pinned in `pyproject.toml`/`uv.lock`/`requirements.txt`; installed METADATA confirms `License-Expression: Apache-2.0 OR BSD-3-Clause`; primary AESGCM docs at `https://github.com/pyca/cryptography/blob/main/docs/hazmat/primitives/aead.rst` |

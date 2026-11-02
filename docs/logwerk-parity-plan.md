@@ -1,6 +1,18 @@
 # LogWerk Parity Implementation Plan
 
 Status: proposed 2026-11-01. Plan only — no application code changed.
+
+Implementation status 2026-11-02 (this branch; scope rows below are the
+frozen plan, not a duplicate claim): slices A–G plus genuine GeoIP (I),
+locale preparation (J), timestamp compatibility/numeric domain (T5b1),
+the T5b1c replay private-association guard, opt-in CLI follow/rotation
+(H, `app/db/follow.py` + migration 0008), the supported-schema
+`/readyz` gate, the coordinator upgrade helper and the synthetic
+benchmark are implemented with focused tests green (see
+`docs/verification.md`). Consolidated full unit/integration, protected
+browser E2E, secret history scan, genuine-MMDB runtime proof and
+independent security/release review stay coordinator-owned and pending
+before activation; native Linux x86-64 stays NOT RUN.
 Owner scope: `artifacts/task-inputs/logwerk-parity-owner-scope.md` (already authorized; no new approval loop).
 Baseline: public checkout HEAD `70aab80` on `feature/logwerk-parity-2026-11-01`; application anchor `ffaf737` (owner-UX source).
 Implementer for all later stages: Muse Spark 1.3 Contributor, medium effort, protections ON, sole writer, no subagents.
