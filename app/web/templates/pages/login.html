@@ -3,6 +3,7 @@
 {% block bare_content %}
 <div class="brand-hero mb-6 flex flex-col items-center gap-3 text-center">
   {% include "partials/brand_wordmark.html" %}
+  <span class="sr-only">{{ t("app.name") }}</span>
   <p class="text-sm text-base-content/70">{{ t("app.tagline") }}</p>
 </div>
 <div class="card bg-base-100 shadow">

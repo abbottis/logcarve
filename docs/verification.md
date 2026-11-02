@@ -3068,3 +3068,60 @@ Maps to UI-01 (central `en` tagline, exact wording), UI-02
 UI-03 (theme/narrow behavior implemented; final browser
 confirmation pending root run, recorded BLOCKED above, not
 claimed).
+
+## 2026-11-02 — Branding slice correction (harness + wordmark geometry)
+
+Bounded correction on the same feature branch from clean
+`9fd60d5`, same scope and protections (sole writer, exact Muse
+Spark 1.3 Contributor / medium, sandbox + approval ON, no
+agents, no app logic/auth/API/DB/model/settings changes, no
+private parent material, no paid calls, no push/deployment, no
+Chromium retry in this restricted shell, no wider suites).
+
+Coordinator protected Chromium had inspected login/header in
+both themes at 1440/390/320 (layout good, no page overflow,
+login works) and reported three small corrections:
+
+1. Harness error, not an app failure: the new E2E read SVG
+   `<text>` via `Locator.inner_text`, which raises "Node is not
+   an HTMLElement" on SVG text. The repaired
+   `tests/e2e/test_branding.py::test_login_and_header_wordmark`
+   reads SVG text via `text_content` and runs each theme/width
+   case (light/dark x 1440/390/320) as an independently
+   parametrized case in a fresh browser context — the old
+   single-test loop reused the first login session, so the
+   second `/login` visit redirected to `/` (routes.py:906).
+   Each case now verifies the app-resolved `data-theme`, the
+   actually loaded Inter Variable webfont
+   (`document.fonts.check` + computed family), glyph ink
+   bounds via `getBBox()` inside the viewBox, no page
+   overflow, and a usable login form + home link. No
+   protection loosened, no broad exception handling.
+2. Geometry: the coordinator's loaded-Inter probe measured ink
+   `x6 y~-0.46 w250.0 h65.83` in `viewBox 0 0 288 72` — the
+   font bbox crossed the top by ~0.5 units with visibly more
+   blank space right than left. The partial now sets
+   `viewBox 0 0 282 72` with the text at `x16 y55.5`: ink
+   lands at ~16..266 horizontally (even 16-unit margins, so
+   the visible wordmark centers above the centered tagline)
+   and ~3.0..68.9 vertically (even ~3-unit margins, fully
+   inside). Wordmark design, locale tagline, responsive
+   sizing, accessible home link, and no-remote/no-inline
+   rules are preserved. The login hero also gains a
+   screen-reader-only `app.name` alongside the `aria-hidden`
+   SVG, so the visual brand has readable text.
+3. History preserved: this implementer's first run recorded
+   the shell-sandbox browser launch denial as BLOCKED; that
+   denial remains historical environment evidence, never an
+   app failure. The coordinator's protected run supplied the
+   two findings above.
+
+| Check | Result | Evidence |
+| --- | --- | --- |
+| `ruff check` + `ruff format --check` on repaired test | PASS | Both clean on `tests/e2e/test_branding.py` |
+| Server-rendered markup probe (TestClient, no browser) | PASS | `/login` 200: one `brand-hero`, one `brand-logo` SVG with `viewBox="0 0 282 72"` (second page SVG is the log-in button icon), zero `<img>`, exact tagline present, sr-only `LogCarve` present, zero `style="`; seeded dashboard 200: one `brand-home` home link `href="/"`, `aria-label="LogCarve"` |
+| Asset rebuild + `check:external` | NOT RUN | Template-only change: no authored CSS/JS/font/vendor edits, built `app/web/static/app.css` already carries the brand + `sr-only` classes, no new URLs — nothing to rebuild or re-guard |
+| Repaired focused E2E + actual-image visual check | NOT RUN | Root runs `tests/e2e/test_branding.py::test_login_and_header_wordmark` (6 cases) outside this shell sandbox; no new global suite needed |
+
+UI-01/UI-02/UI-03 mapping is unchanged; UI-03 browser
+confirmation stays root-owned as before.
