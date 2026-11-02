@@ -65,7 +65,7 @@ Processing-tier flags describe the request LogCarve sends; they do
 not prove how the provider actually processed a call or which
 privacy mode applied. Response-tier checks above are accounting
 guards, not provider handling proofs. Official tier references:
-[OpenAI service tiers](https://developers.openai.com/api/docs/guides/service-tiers),
+[OpenAI Responses `service_tier` schema](https://developers.openai.com/api/reference/resources/responses/methods/cancel),
 [Anthropic service tiers](https://platform.claude.com/docs/en/api/service-tiers),
 [Gemini priority inference](https://ai.google.dev/gemini-api/docs/generate-content/priority-inference),
 [Gemini flex inference](https://ai.google.dev/gemini-api/docs/generate-content/flex-inference).
@@ -79,7 +79,7 @@ Primary API references used for the native transports:
 - Gemini thought signatures, function calling and Gemini 3.5 notes:
   [thought-signatures](https://ai.google.dev/gemini-api/docs/generate-content/thought-signatures),
   [function-calling](https://ai.google.dev/gemini-api/docs/generate-content/function-calling),
-  [whats-new-gemini-3.5](https://ai.google.dev/gemini-api/docs/generate-content/whats-new-3.5)
+  [whats-new-gemini-3.5](https://ai.google.dev/gemini-api/docs/generate-content/whats-new-gemini-3.5)
 - Anthropic API overview and Messages:
   [overview](https://platform.claude.com/docs/en/api/overview),
   [messages](https://platform.claude.com/docs/en/api/http/messages)

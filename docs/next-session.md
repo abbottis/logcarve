@@ -1,4 +1,12 @@
-# Next session checkpoint (2 Nov 2026, adapter final cost-profile closeout — source freeze for root runtime update)
+# Next session checkpoint (2 Nov 2026, adapter operational docs handoff — CURRENT)
+
+## CURRENT checkpoint (2 Nov 2026, docs-only operational handoff)
+
+- App source FROZEN at `9c45539`; image `sha256:255bb54617fb647312b7a648f9ede23502d8b8dd4ae76a54ae751d9b29daeea7` built/activated by root (coordinator-reported: ready 200 schema 9, settings 200 all 4, API 200 = 120, 18/18 preservation, root diff PASS, 77-commit scan 3 reviewed fakes; see `docs/verification.md` latest entry). Older receipts below are preserved historical records, not current claims.
+- Budgets unchanged: 1 / 8 / 923026 remaining, reserved for OWNER video. Other 3 providers live NOT RUN (no keys); x86-64 NOT RUN. User chose offline completion; no additional real/model calls authorized.
+- Root handles final publication (safe branch only; `main` unchanged). This shell commits only the four doc files, writes the delivery JSON, and stops.
+
+# Previous checkpoint (2 Nov 2026, adapter final cost-profile closeout — source freeze for root runtime update)
 
 ## Current source closeout (2 Nov 2026, this pass)
 

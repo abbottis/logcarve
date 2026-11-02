@@ -21,8 +21,10 @@ Independent review is required for parser, auth, tool-calling, retention and aut
 
 ## Known secret-scan findings (reviewed, not allowlisted)
 
-Gitleaks history scans report exactly two findings, both reviewed false
-positives; neither is a blanket rule, and history is never rewritten.
+Gitleaks history scans report exactly three findings, all reviewed
+false positives; none is a blanket rule, and history is never rewritten.
+Raw Gitleaks exit is 1 (findings present) with 3 reviewed fakes and no
+actual credentials — not an unqualified 0-findings claim.
 
 - `docs/technical-spec.md:787`: a cost-heading line in the supplied
   German requirements snapshot matches a generic rule. The file is a
@@ -34,3 +36,10 @@ positives; neither is a blanket rule, and history is never rewritten.
   `test_unavailable_selection_copy_names_stored_rows`. Root AST review
   confirms test-only dataflow (environment fixture, never a
   credential); no secret value is printed here or elsewhere.
+- `986f46e8a8daea2aee86e9484224be47e3fdb022:tests/unit/test_native_http_boundary.py:generic-api-key:32`
+  (fingerprint verified via `git rev-parse 986f46e`): a pure
+  synthetic fake key sentinel used ONLY through the injected
+  fake opener/transport offline tests — never real provider
+  credentials and never a real call. No value is printed here or
+  elsewhere; the scan rule is not ignored and history is not
+  rewritten.
