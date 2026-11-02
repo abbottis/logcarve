@@ -15,6 +15,16 @@
   {% if params_source %}<input type="hidden" name="source" value="{{ params_source }}">{% endif %}
   {% if limit is defined %}<input type="hidden" name="limit" value="{{ limit }}">{% endif %}
   {% if bucket %}<input type="hidden" name="bucket" value="{{ bucket }}">{% endif %}
+  {# Page-local report state (validated allowlists in routes.py): kept in
+     native GET, htmx Apply and canonical push; never part of the shared
+     cross-page navigation scope. Only one sort input renders per page. #}
+  {% if slow_sort is defined and slow_sort %}<input type="hidden" name="sort" value="{{ slow_sort }}">{% endif %}
+  {% if explorer_sort is defined and explorer_sort and slow_sort is not defined and bots_sort is not defined %}<input type="hidden" name="sort" value="{{ explorer_sort }}">{% endif %}
+  {% if bots_sort is defined and bots_sort %}<input type="hidden" name="sort" value="{{ bots_sort }}">{% endif %}
+  {% if paths_sort is defined and paths_sort %}<input type="hidden" name="paths_sort" value="{{ paths_sort }}">{% endif %}
+  {% if seo_view is defined and seo_view %}<input type="hidden" name="view" value="{{ seo_view }}">{% endif %}
+  {% if referrer_view is defined and referrer_view %}<input type="hidden" name="view" value="{{ referrer_view }}">{% endif %}
+  {% if relation is defined and relation %}<input type="hidden" name="relation" value="{{ relation }}">{% endif %}
   <div class="form-control">
     <label class="label py-1" for="f-site"><span class="label-text">{{ t("filter.site") }}</span></label>
     <select id="f-site" name="site" class="select select-bordered select-sm">

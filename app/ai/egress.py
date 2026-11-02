@@ -466,6 +466,21 @@ def _project_report(report: object, minimized: dict, full: dict | None) -> str:
             if isinstance(row, dict)
         ]
         return _compact_json({"groups": total, "more": max(0, total - len(shown)), "top": shown})
+    if report == "referrer_urls":
+        items = minimized.get("items")
+        rows = list(items) if isinstance(items, (list, tuple)) else []
+        total = _int_or(source.get("total_groups"), len(rows))
+        shown = [
+            {
+                "referrer": _clip_projection_text(row.get("referer_host", "?")),
+                "requests": _int_or(row.get("requests")),
+                "errors": _int_or(row.get("errors")),
+                "internal": _bool_or_none(row.get("internal")),
+            }
+            for row in rows[:EVIDENCE_PROJECTION_ITEMS]
+            if isinstance(row, dict)
+        ]
+        return _compact_json({"groups": total, "more": max(0, total - len(shown)), "top": shown})
     if report == "journeys":
         items = minimized.get("items")
         rows = list(items) if isinstance(items, (list, tuple)) else []

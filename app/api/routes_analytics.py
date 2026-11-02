@@ -1811,6 +1811,91 @@ def get_seo_ai_only_paths(
             )
 
 
+@router.get("/referrers/urls", response_model=schemas.ReferrerUrlsResponse)
+def get_referrer_urls(
+    request: Request,
+    site_id: SiteId,
+    time_from: TimeFrom,
+    time_to: TimeTo,
+    source_id: SourceId = None,
+    method: Method = None,
+    status: Status = None,
+    status_class: StatusClassParam = None,
+    path_prefix: PathPrefix = None,
+    referer_host: RefererHost = None,
+    search: SearchParam = None,
+    client: ClientParam = None,
+    traffic: TrafficParam = "all",
+    bot: BotParam = None,
+    category: CategoryParam = None,
+    provider: ProviderParam = None,
+    purpose: PurposeParam = None,
+    path_exact: PathExact = None,
+    server_host: ServerHost = None,
+    http_version: HttpVersion = None,
+    mime_type: MimeType = None,
+    cache_status: CacheStatus = None,
+    tls_protocol: TlsProtocol = None,
+    timing_available: TimingAvailable = None,
+    upstream_available: UpstreamAvailable = None,
+    timing_min_ms: TimingMin = None,
+    timing_max_ms: TimingMax = None,
+    limit: Limit = 100,
+    offset: Offset = 0,
+    timezone: Timezone = "UTC",
+    relation: Annotated[Literal["all", "internal", "external"], Query()] = "all",
+):
+    """All sanitized referrer source URLs (LogWerk renderRefererUrls).
+
+    Every stored referrer contributes regardless of status; the
+    404-only report stays at ``/referrers/404-targets``. Grouping,
+    internal labelling, totals, paging and filter scopes mirror the
+    404 report. Missing scheme/path renders as Unknown, never as an
+    invented URL or direct-traffic claim.
+    """
+    _, filt, err = _prepare(
+        request,
+        **_params(
+            site_id,
+            time_from,
+            time_to,
+            source_id,
+            method,
+            status,
+            status_class,
+            path_prefix,
+            referer_host,
+            search,
+            client,
+            traffic,
+            bot,
+            category,
+            provider,
+            purpose,
+            path_exact,
+            server_host,
+            http_version,
+            mime_type,
+            cache_status,
+            tls_protocol,
+            timing_available,
+            upstream_available,
+            timing_min_ms,
+            timing_max_ms,
+            limit,
+            offset,
+            timezone,
+        ),
+    )
+    if err is not None:
+        return err
+    with read_store(request) as conn:
+        try:
+            return service.referrer_urls(conn, filt, request.app.state.rules, relation=relation)  # type: ignore[arg-type]
+        except ValueError:
+            return _deny(request.state.request_id, "invalid_request", "Unknown relation.")
+
+
 @router.get("/referrers/404-targets", response_model=schemas.Referrer404Response)
 def get_referrer_404_targets(
     request: Request,

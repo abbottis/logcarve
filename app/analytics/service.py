@@ -1797,3 +1797,42 @@ def referrer_404s(
         "coverage": coverage_summary(conn, filt, rules),
         "limitations": [*LIMITATIONS_SEO, *LIMITATIONS_LOGS],
     }
+
+
+def referrer_urls(
+    conn: sqlite3.Connection,
+    filt: AnalyticsFilter,
+    rules: list[Rule] | None = None,
+    *,
+    relation: queries.ReferrerRelation = "all",
+) -> dict[str, object]:
+    """All sanitized referrer source URLs (LogWerk renderRefererUrls).
+
+    Every stored referrer contributes regardless of target status:
+    the 404-only report stays available separately. Grouping, internal
+    labelling, totals, paging and filter scopes mirror
+    :func:`referrer_404s`; ``errors`` counts 4xx/5xx rows and
+    ``bytes_total``/``bytes_known`` describe known response sizes.
+    Missing scheme/path stays ``None`` (Unknown, never direct-traffic
+    or people claims). No timing, countries or query values.
+    """
+    clf = _classifier_for(filt, rules)
+    own_hosts = queries.own_hosts_for_scope(conn, filt)
+    items, total = queries.referrer_urls(conn, filt, clf, own_hosts=own_hosts, relation=relation)
+    return {
+        "site_id": filt.site_id,
+        "time_range": _window_dict(filt),
+        "filters": _filter_dict(filt),
+        "own_hosts": sorted(own_hosts),
+        "relation": relation,
+        "host_matching": (
+            "lowercase hostname equality; ports, userinfo and query values are never stored; "
+            "IDN compares in stored encoded form; only http/https schemes are stored"
+        ),
+        "items": items,
+        "total_groups": total,
+        "limit": filt.limit,
+        "offset": filt.offset,
+        "coverage": coverage_summary(conn, filt, rules),
+        "limitations": [*LIMITATIONS_SEO, *LIMITATIONS_LOGS],
+    }

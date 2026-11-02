@@ -2550,3 +2550,51 @@ exit status visible, no tail-masking) plus focused suites below.
 | 120-row fixture / HMAC / 77-rule catalog | PASS | Untouched: no fixture, rule or config changes in tree; new tests use tmp stores only |
 | Gitleaks | NOT RUN | `gitleaks` is not installed in this environment and installs are out of scope (no network, no user-wide changes); the diff adds no secrets, keys, tokens or real logs (synthetic `synthetic-test-*` values only, matching the existing test pattern) |
 | Journeys UI (T4b2), saved views/comparison/refresh/Help (T4c), follow/GeoIP (T5), release | NOT RUN | No UI added for journeys/entry paths/security rate sequences, saved views, comparison controls, refresh or comprehensive Help; genuine country UI stays T5a; no overall T4 claim; stopping for independent review |
+
+## 2026-11-02 — Parity T4b1 review corrections (implementer run)
+
+Owner-authorized T4b1 corrections before T4b2 on
+`feature/logwerk-parity-2026-11-01` (frozen anchor `319eafb` clean,
+prior commits preserved, no amend), exact model
+`muse-spark-1.3-contributor` / medium / Contributor ON; sandbox +
+approval ON, sole writer, no agents/new approval loop, no parent
+private files/keys/history/real logs, no actual product/provider
+calls, no Docker/live activation/push/main/deploy/allowance reset.
+Public/synthetic fixtures only; prior work, 120-row fixtures, 77
+bot rules, core HMAC, auth/usage preserved. No browser import, no
+translations.
+
+Reproduced first on the frozen anchor with rendered controls and
+partial requests: `/performance?sort=p95_desc`, `/seo?view=ai_only`
+and `/referrers?relation=external` returned 200 while the
+serialized `#filter-bar` (no `sort`/`view`/`relation` inputs) and
+the partial `HX-Push-Url` silently fell back to
+`avg_desc`/`client_errors`/`all`. The all-URL referrer overview was
+absent (404-only page; host-only `top_referrers` did not fill the
+gap). Referrer 404 supporting-data links filtered host+target only
+(widening different source paths). Tool hrefs still pointed at
+Overview/Errors/Crawlers placeholders. Slow-endpoint copy read
+generic "Most requests/Requests" for measured-only rows.
+
+`UV_CACHE_DIR=/tmp/uvcache uv run --locked pytest tests/unit tests/integration`
+(1016 passed, 2 skipped — same pre-existing live-loopback category —
+exit status visible, no tail-masking) plus focused suites below.
+`uv lock --check` clean (no manifest/lock delta, no new
+dependencies). `ruff check` + `ruff format --check` clean over
+`app`/`tests`/`clients`. `npm run build` + `node
+scripts/check_no_external.mjs` clean (served `app/web/static/js/*`
+is gitignored build output; authored `assets/src/js/*` unchanged;
+tracked `app/web/static/app.css` reverted — no CSS source change).
+Gitleaks NOT RUN (`gitleaks` not installed; no network installs in
+scope; diff adds only synthetic `synthetic-test-*` values, no
+secrets/keys/tokens/real logs).
+
+| Check | Result | Evidence |
+| --- | --- | --- |
+| New `tests/integration/test_parity_t4b1_corrections.py` | PASS | 10 passed: filter-bar hidden sort/view/relation, partial Apply preserves `sort=p95_desc`/`view=ai_only`/`view=broken&relation=external` in `HX-Push-Url`, paging/variant links keep page-local state, full referrer URLs (same-host http/https multi-path, ordinary 2xx/304 `/ordinary-source-*`, internal alias `shop.example.org`, missing-referer exclusion, host-only legacy, query-secret absence, unknown-bytes em dash) with service/API/UI agreement, stable paging/filter scopes, token negatives, honest "Related requests" scope labels (no exact-row claim, no `None://` invention), report href replay with contradictory parent status staying empty and exact client travelling, `referrer_urls` tool bounds <=1600, measured-request labels with preserved backend sort |
+| Updated `tests/integration/test_parity_t4b1_web.py` | PASS | 12 passed: cross-page nav assertion now allows the active view's canonical sort while every other page link stays sort-free (Requests sort cannot break SEO) |
+| Updated `tests/integration/test_assistant_stage_c.py` | PASS | 28 passed: `REPORT_NAMES` allowlist extended with approved `referrer_urls`; evidence hrefs updated to implemented pages (`/seo?view=client_errors`, `/performance?`) |
+| New `tests/e2e/test_parity_t4b1.py::test_apply_keeps_page_local_state` | BLOCKED (environmental) | Collects cleanly; Chromium fails at launch in this shell sandbox (`TargetClosedError`, EPERM/kill — identical for the pre-existing tests, so not caused by this change); coordinator executes `uv run --locked pytest tests/e2e/test_parity_t4b1.py -q` with the browser sandbox ON (label updated to "Measured requests (most first)"; 1440/390 both themes, no external requests/console errors) |
+| 120-row fixture / HMAC / 77-rule catalog | PASS | Untouched: no fixture, rule or config changes; new tests use tmp stores only |
+| Requirements clarification (PAR-03/04/07, accepted full parity) | RECORDED | PAR-03 measured labels now read "Measured requests" (backend ranking/keys/API unchanged, no fake all-traffic count). PAR-04 full sanitized referrer-URL overview added alongside the retained 404-target view (LogWerk `renderRefererUrls` + full-path requirement; `GET /api/v1/referrers/urls`, `get_report referrer_urls`, web `view=all/broken`, stdlib `--endpoint referrer-urls`, `docs/external-api.md`); missing scheme/path reads Unknown, never direct-traffic/people claims. PAR-07 chat-disabled/no-key/offline API still works (focused + full suites green without provider). Tool hrefs now reproduce the executed report (page-local view/sort/relation; contradictory parent filters stay empty; exact client travels). No false full-release/native-Linux/owner-acceptance claim; stopping for independent review before T4b2 |
+| Journeys UI (T4b2), comparison halves (T4c), GeoIP (T5), release | NOT RUN | No journey/security UI, no comparison-half link change, no GeoIP, no push/main/deploy; independent review stays required before T4b2 |

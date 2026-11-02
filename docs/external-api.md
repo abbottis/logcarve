@@ -215,7 +215,7 @@ the streaming export stay outside the tool surface) are available to
 external callers with the same scoped token contract:
 
 - `/api/v1/performance`, `/api/v1/performance/overview`, `/api/v1/performance/slow-endpoints`
-- `/api/v1/seo/bot-statuses`, `/api/v1/seo/ai-only-paths`, `/api/v1/referrers/404-targets`
+- `/api/v1/seo/bot-statuses`, `/api/v1/seo/ai-only-paths`, `/api/v1/referrers/404-targets`, `/api/v1/referrers/urls`
 - `/api/v1/journeys`, `/api/v1/journeys/entry-paths`, `/api/v1/comparison`
 - `/api/v1/traffic/breakdown`, `/api/v1/traffic/resources`, `/api/v1/traffic/browsers`, `/api/v1/traffic/heatmap`
 

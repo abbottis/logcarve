@@ -40,6 +40,7 @@ REPORT_ENDPOINTS = {
     "seo-bot-statuses": "seo/bot-statuses",
     "seo-ai-only-paths": "seo/ai-only-paths",
     "referrer-404-targets": "referrers/404-targets",
+    "referrer-urls": "referrers/urls",
     "journeys": "journeys",
     "journey-entries": "journeys/entry-paths",
     "comparison": "comparison",

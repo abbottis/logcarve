@@ -22,21 +22,37 @@ TOOL_PAGE_MAP = {
 }
 
 #: Report pages for the aggregate-only ``get_report`` tool. Every
-#: report maps to the closest existing dashboard page (full report
-#: pages arrive with T4): performance, slow-endpoint, comparison and
-#: journey aggregates reproduce on the overview, SEO errors on the
-#: error groups page, AI-candidate paths with the crawler claims.
+#: report maps to the dashboard page that reproduces its exact read,
+#: including page-local selectors (SEO view, slow-endpoint sort,
+#: referrer view/relation). Journey/security maps arrive with T4b2;
+#: comparison inside-halves semantics arrive with T4c.
 REPORT_PAGE_MAP = {
-    "performance": "/",
-    "slow_endpoints": "/",
-    "seo_redirects": "/errors",
-    "seo_client_errors": "/errors",
-    "seo_server_errors": "/errors",
-    "seo_ai_only": "/crawlers",
-    "referrer_404s": "/",
+    "performance": "/performance",
+    "slow_endpoints": "/performance",
+    "seo_redirects": "/seo",
+    "seo_client_errors": "/seo",
+    "seo_server_errors": "/seo",
+    "seo_ai_only": "/seo",
+    "referrer_404s": "/referrers",
+    "referrer_urls": "/referrers",
     "journeys": "/",
     "journey_entries": "/",
     "comparison": "/",
+}
+
+#: Page-local selectors per report, applied on top of the shared global
+#: filters so a replayed URL returns the executed report counts. The
+#: slow-endpoint report ranks by server average; the referrer-404
+#: report links explicitly to the broken view (the default view is
+#: the all-URL overview) with the executed relation.
+REPORT_PAGE_EXTRAS: dict[str, dict[str, object]] = {
+    "slow_endpoints": {"sort": "avg_desc"},
+    "seo_redirects": {"view": "redirects"},
+    "seo_client_errors": {"view": "client_errors"},
+    "seo_server_errors": {"view": "server_errors"},
+    "seo_ai_only": {"view": "ai_only"},
+    "referrer_404s": {"view": "broken", "relation": "all"},
+    "referrer_urls": {"view": "all", "relation": "all"},
 }
 
 
@@ -95,6 +111,10 @@ def evidence_url(page_path: str, envelope_filters: dict, tz_name: str = "UTC") -
         elif value is False:
             value = "no"
         query[key] = value
+    report = envelope_filters.get("report")
+    if isinstance(report, str):
+        for key, value in REPORT_PAGE_EXTRAS.get(report, {}).items():
+            query[key] = value
     return page_path + "?" + urlencode(query)
 
 

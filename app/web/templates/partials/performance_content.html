@@ -61,7 +61,7 @@
     </div>
     {% if slow_items %}
     <div class="chart-frame"><canvas id="perf-slow-chart" aria-label="{{ t("perf.slow_chart") }}" role="img"></canvas></div>
-    <script id="perf-slow-chart-data" type="application/json">{{ {"rows": slow_items, "requestsLabel": (t("table.requests") if slow_sort == "requests_desc" else "ms"), "valueKey": ("average_ms" if slow_sort == "avg_desc" else ("p95_ms" if slow_sort == "p95_desc" else ("max_ms" if slow_sort == "max_desc" else "measured")))} | tojson }}</script>
+    <script id="perf-slow-chart-data" type="application/json">{{ {"rows": slow_items, "requestsLabel": (t("perf.measured_requests") if slow_sort == "requests_desc" else "ms"), "valueKey": ("average_ms" if slow_sort == "avg_desc" else ("p95_ms" if slow_sort == "p95_desc" else ("max_ms" if slow_sort == "max_desc" else "measured")))} | tojson }}</script>
     <div class="table-scroll overflow-x-auto">
       <table class="table table-sm">
         <caption class="sr-only">{{ t("perf.slow_table") }}</caption>

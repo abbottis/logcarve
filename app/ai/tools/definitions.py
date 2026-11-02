@@ -52,6 +52,7 @@ REPORT_NAMES = (
     "seo_server_errors",
     "seo_ai_only",
     "referrer_404s",
+    "referrer_urls",
     "journeys",
     "journey_entries",
     "comparison",
@@ -131,13 +132,13 @@ class ReportArguments(ToolArguments):
 
     Fixed server-side rankings and windows keep the surface small:
     slow endpoints rank by average, journeys list by request count,
-    referrer 404s cover both relations with labels, and comparison
-    compares equal halves INSIDE the selected window (baseline first
-    half, current second half), never outside it.
+    referrer 404s/urls cover both relations with labels, and
+    comparison compares equal halves INSIDE the selected window
+    (baseline first half, current second half), never outside it.
     """
 
     report: str = Field(
-        pattern="^(performance|slow_endpoints|seo_redirects|seo_client_errors|seo_server_errors|seo_ai_only|referrer_404s|journeys|journey_entries|comparison)$",
+        pattern="^(performance|slow_endpoints|seo_redirects|seo_client_errors|seo_server_errors|seo_ai_only|referrer_404s|referrer_urls|journeys|journey_entries|comparison)$",
         description=(
             "Aggregate report selector. comparison compares equal halves "
             "INSIDE the selected window (baseline first half, current "
@@ -400,6 +401,8 @@ def _execute_report(conn, rules, *, report: str, filt, observed) -> dict:
         return service.ai_only_paths(conn, filt, rules, observation_time=observed)
     if report == "referrer_404s":
         return service.referrer_404s(conn, filt, rules)
+    if report == "referrer_urls":
+        return service.referrer_urls(conn, filt, rules)
     if report == "journeys":
         return service.journeys(conn, JourneyQuery(filt=filt), rules, observation_time=observed)
     if report == "journey_entries":

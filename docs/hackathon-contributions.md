@@ -49,3 +49,23 @@ Muse implementation with separate AI-assisted planning, review and testing.
 - Publication: a consolidated checkpoint branch preserves the existing
   remote main as its parent. Detailed development branches remain local;
   the publication commit is not a claim that all work occurred in one step.
+
+## Parity T4b1 review corrections, 2 November 2026
+
+Owner-authorized LogWerk parity corrections before T4b2 (no new
+approval loop), implemented solely by Muse Spark 1.3 Contributor
+(medium, Contributor ON) with sandbox + approval ON: page-local
+report state preserved across Apply/canonical/history/paging (native
+GET + htmx, no cross-page sort leaks); approved full sanitized
+referrer-URL overview added alongside the retained 404-target view
+(LogWerk `renderRefererUrls`, no copied metric engine, no new
+storage/dependencies); referrer supporting-data links honestly
+labelled as related scope (no exact-row pretense, no invented URLs);
+internal tool hrefs map to the implemented Performance/SEO/Referrers
+pages with page-local view/sort/relation; slow-endpoint copy reads
+measured requests with backend ranking/keys/API unchanged. Original
+LogCarve code remains Apache-2.0; no LogWerk application code was
+imported (70-pattern MIT rule adaptation of 2026-11-01 unchanged).
+Synthetic fixtures only; no real logs, keys, provider calls,
+push/main/deploy or release/acceptance claims. Independent review
+stays required before T4b2.

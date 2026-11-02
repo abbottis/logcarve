@@ -157,7 +157,7 @@ def test_report_navigation_charts_tables_and_drilldowns(page, b1_base):
     rows = page.locator("table tbody tr td:first-child")
     first_default = rows.first.inner_text(timeout=10000)
     assert "/slow" in first_default
-    page.click('a:has-text("Requests (most first)")')
+    page.click('a:has-text("Measured requests (most first)")')
     page.wait_for_load_state("load")
     expect(page.locator("body")).to_contain_text("/slow")
 
@@ -199,6 +199,51 @@ def test_report_navigation_charts_tables_and_drilldowns(page, b1_base):
         "() => document.activeElement ? document.activeElement.tagName : 'NONE'"
     )
     assert focused in ("A", "BUTTON", "SELECT", "INPUT"), focused
+
+    assert failed == [], failed
+    assert outside == [], outside
+    assert errors == [], errors
+
+
+def test_apply_keeps_page_local_state(page, b1_base):
+    """Genuine Apply-state: switch view/relation/sort, Apply, assert URL/view/count."""
+    errors, failed, outside = _watch(page)
+    base = b1_base
+    _login(page, base)
+
+    # Performance: switch to the P95 rank, then Apply a timezone change.
+    page.goto(f"{base}/performance?{STATE}&sort=p95_desc")
+    expect(page.locator("body")).to_contain_text("Slow endpoints")
+    assert "sort=p95_desc" in page.url
+    page.select_option("#f-tz", "America/New_York")
+    page.click('button:has-text("Apply")')
+    page.wait_for_load_state("load")
+    assert "sort=p95_desc" in page.url, page.url
+    expect(page.locator("body")).to_contain_text("Slow endpoints")
+    expect(page.locator("body")).to_contain_text("/slow")
+
+    # SEO: switch to the AI-only view, then Apply keeps the view.
+    page.goto(f"{base}/seo?{STATE}&view=ai_only")
+    expect(page.locator("body")).to_contain_text("Comparison universe")
+    page.select_option("#f-tz", "America/New_York")
+    page.click('button:has-text("Apply")')
+    page.wait_for_load_state("load")
+    assert "view=ai_only" in page.url, page.url
+    expect(page.locator("body")).to_contain_text("Comparison universe")
+
+    # Referrers: broken+external view survives an Apply.
+    page.goto(f"{base}/referrers?{STATE}&view=broken&relation=external")
+    expect(page.locator("body")).to_contain_text("Broken inbound links")
+    page.select_option("#f-tz", "America/New_York")
+    page.click('button:has-text("Apply")')
+    page.wait_for_load_state("load")
+    assert "view=broken" in page.url and "relation=external" in page.url, page.url
+    expect(page.locator("body")).to_contain_text("Broken inbound links")
+
+    # Back/forward history keeps the report state (canonical push).
+    page.go_back()
+    page.wait_for_load_state("load")
+    assert "view=broken" in page.url or "view=ai_only" in page.url or "sort=" in page.url
 
     assert failed == [], failed
     assert outside == [], outside

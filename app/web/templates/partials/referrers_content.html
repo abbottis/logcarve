@@ -10,12 +10,53 @@
 </div>
 {% endif %}
 
-<nav class="mb-4 flex flex-wrap gap-2 text-sm" aria-label="{{ t("ref.relation") }}">
-  <a class="btn btn-outline btn-xs" href="{{ page_url("/referrers", relation="all", offset=0) }}" {% if relation == "all" %}aria-current="page"{% endif %}>{{ t("ref.rel_all") }}</a>
-  <a class="btn btn-outline btn-xs" href="{{ page_url("/referrers", relation="internal", offset=0) }}" {% if relation == "internal" %}aria-current="page"{% endif %}>{{ t("ref.rel_internal") }}</a>
-  <a class="btn btn-outline btn-xs" href="{{ page_url("/referrers", relation="external", offset=0) }}" {% if relation == "external" %}aria-current="page"{% endif %}>{{ t("ref.rel_external") }}</a>
+<nav class="mb-4 flex flex-wrap gap-2 text-sm" aria-label="{{ t("ref.view") }}">
+  <a class="btn btn-outline btn-xs" href="{{ page_url("/referrers", view="all", relation=relation, offset=0) }}" {% if referrer_view == "all" %}aria-current="page"{% endif %}>{{ t("ref.view_all") }}</a>
+  <a class="btn btn-outline btn-xs" href="{{ page_url("/referrers", view="broken", relation=relation, offset=0) }}" {% if referrer_view == "broken" %}aria-current="page"{% endif %}>{{ t("ref.view_broken") }}</a>
 </nav>
 
+<nav class="mb-4 flex flex-wrap gap-2 text-sm" aria-label="{{ t("ref.relation") }}">
+  <a class="btn btn-outline btn-xs" href="{{ page_url("/referrers", view=referrer_view, relation="all", offset=0) }}" {% if relation == "all" %}aria-current="page"{% endif %}>{{ t("ref.rel_all") }}</a>
+  <a class="btn btn-outline btn-xs" href="{{ page_url("/referrers", view=referrer_view, relation="internal", offset=0) }}" {% if relation == "internal" %}aria-current="page"{% endif %}>{{ t("ref.rel_internal") }}</a>
+  <a class="btn btn-outline btn-xs" href="{{ page_url("/referrers", view=referrer_view, relation="external", offset=0) }}" {% if relation == "external" %}aria-current="page"{% endif %}>{{ t("ref.rel_external") }}</a>
+</nav>
+
+{% if referrer_view == "all" %}
+<section class="card bg-base-100 shadow" aria-labelledby="ref-all-h">
+  <div class="card-body">
+    <h2 id="ref-all-h" class="card-title text-base">{{ t("ref.all") }}</h2>
+    <p class="text-sm text-base-content/70">{{ t("ref.all_note") }}</p>
+    <p class="text-sm text-base-content/70">{{ t("ref.match_note") }}</p>
+    <p class="text-sm text-base-content/70">{{ t("ref.own_hosts") }}: {% if all_report.own_hosts %}<span class="tech">{{ all_report.own_hosts | join(", ") }}</span>{% else %}—{% endif %}</p>
+    {% if sources %}
+    <div class="chart-frame"><canvas id="ref-targets-chart" aria-label="{{ t("ref.distribution_chart") }}" role="img"></canvas></div>
+    <script id="ref-targets-chart-data" type="application/json">{{ {"rows": sources, "requestsLabel": t("table.requests")} | tojson }}</script>
+    <div class="table-scroll overflow-x-auto">
+      <table class="table table-sm">
+        <caption class="sr-only">{{ t("ref.distribution_table") }}</caption>
+        <thead><tr><th scope="col">{{ t("ref.full_path") }}</th><th scope="col">{{ t("ref.relation") }}</th><th scope="col" class="text-right">{{ t("table.requests") }}</th><th scope="col" class="text-right">{{ t("ref.errors") }}</th><th scope="col" class="text-right">{{ t("ref.known_bytes") }}</th><th scope="col"><span class="sr-only">{{ t("table.detail") }}</span></th></tr></thead>
+        <tbody>
+          {% for item in sources %}
+          <tr>
+            <td class="tech break-all">{% if item.referrer_link %}<a class="link" href="{{ item.referrer_link }}" rel="noopener noreferrer nofollow">{{ item.referrer }}</a>{% else %}{{ item.referrer }}{% endif %}{% if not item.referer_scheme or not item.referer_path %} <span class="text-sm text-base-content/70">({{ t("ref.unknown") }})</span>{% endif %}</td>
+            <td>{% if item.internal %}<span class="badge badge-info">{{ t("ref.internal") }}</span>{% else %}<span class="badge badge-ghost">{{ t("ref.external") }}</span>{% endif %}</td>
+            <td class="text-right tech">{{ item.requests }}</td>
+            <td class="text-right tech">{{ item.errors }}</td>
+            <td class="text-right tech">{% if item.bytes_total is not none %}{{ item.bytes_total }}{% else %}—{% endif %}</td>
+            <td class="text-right"><a class="link text-sm" href="{{ page_url("/requests", referer_host=item.referer_host, offset=0) }}" title="{{ t("ref.related_all_title") }}">{{ t("ref.related") }}</a></td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+    <p class="mt-2 text-sm text-base-content/70">{{ t("paging.showing", start=offset + 1, end=offset + sources|length, total=all_report.total_groups) }}</p>
+    {% include "partials/paging.html" %}
+    {% else %}
+    <p class="text-sm text-base-content/70" role="status">{{ t("ref.no_sources") }}</p>
+    {% endif %}
+  </div>
+</section>
+{% else %}
 <section class="card bg-base-100 shadow" aria-labelledby="ref-broken-h">
   <div class="card-body">
     <h2 id="ref-broken-h" class="card-title text-base">{{ t("ref.broken") }}</h2>
@@ -31,11 +72,11 @@
         <tbody>
           {% for item in targets %}
           <tr>
-            <td class="tech break-all">{{ item.referrer }}</td>
-            <td class="tech break-all"><a class="link" href="{{ page_url("/referrers", relation=relation, path_exact=item.target_path, offset=0) }}" title="{{ t("seo.view_rows") }}">{{ item.target_path }}</a></td>
+            <td class="tech break-all">{{ item.referrer }}{% if not item.referer_scheme or not item.referer_path %} <span class="text-sm text-base-content/70">({{ t("ref.unknown") }})</span>{% endif %}</td>
+            <td class="tech break-all"><a class="link" href="{{ page_url("/referrers", view=referrer_view, relation=relation, path_exact=item.target_path, offset=0) }}" title="{{ t("seo.view_rows") }}">{{ item.target_path }}</a></td>
             <td>{% if item.internal %}<span class="badge badge-info">{{ t("ref.internal") }}</span>{% else %}<span class="badge badge-ghost">{{ t("ref.external") }}</span>{% endif %}</td>
             <td class="text-right tech">{{ item.requests }}</td>
-            <td class="text-right"><a class="link text-sm" href="{{ page_url("/requests", referer_host=item.referer_host, status=404, path_exact=item.target_path, offset=0) }}">{{ t("finding.supporting_data") }}</a></td>
+            <td class="text-right"><a class="link text-sm" href="{{ page_url("/requests", referer_host=item.referer_host, status=404, path_exact=item.target_path, offset=0) }}" title="{{ t("ref.related_broken_title") }}">{{ t("ref.related") }}</a></td>
           </tr>
           {% endfor %}
         </tbody>
@@ -48,13 +89,15 @@
     {% endif %}
   </div>
 </section>
+{% endif %}
 
 <div class="mt-6 space-y-2 text-sm text-base-content/70">
   <p>{{ t("data.events", count=summary.coverage.unique_events) }} · {{ t("data.observed", min=summary.coverage.observed_min, max=summary.coverage.observed_max) }}</p>
-  {% if report.limitations %}
+  {% set active_report = all_report if referrer_view == "all" else report %}
+  {% if active_report.limitations %}
   <h2 class="font-medium">{{ t("finding.limitations") }}</h2>
   <ul class="list-disc space-y-1 pl-5">
-    {% for limitation in report.limitations %}
+    {% for limitation in active_report.limitations %}
     <li>{{ limitation }}</li>
     {% endfor %}
   </ul>

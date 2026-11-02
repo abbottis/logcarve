@@ -401,7 +401,8 @@
   "perf.rank_note": "Ranked by server average; not a p95 rank. Choose another ranking to re-rank the full scope.",
   "perf.sort_avg": "Average (slowest first)",
   "perf.sort_p95": "P95 (slowest first)",
-  "perf.sort_requests": "Requests (most first)",
+  "perf.sort_requests": "Measured requests (most first)",
+  "perf.measured_requests": "Measured requests",
   "perf.sort_max": "Maximum (slowest first)",
   "perf.cache": "Cache behavior",
   "perf.average": "Average",
@@ -452,5 +453,17 @@
   "ref.match_note": "Lowercase hostname equality; ports, userinfo and query values are never stored; only http/https referrers are kept.",
   "ref.distribution": "Broken targets by relation",
   "ref.distribution_chart": "Broken targets chart",
-  "ref.distribution_table": "Broken targets table"
+  "ref.distribution_table": "Broken targets table",
+  "ref.view": "Referrer view",
+  "ref.view_all": "All referring pages",
+  "ref.view_broken": "Broken inbound links",
+  "ref.all": "All referring pages",
+  "ref.all_note": "Every stored referrer counts, whatever the response status; missing scheme or path reads as Unknown and never implies direct traffic.",
+  "ref.no_sources": "No referring pages in this window.",
+  "ref.errors": "Errors",
+  "ref.known_bytes": "Known bytes",
+  "ref.unknown": "Unknown",
+  "ref.related": "Related requests",
+  "ref.related_broken_title": "Related host and target requests with status 404; different source paths on the same host are included.",
+  "ref.related_all_title": "Related requests carrying this referring host; different source paths on the same host are included."
 }

@@ -270,7 +270,17 @@ def test_ip_search_post_via_rendered_action_keeps_sort_and_pseudonym(b1):
 def test_page_specific_sort_never_leaks_into_shared_navigation(b1):
     html = _page(b1["client"], "/requests", "&sort=path_asc")
     nav = html.split('id="side-nav"')[1].split("</nav>")[0]
-    assert "sort=" not in nav
+    # The active view keeps its full canonical state (including its own
+    # page-local sort); every OTHER page link must stay sort-free so a
+    # Requests sort can never break SEO or other views.
+    import re as _re
+
+    hrefs = _re.findall(r'href="([^"]+)"', nav)
+    assert hrefs, "side nav links missing"
+    others = [h for h in hrefs if not h.startswith("/requests")]
+    assert others, "cross-page nav links missing"
+    assert all("sort=" not in h for h in others), others
+    assert any(h.startswith("/seo") for h in others)
 
 
 # --- Residual (b): bounded journeys evidence fits the 1600-char bound. ---

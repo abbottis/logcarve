@@ -803,6 +803,8 @@ def _overview_context(request, conn, rules, params) -> tuple[dict | None, str | 
             "findings": findings,
         }
     )
+    # Overview-local paths sort rides the canonical URL, never cross-page nav.
+    context["canonical_url"] = _page_url("/", params, site, paths_sort=paths_sort)
     return context, None
 
 
@@ -1249,6 +1251,7 @@ def _crawlers_context(request: Request, conn, params):
             "sitemap_requests": sitemap_requests,
             "paging": _paging_nav("/crawlers", params, site, table["total_rules"], {"sort": sort}),
             "fragment_url": "/partials/crawlers",
+            "canonical_url": _page_url("/crawlers", params, site, sort=sort),
         }
     )
     return context, None
@@ -1294,6 +1297,12 @@ SEO_VIEWS = ("redirects", "client_errors", "server_errors", "ai_only")
 #: Allowlisted referrer-relation selector for the Referrers page
 #: (page-local SQL narrowing with matching totals).
 REFERRER_RELATIONS = ("all", "internal", "external")
+
+#: Allowlisted Referrers views: ``all`` is the sanitized source-URL
+#: overview (every stored referrer, any status); ``broken`` is the
+#: referrer-path -> 404-target report. Page-local, like a sort: never
+#: part of the shared navigation scope.
+REFERRER_VIEWS = ("all", "broken")
 
 
 def _performance_context(request: Request, conn, params):
@@ -1346,6 +1355,9 @@ def _performance_context(request: Request, conn, params):
             "fragment_url": "/partials/performance",
         }
     )
+    # Page-local sort rides the canonical URL (native GET, htmx push,
+    # reload) but never the shared cross-page navigation scope.
+    context["canonical_url"] = _page_url("/performance", params, site, sort=slow_sort)
     return context, None
 
 
@@ -1405,6 +1417,7 @@ def _seo_context(request: Request, conn, params):
             "fragment_url": "/partials/seo",
         }
     )
+    context["canonical_url"] = _page_url("/seo", params, site, view=raw_view)
     return context, None
 
 
@@ -1423,20 +1436,35 @@ def _referrers_context(request: Request, conn, params):
     raw_relation = (request.query_params.get("relation") or "").strip() or "all"
     if raw_relation not in REFERRER_RELATIONS:
         return None, "error.bad_params"
+    raw_view = (request.query_params.get("view") or "").strip() or "all"
+    if raw_view not in REFERRER_VIEWS:
+        return None, "error.bad_params"
     page_filt = filt.model_copy(update={"limit": params["limit"], "offset": params["offset"]})
     try:
-        report = service.referrer_404s(
-            conn,
-            page_filt,
-            request.app.state.rules,
-            relation=raw_relation,  # type: ignore[arg-type]
-        )
+        if raw_view == "broken":
+            report = service.referrer_404s(
+                conn,
+                page_filt,
+                request.app.state.rules,
+                relation=raw_relation,  # type: ignore[arg-type]
+            )
+            all_report = None
+        else:
+            all_report = service.referrer_urls(
+                conn,
+                page_filt,
+                request.app.state.rules,
+                relation=raw_relation,  # type: ignore[arg-type]
+            )
+            report = None
     except ValueError:
         return None, "error.bad_params"
     summary = service.summarize(conn, filt, request.app.state.rules)
     _attach_observed_options(conn, context, filt, request.app.state.rules)
+    active = report if report is not None else all_report
+    assert isinstance(active, dict)
     items = []
-    for row in report["items"]:  # type: ignore[union-attr]
+    for row in active["items"]:  # type: ignore[union-attr]
         assert isinstance(row, dict)
         scheme, host, ref_path = (
             row.get("referer_scheme"),
@@ -1447,19 +1475,25 @@ def _referrers_context(request: Request, conn, params):
             full = f"{scheme}://{host}{ref_path or ''}"
         else:
             full = str(host or ref_path or "")
-        items.append({**row, "referrer": full})
+        link = private_view.safe_referrer_url(scheme, host, ref_path)
+        items.append({**row, "referrer": full, "referrer_link": link})
+    extra = {"relation": raw_relation, "view": raw_view}
     context.update(
         {
             "summary": summary,
             "totals": summary["totals"],
             "report": report,
+            "all_report": all_report,
             "targets": items,
+            "sources": items if all_report is not None else [],
             "relation": raw_relation,
-            "paging": _paging_nav(
-                "/referrers", params, site, int(report["total_groups"]), {"relation": raw_relation}
-            ),  # type: ignore[arg-type]
+            "referrer_view": raw_view,
+            "paging": _paging_nav("/referrers", params, site, int(active["total_groups"]), extra),  # type: ignore[arg-type]
             "fragment_url": "/partials/referrers",
         }
+    )
+    context["canonical_url"] = _page_url(
+        "/referrers", params, site, relation=raw_relation, view=raw_view
     )
     return context, None
 
@@ -1666,6 +1700,7 @@ def _requests_context(request: Request, conn, params, ip_search_error: str | Non
             ),
             "paging": _paging_nav("/requests", params, site, total_rows, {"sort": sort}),
             "fragment_url": "/partials/requests",
+            "canonical_url": _page_url("/requests", params, site, sort=sort),
             # The exact-IP search POST rebuilds its redirect from this
             # action's query string, so the current allowlisted explorer
             # sort travels here. Page-local sort stays out of the shared

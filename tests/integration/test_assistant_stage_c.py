@@ -515,6 +515,7 @@ def test_report_names_are_allowlisted_and_bounded():
         "seo_server_errors",
         "seo_ai_only",
         "referrer_404s",
+        "referrer_urls",
         "journeys",
         "journey_entries",
         "comparison",
@@ -834,14 +835,14 @@ def test_evidence_replay_crosses_egress_with_ids_and_bounds(cenv, no_network):
     assert result.evidence[0]["observation_time"] == NOW.isoformat()
     assert len(fake.outgoing[1].prompt_text) <= egress_mod.MAX_OUTGOING_CHARS
     href = envelope_href("get_report", result.evidence[0]["filters"], "UTC")
-    assert href is not None and href.startswith("/errors?")
-    assert "report=seo_client_errors" in href
+    assert href is not None and href.startswith("/seo?")
+    assert "report=seo_client_errors" in href and "view=client_errors" in href
     assert envelope_href("get_report", {"report": "timelines"}, "UTC").startswith("/?")
     assert envelope_href("get_unknown_tool", {}, "UTC") is None
     perf_href = envelope_href(
         "get_report", {**result.evidence[0]["filters"], "report": "performance"}, "UTC"
     )
-    assert perf_href is not None and perf_href.startswith("/?")
+    assert perf_href is not None and perf_href.startswith("/performance?")
 
 
 def test_provider_failure_preserves_deterministic_api(cenv, no_network):

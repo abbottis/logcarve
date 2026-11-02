@@ -2354,6 +2354,86 @@ def referrer_404_targets(
     )
 
 
+def referrer_urls(
+    conn: sqlite3.Connection,
+    filt: AnalyticsFilter,
+    classifier: Classifier | None,
+    own_hosts: set[str] | None = None,
+    *,
+    relation: ReferrerRelation = "all",
+) -> tuple[list[dict[str, object]], int]:
+    """All sanitized referrer source URLs over the filtered scope.
+
+    Every request carrying a stored referrer contributes, regardless
+    of status (2xx/3xx/304/4xx/5xx unless the caller filters): this
+    fills the LogWerk ``renderRefererUrls`` gap that a 404-only page
+    leaves. Keys use ONLY the minimized stored referrer (lowercase
+    host without port/userinfo, ``http``/``https`` scheme or ``None``,
+    secret-masked path without query values). Rows whose referrer
+    host is a configured own host/alias are labelled internal;
+    everything else is external. Missing scheme/path stays ``None``
+    (rendered as Unknown, never an invented URL or direct-traffic
+    claim). Totals come from an exact grouped subquery; the stable
+    order (requests DESC, host ASC, scheme NULLS LAST, path NULLS
+    LAST) pages deterministically. ``requests`` counts all rows,
+    ``errors`` counts 4xx/5xx rows, ``bytes_total`` sums known bytes
+    (``None`` when no row carries bytes) and ``bytes_known`` counts
+    rows with known bytes.
+    """
+    if relation not in ("all", "internal", "external"):
+        raise ValueError(f"unknown referrer relation: {relation!r}")
+    hosts = own_hosts if own_hosts is not None else own_hosts_for_scope(conn, filt)
+    lowered = sorted({h.lower() for h in hosts if h})
+    where, params = _where(filt, classifier)
+    scoped = f"{where} AND referer_host IS NOT NULL"
+    relation_params: list[object] = []
+    if relation != "all":
+        if lowered:
+            in_list = ", ".join("?" for _ in lowered)
+            if relation == "internal":
+                scoped += f" AND lower(referer_host) IN ({in_list})"
+            else:
+                scoped += f" AND lower(referer_host) NOT IN ({in_list})"
+            relation_params = [*lowered]
+        elif relation == "internal":
+            return [], 0
+    total = int(
+        conn.execute(
+            "SELECT COUNT(*) FROM (SELECT 1"
+            f" FROM requests WHERE {scoped}"
+            " GROUP BY referer_host, referer_scheme, referer_path)",
+            [*params, *relation_params],
+        ).fetchone()[0]
+    )
+    rows = conn.execute(
+        "SELECT referer_host, referer_scheme, referer_path, COUNT(*) AS requests,"
+        " SUM(CASE WHEN status >= 400 THEN 1 ELSE 0 END) AS errors,"
+        " SUM(bytes) AS bytes_total, COUNT(bytes) AS bytes_known"
+        f" FROM requests WHERE {scoped}"
+        " GROUP BY referer_host, referer_scheme, referer_path"
+        " ORDER BY requests DESC, referer_host ASC,"
+        " referer_scheme ASC NULLS LAST, referer_path ASC NULLS LAST"
+        " LIMIT ? OFFSET ?",
+        [*params, *relation_params, filt.limit, filt.offset],
+    ).fetchall()
+    lowered_set = set(lowered)
+    items: list[dict[str, object]] = []
+    for host, scheme, ref_path, count, errors, nbytes, known in rows:
+        items.append(
+            {
+                "referer_host": host,
+                "referer_scheme": scheme,
+                "referer_path": ref_path,
+                "requests": int(count),
+                "errors": int(errors or 0),
+                "bytes_total": int(nbytes) if nbytes is not None else None,
+                "bytes_known": int(known or 0),
+                "internal": str(host).lower() in lowered_set,
+            }
+        )
+    return items, total
+
+
 #: Request-journey inactivity threshold (seconds). A gap STRICTLY
 #: greater than this between two consecutive events of one
 #: (client pseudonym, sanitized User-Agent) key starts a new journey;

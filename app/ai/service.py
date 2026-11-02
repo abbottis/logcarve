@@ -1413,6 +1413,7 @@ def _projection_quality(tool_name: str, envelope: dict) -> dict:
             "seo_server_errors",
             "seo_ai_only",
             "referrer_404s",
+            "referrer_urls",
         ):
             quality["limitations"] = [*LIMITATIONS_SEO, *LIMITATIONS_LOGS]
         elif report in ("journeys", "journey_entries"):

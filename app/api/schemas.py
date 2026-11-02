@@ -511,6 +511,32 @@ class Referrer404Response(BaseModel):
     limitations: list[str]
 
 
+class ReferrerUrlItemOut(BaseModel):
+    referer_host: str
+    referer_scheme: str | None = None
+    referer_path: str | None = None
+    requests: int
+    errors: int
+    bytes_total: int | None = None
+    bytes_known: int
+    internal: bool
+
+
+class ReferrerUrlsResponse(BaseModel):
+    site_id: str
+    time_range: TimeRangeOut
+    filters: dict[str, object]
+    own_hosts: list[str]
+    relation: str
+    host_matching: str
+    items: list[ReferrerUrlItemOut]
+    total_groups: int
+    limit: int
+    offset: int
+    coverage: dict[str, object]
+    limitations: list[str]
+
+
 class JourneyItemOut(BaseModel):
     journey_id: str
     client_pseudonym: str
