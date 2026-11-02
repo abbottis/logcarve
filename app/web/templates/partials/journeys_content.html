@@ -1,0 +1,172 @@
+{% if oob_notice %}<p id="filter-times-notice" hx-swap-oob="true" class="w-full text-sm text-base-content/70">{{ t("filter.times_in", tz=tz_name) }} ({{ tz_offset }}; {{ t("filter.offset_note", date=window_start_date) }})</p>{% endif %}
+<p class="tech mb-4 text-sm text-base-content/70" data-observation-window>{{ window_from }} → {{ window_to }}</p>
+{% include "partials/filter_oob.html" %}
+{% include "partials/active_matchers.html" %}
+{% if summary.warnings %}
+<div class="mb-4 space-y-2" role="status">
+  {% for warning in summary.warnings %}
+  <p class="alert alert-warning text-sm">{% include "icons/triangle-alert.svg" %}{{ warning }}</p>
+  {% endfor %}
+</div>
+{% endif %}
+
+<nav class="mb-4 flex flex-wrap gap-2 text-sm" aria-label="{{ t("journeys.view") }}">
+  <a class="btn btn-outline btn-xs" href="{{ page_url("/journeys", view="journeys", sort=journey_sort, min_requests=min_requests, offset=0) }}" {% if journey_view == "journeys" %}aria-current="page"{% endif %}>{{ t("journeys.view_list") }}</a>
+  <a class="btn btn-outline btn-xs" href="{{ page_url("/journeys", view="entries", sort=journey_sort, min_requests=min_requests, offset=0) }}" {% if journey_view == "entries" %}aria-current="page"{% endif %}>{{ t("journeys.view_entries") }}</a>
+</nav>
+<p class="mb-4 text-sm text-base-content/70">{{ t("journeys.list_note") }}</p>
+<p class="mb-4 text-sm text-base-content/70">{{ t("journeys.gap_note") }}</p>
+
+{% if journey_view == "journeys" %}
+<section class="card bg-base-100 shadow" aria-labelledby="journeys-list-h">
+  <div class="card-body">
+    <h2 id="journeys-list-h" class="card-title text-base">{{ t("journeys.list") }}</h2>
+    <p class="text-sm text-base-content/70">{{ t("journeys.min_requests_note") }}</p>
+    <div class="mb-3 flex flex-wrap items-center gap-2 text-sm" role="group" aria-label="{{ t("journeys.sort") }}">
+      <span class="text-base-content/70">{{ t("journeys.sort") }}:</span>
+      <a class="link" href="{{ page_url("/journeys", view="journeys", sort="requests_desc", min_requests=min_requests, offset=0) }}" {% if journey_sort == "requests_desc" %}aria-current="true"{% endif %}>{{ t("journeys.sort_requests") }}</a>
+      <span aria-hidden="true">·</span>
+      <a class="link" href="{{ page_url("/journeys", view="journeys", sort="start_asc", min_requests=min_requests, offset=0) }}" {% if journey_sort == "start_asc" %}aria-current="true"{% endif %}>{{ t("journeys.sort_start_asc") }}</a>
+      <span aria-hidden="true">·</span>
+      <a class="link" href="{{ page_url("/journeys", view="journeys", sort="start_desc", min_requests=min_requests, offset=0) }}" {% if journey_sort == "start_desc" %}aria-current="true"{% endif %}>{{ t("journeys.sort_start_desc") }}</a>
+      <span aria-hidden="true">·</span>
+      <a class="link" href="{{ page_url("/journeys", view="journeys", sort="duration_desc", min_requests=min_requests, offset=0) }}" {% if journey_sort == "duration_desc" %}aria-current="true"{% endif %}>{{ t("journeys.sort_duration") }}</a>
+    </div>
+    <div class="mb-3 flex flex-wrap items-center gap-2 text-sm" role="group" aria-label="{{ t("journeys.min_requests") }}">
+      <span class="text-base-content/70">{{ t("journeys.min_requests") }}:</span>
+      {% for floor in [1, 2, 5] %}
+      <a class="link" href="{{ page_url("/journeys", view="journeys", sort=journey_sort, min_requests=floor, offset=0) }}" {% if min_requests == floor %}aria-current="true"{% endif %}>{{ floor }}</a>
+      {% if not loop.last %}<span aria-hidden="true">·</span>{% endif %}
+      {% endfor %}
+      {% if min_requests not in [1, 2, 5] %}<span aria-hidden="true">·</span><span class="tech" aria-current="true">{{ min_requests }}</span>{% endif %}
+    </div>
+    {% if journey_items %}
+    <div class="chart-frame"><canvas id="journeys-chart" aria-label="{{ t("journeys.chart") }}" role="img"></canvas></div>
+    <script id="journeys-chart-data" type="application/json">{{ {"rows": journey_items, "requestsLabel": t("journeys.shown"), "valueKey": "requests_shown"} | tojson }}</script>
+    <div class="table-scroll overflow-x-auto">
+      <table class="table table-sm">
+        <caption class="sr-only">{{ t("journeys.chart_table") }}</caption>
+        <thead><tr><th scope="col">{{ t("journeys.entry") }}</th><th scope="col">{{ t("journeys.client") }}</th><th scope="col" class="text-right">{{ t("journeys.shown") }}</th><th scope="col" class="text-right">{{ t("journeys.total") }}</th><th scope="col">{{ t("journeys.start") }}</th><th scope="col">{{ t("journeys.end") }}</th><th scope="col" class="text-right">{{ t("journeys.duration") }}</th><th scope="col">{{ t("journeys.completeness") }}</th><th scope="col"><span class="sr-only">{{ t("table.detail") }}</span></th></tr></thead>
+        <tbody>
+          {% for item in journey_items %}
+          <tr>
+            <td class="tech break-all"><a class="link" href="{{ page_url("/requests", path_exact=item.entry_path, offset=0) }}" title="{{ t("security.view_path") }}">{{ item.entry_path }}</a></td>
+            <td class="tech break-all"><a class="link" href="{{ page_url("/requests", client=item.client_pseudonym, offset=0) }}" title="{{ t("security.view_client") }}">{{ item.client_pseudonym }}</a></td>
+            <td class="text-right tech">{{ item.requests_shown }}</td>
+            <td class="text-right tech">{{ item.requests_total }}</td>
+            <td class="tech whitespace-nowrap">{{ item.started_at }}</td>
+            <td class="tech whitespace-nowrap">{{ item.ended_at }}</td>
+            <td class="text-right tech">{{ "%.3f"|format(item.duration_s) }}s</td>
+            <td>{% if item.completeness == "complete" %}<span class="badge badge-success badge-sm">{{ t("journeys.complete") }}</span>{% else %}<span class="badge badge-warning badge-sm">{{ t("journeys.partial") }}</span>{% endif %}</td>
+            <td class="text-right whitespace-nowrap"><a class="link text-sm" href="{{ page_url("/journeys", view="journeys", sort=journey_sort, min_requests=min_requests, offset=offset, journey_id=item.journey_id, journey_client=item.client_pseudonym, journey_start=item.started_at) }}#journey-detail">{{ t("journeys.open_detail") }}</a></td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+    {% include "partials/paging.html" %}
+    {% else %}
+    <p class="text-sm text-base-content/70" role="status">{{ t("journeys.no_groups") }}</p>
+    {% endif %}
+  </div>
+</section>
+{% else %}
+<section class="card bg-base-100 shadow" aria-labelledby="journeys-entries-h">
+  <div class="card-body">
+    <h2 id="journeys-entries-h" class="card-title text-base">{{ t("journeys.entries") }}</h2>
+    <p class="text-sm text-base-content/70">{{ t("journeys.entries_note") }}</p>
+    <div class="mb-3 flex flex-wrap items-center gap-2 text-sm" role="group" aria-label="{{ t("journeys.min_requests") }}">
+      <span class="text-base-content/70">{{ t("journeys.min_requests") }}:</span>
+      {% for floor in [1, 2, 5] %}
+      <a class="link" href="{{ page_url("/journeys", view="entries", sort=journey_sort, min_requests=floor, offset=0) }}" {% if min_requests == floor %}aria-current="true"{% endif %}>{{ floor }}</a>
+      {% if not loop.last %}<span aria-hidden="true">·</span>{% endif %}
+      {% endfor %}
+      {% if min_requests not in [1, 2, 5] %}<span aria-hidden="true">·</span><span class="tech" aria-current="true">{{ min_requests }}</span>{% endif %}
+    </div>
+    {% if entry_items %}
+    <div class="chart-frame"><canvas id="journey-entries-chart" aria-label="{{ t("journeys.entries_chart") }}" role="img"></canvas></div>
+    <script id="journey-entries-chart-data" type="application/json">{{ {"rows": entry_items, "requestsLabel": t("journeys.journeys"), "valueKey": "journeys"} | tojson }}</script>
+    <div class="table-scroll overflow-x-auto">
+      <table class="table table-sm">
+        <caption class="sr-only">{{ t("journeys.entries_table") }}</caption>
+        <thead><tr><th scope="col">{{ t("journeys.entry") }}</th><th scope="col" class="text-right">{{ t("journeys.journeys") }}</th><th scope="col" class="text-right">{{ t("journeys.complete_journeys") }}</th><th scope="col" class="text-right">{{ t("journeys.partial_journeys") }}</th></tr></thead>
+        <tbody>
+          {% for item in entry_items %}
+          <tr>
+            <td class="tech break-all"><a class="link" href="{{ page_url("/requests", path_exact=item.entry_path, offset=0) }}" title="{{ t("security.view_path") }}">{{ item.entry_path }}</a></td>
+            <td class="text-right tech">{{ item.journeys }}</td>
+            <td class="text-right tech">{{ item.complete_journeys }}</td>
+            <td class="text-right tech">{{ item.partial_journeys }}</td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+    {% include "partials/paging.html" %}
+    {% else %}
+    <p class="text-sm text-base-content/70" role="status">{{ t("journeys.no_entries") }}</p>
+    {% endif %}
+  </div>
+</section>
+{% endif %}
+
+<section class="card mt-6 bg-base-100 shadow" aria-labelledby="journey-detail-h" id="journey-detail">
+  <div class="card-body">
+    <h2 id="journey-detail-h" class="card-title text-base">{{ t("journeys.detail") }}</h2>
+    <p class="text-sm text-base-content/70">{{ t("journeys.detail_note") }}</p>
+    {% if detail is not none %}
+    <dl class="flex flex-wrap gap-x-8 gap-y-2">
+      <div class="min-w-0"><dt class="text-sm text-base-content/70">{{ t("journeys.journey_id") }}</dt><dd class="tech break-all text-sm">{{ detail.journey_id }}</dd></div>
+      <div class="min-w-0"><dt class="text-sm text-base-content/70">{{ t("journeys.client") }}</dt><dd class="tech break-all text-sm">{{ detail.client_pseudonym }}</dd></div>
+      <div><dt class="text-sm text-base-content/70">{{ t("journeys.entry") }}</dt><dd class="tech break-all text-sm">{{ detail.entry_path }}</dd></div>
+      <div><dt class="text-sm text-base-content/70">{{ t("journeys.start") }}</dt><dd class="tech text-sm">{{ detail.started_at }}</dd></div>
+      <div><dt class="text-sm text-base-content/70">{{ t("journeys.end") }}</dt><dd class="tech text-sm">{{ detail.ended_at }}</dd></div>
+      <div><dt class="text-sm text-base-content/70">{{ t("journeys.shown") }}</dt><dd class="tech text-sm">{{ detail.requests_shown }}</dd></div>
+      <div><dt class="text-sm text-base-content/70">{{ t("journeys.total") }}</dt><dd class="tech text-sm">{{ detail.requests_total }}</dd></div>
+      <div><dt class="text-sm text-base-content/70">{{ t("journeys.completeness") }}</dt><dd class="text-sm">{% if not detail.left_truncated and not detail.right_truncated %}{{ t("journeys.complete") }}{% else %}{{ t("journeys.partial") }}{% endif %}</dd></div>
+    </dl>
+    {% if detail["items"] %}
+    <div class="table-scroll overflow-x-auto">
+      <table class="table table-sm">
+        <caption class="sr-only">{{ t("journeys.timeline_table") }}</caption>
+        <thead><tr><th scope="col">{{ t("journeys.start") }}</th><th scope="col">{{ t("table.method") }}</th><th scope="col">{{ t("table.path") }}</th><th scope="col">{{ t("table.status") }}</th><th scope="col" class="text-right">{{ t("table.bytes") }}</th><th scope="col">{{ t("table.referrer") }}</th></tr></thead>
+        <tbody>
+          {% for row in detail["items"] %}
+          <tr>
+            <td class="tech whitespace-nowrap">{{ row.ts_utc }}</td>
+            <td class="tech">{{ row.method }}</td>
+            <td class="tech break-all"><a class="link" href="{{ page_url("/requests", path_exact=row.path, offset=0) }}" title="{{ t("security.view_path") }}">{{ row.path }}</a></td>
+            <td class="tech">{{ row.status }}</td>
+            <td class="text-right tech">{% if row.bytes is not none %}{{ row.bytes }}{% else %}—{% endif %}</td>
+            <td class="tech break-all">{% if row.referer_host %}{{ row.referer_host }}{% else %}—{% endif %}</td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+    {% if detail.truncated %}
+    <p class="mt-1 text-sm text-base-content/70">{{ t("journeys.timeline_truncated", shown=detail.shown, total=detail.total) }}</p>
+    {% endif %}
+    {% else %}
+    <p class="text-sm text-base-content/70" role="status">{{ t("journeys.no_groups") }}</p>
+    {% endif %}
+    {% elif detail_error is not none %}
+    <p class="text-sm text-base-content/70" role="status">{{ t(detail_error) }}</p>
+    {% else %}
+    <p class="text-sm text-base-content/70" role="status">{{ t("journeys.no_detail") }}</p>
+    {% endif %}
+  </div>
+</section>
+
+<div class="mt-6 space-y-2 text-sm text-base-content/70">
+  <p>{{ t("data.events", count=summary.coverage.unique_events) }} · {{ t("data.observed", min=summary.coverage.observed_min, max=summary.coverage.observed_max) }}</p>
+  {% set limitations = journeys.limitations %}
+  {% if limitations %}
+  <h2 class="font-medium">{{ t("finding.limitations") }}</h2>
+  <ul class="list-disc space-y-1 pl-5">
+    {% for limitation in limitations %}
+    <li>{{ limitation }}</li>
+    {% endfor %}
+  </ul>
+  {% endif %}
+</div>

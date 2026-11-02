@@ -1158,8 +1158,13 @@ def test_chat_route_forwards_new_selectors_over_hostile_args(cenv, monkeypatch):
     assert evidence[0]["filters"]["server_host"] == "example.org"
     assert evidence[0]["filters"]["timing_available"] is False
     assert evidence[0]["filters"]["timing_min_ms"] == 0
-    assert evidence[0]["href"].startswith("/?")
+    # T4b2: journey reports land on the Journeys page with the executed
+    # scope and the server-fixed sort/min-requests defaults, never the
+    # overview fallback.
+    assert evidence[0]["href"].startswith("/journeys?")
     assert "path_exact=%2Fmeasured-fast" in evidence[0]["href"]
+    assert "view=journeys" in evidence[0]["href"]
+    assert "sort=requests_desc" in evidence[0]["href"]
 
 
 def test_chat_body_rejects_invalid_timing_range():

@@ -1413,9 +1413,19 @@ def _projection_quality(tool_name: str, envelope: dict) -> dict:
             "seo_server_errors",
             "seo_ai_only",
             "referrer_404s",
-            "referrer_urls",
         ):
             quality["limitations"] = [*LIMITATIONS_SEO, *LIMITATIONS_LOGS]
+        elif report == "referrer_urls":
+            # Host-only model boundary: local groups stay distinct
+            # sanitized source URLs, but this evidence carries only
+            # the referer host per group. Repeated hosts are
+            # host-only URL-group samples with paths withheld, never
+            # host totals.
+            quality["limitations"] = [
+                "host-only URL-group samples; paths withheld, never host totals",
+                *LIMITATIONS_SEO,
+                *LIMITATIONS_LOGS,
+            ]
         elif report in ("journeys", "journey_entries"):
             # Compact model-facing limitation notes: the full service
             # and API envelopes keep the exact long-form sentences, but

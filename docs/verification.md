@@ -2598,3 +2598,59 @@ secrets/keys/tokens/real logs).
 | 120-row fixture / HMAC / 77-rule catalog | PASS | Untouched: no fixture, rule or config changes; new tests use tmp stores only |
 | Requirements clarification (PAR-03/04/07, accepted full parity) | RECORDED | PAR-03 measured labels now read "Measured requests" (backend ranking/keys/API unchanged, no fake all-traffic count). PAR-04 full sanitized referrer-URL overview added alongside the retained 404-target view (LogWerk `renderRefererUrls` + full-path requirement; `GET /api/v1/referrers/urls`, `get_report referrer_urls`, web `view=all/broken`, stdlib `--endpoint referrer-urls`, `docs/external-api.md`); missing scheme/path reads Unknown, never direct-traffic/people claims. PAR-07 chat-disabled/no-key/offline API still works (focused + full suites green without provider). Tool hrefs now reproduce the executed report (page-local view/sort/relation; contradictory parent filters stay empty; exact client travels). No false full-release/native-Linux/owner-acceptance claim; stopping for independent review before T4b2 |
 | Journeys UI (T4b2), comparison halves (T4c), GeoIP (T5), release | NOT RUN | No journey/security UI, no comparison-half link change, no GeoIP, no push/main/deploy; independent review stays required before T4b2 |
+
+## 2026-11-02 — Parity T4b2 journeys/entry-paths/security report UI (implementer run)
+
+Owner-authorized T4b2 after reviewed T4b1 on
+`feature/logwerk-parity-2026-11-01` (frozen anchor `7062190` clean,
+prior commits preserved, no amend), exact model
+`muse-spark-1.3-contributor` / medium / Contributor ON; sandbox +
+approval ON, sole writer, no agents/new approval loop, no parent
+private files/keys/history/real logs, no actual product/provider
+calls, no Docker/live activation/push/main/deploy/allowance reset.
+Public/synthetic fixtures only; prior work, 120-row fixtures, 77
+bot rules, core HMAC, auth/usage preserved. No browser import, no
+translations; all new visible text through central `en` keys; no
+template/JS metric reimplementation (shared service contracts only).
+
+Scope actually built: `/journeys` page (ranked technical-journey
+list with server `sort` × 4 and `min_requests` floor, entry-path
+aggregation with complete/partial shares and the outside-window
+caveat, opaque-ID timeline detail with bounded chronological rows
+and shown/total truncation, all with Chart.js plots plus table
+alternatives and exact-path/client drilldowns); expanded
+`/security` page (findings chart, 401-challenge note, per-offender
+average rate + whole-UTC-minute peak + interval, sample/sequence
+tables with shown/total/truncation, offender shown/total counts);
+tool evidence maps `journeys`/`journey_entries` to `/journeys` with
+the executed sort/min-requests defaults and finding links to
+`/requests` (client-scoped for offenders), `/errors` and
+`/crawlers` — overview is no longer a fallback. Comparison links,
+saved views, refresh and comprehensive Help stay T4c; genuine
+country UI stays T5a. Inherited model clarity: `referrer_urls`
+evidence now carries `host_sample` rows plus the "host-only
+URL-group samples; paths withheld, never host totals" limitation
+(same-host/different-path regression; API/UI keep full local
+sanitized URL groups; no Referer path/scheme added to egress; no
+provider call).
+
+`UV_CACHE_DIR=/tmp/uvcache uv run --locked pytest tests/unit`
+(416 passed) and `uv run --locked pytest tests/integration`
+(612 passed, 2 skipped — same pre-existing live-loopback
+category). `uv lock --check --offline` clean (no manifest/lock
+delta, no new dependencies). `ruff check` + `ruff format --check`
+clean over `app`/`tests`. `npm run build` +
+`node scripts/check_no_external.mjs` clean (tracked
+`app/web/static/app.css` rebuilt for the new templates; served
+`app/web/static/js/*` is gitignored build output, synced by
+`build:js`; `node --check` clean). Gitleaks NOT RUN (`gitleaks`
+not installed; no network installs in scope; diff adds only
+synthetic `synthetic-test-*` values, no secrets/keys/tokens/real
+logs).
+
+| Check | Result | Evidence |
+| --- | --- | --- |
+| New `tests/integration/test_parity_t4b2_web.py` | PASS | 12 passed: journeys list agrees service/API/page (7 journeys, `/gone-1` first by shown requests), all 4 server sorts rank whole scope with invalid rejection, `min_requests` floor (5 eligible) with API agreement, paging + client-pseudonym filter, opaque timeline detail (exact rows, unknown-ID empty state, partial-selector/malformed 400, limit-2 truncation note), entry-paths view (7 groups) with API agreement, security expanded evidence (chart, 401-challenge note, avg/peak/sequence, exact offender counts, path/client drilldowns), support links never overview (`/requests`/`/errors` only), journey evidence hrefs replay on `/journeys` with server defaults, referrer host-only regression (repeated `host_sample`, withheld paths, `never host totals`, <=1600 chars) |
+| Updated `tests/integration/test_assistant_stage_c.py`, `tests/integration/test_web_partb.py` | PASS | 2 contract evolutions required by T4b2: journey evidence hrefs now land on `/journeys` with executed scope + fixed defaults (selector-override purpose unchanged); 200 sensitive-path card now links to the Requests explorer that lists its rows (error-group exclusion kept, overview fallback removed) |
+| New `tests/e2e/test_parity_t4b2.py` | BLOCKED (environmental) | Collects cleanly; Chromium fails at launch in this shell sandbox (`TargetClosedError` — identical for the pre-existing T4b1 e2e, so not caused by this change); coordinator executes `uv run --locked pytest tests/e2e/test_parity_t4b2.py -q` with the browser sandbox ON (journeys nav/chart/sort/entries/detail, security chart/rates/sequence/401, 390-dark/desktop-light widths, keyboard focus, no external requests/console errors) |
+| T4c (saved views/comparison/refresh/Help), follow/GeoIP (T5), release | NOT RUN | Not implemented or claimed; stopping for independent review |

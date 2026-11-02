@@ -50,6 +50,25 @@ Muse implementation with separate AI-assisted planning, review and testing.
   remote main as its parent. Detailed development branches remain local;
   the publication commit is not a claim that all work occurred in one step.
 
+## Parity T4b2 journeys/entry-paths/security report UI, 2 November 2026
+
+Owner-authorized LogWerk parity T4b2 (no new approval loop),
+implemented solely by Muse Spark 1.3 Contributor (medium,
+Contributor ON) with sandbox + approval ON: navigable Journeys
+page over the shared journey service (ranked list, entry-path
+aggregation, opaque timeline detail; no visitor/session/people
+labels), expanded Security page (rates, UTC-minute peaks,
+sequences, 401/403 candidates; 401 as challenge, never failed
+login; heuristic candidates, never confirmed attacks), tool
+evidence mapped to the pages that reproduce each read, and the
+host-only referrer URL-group model clarification (paths withheld,
+no egress widening, no provider call). Original LogCarve code
+remains Apache-2.0; no LogWerk application code was imported
+(70-pattern MIT rule adaptation of 2026-11-01 unchanged).
+Synthetic fixtures only; no real logs, keys, provider calls,
+push/main/deploy or release/acceptance claims. Independent review
+stays required before T4c.
+
 ## Parity T4b1 review corrections, 2 November 2026
 
 Owner-authorized LogWerk parity corrections before T4b2 (no new

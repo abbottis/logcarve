@@ -467,12 +467,20 @@ def _project_report(report: object, minimized: dict, full: dict | None) -> str:
         ]
         return _compact_json({"groups": total, "more": max(0, total - len(shown)), "top": shown})
     if report == "referrer_urls":
+        # Host-only privacy boundary: local groups are distinct
+        # sanitized source URLs, but the model projection carries
+        # only the referer host per group. Repeated hosts are
+        # host-only URL-group samples with paths withheld — never
+        # whole-host aggregate totals and never complete URLs. The
+        # limitation travels in the quality envelope; the short row
+        # key keeps repeated samples explicit within the 1600-char
+        # bound.
         items = minimized.get("items")
         rows = list(items) if isinstance(items, (list, tuple)) else []
         total = _int_or(source.get("total_groups"), len(rows))
         shown = [
             {
-                "referrer": _clip_projection_text(row.get("referer_host", "?")),
+                "host_sample": _clip_projection_text(row.get("referer_host", "?")),
                 "requests": _int_or(row.get("requests")),
                 "errors": _int_or(row.get("errors")),
                 "internal": _bool_or_none(row.get("internal")),

@@ -202,6 +202,9 @@
     renderBar("perf-hosts-chart", "perf-hosts-chart-data", "value", null);
     renderBar("seo-groups-chart", "seo-groups-chart-data", "path", null);
     renderBar("ref-targets-chart", "ref-targets-chart-data", "target_path", null);
+    renderBar("journeys-chart", "journeys-chart-data", "entry_path", null);
+    renderBar("journey-entries-chart", "journey-entries-chart-data", "entry_path", null);
+    renderBar("security-findings-chart", "security-findings-chart-data", "label", null);
   }
 
   function shortLabel(value, maxLen) {

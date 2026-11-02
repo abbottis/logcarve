@@ -591,12 +591,14 @@ def test_security_populated_findings_render_both_rules(tmp_path, monkeypatch):
     assert "never proof of compromise or attribution" in html
     assert "2026-10-27T00:00:00+00:00" in html
     assert t("finding.supporting_data") in html
-    # The 200 sensitive-path card links to overview context, never to the
-    # error groups that cannot list it; the 4xx card links to /errors.
+    # The 200 sensitive-path card links to the Requests explorer in the
+    # shared scope that lists its rows, never to the error groups that
+    # cannot list it; the 4xx card links to /errors.
     cards = html.split('<li class="rounded-lg border border-base-300 p-3">')[1:]
     assert len(cards) == 2
     sensitive = next(card for card in cards if "sec-sensitive-path" in card)
-    assert 'href="/?' in sensitive and 'href="/errors?' not in sensitive
+    assert 'href="/requests?' in sensitive and 'href="/errors?' not in sensitive
+    assert 'href="/?' not in sensitive
     repeated = next(card for card in cards if "sec-repeated-client-errors" in card)
     assert 'href="/errors?' in repeated
     assert "site=default" in repeated

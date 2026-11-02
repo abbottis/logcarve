@@ -24,8 +24,8 @@ TOOL_PAGE_MAP = {
 #: Report pages for the aggregate-only ``get_report`` tool. Every
 #: report maps to the dashboard page that reproduces its exact read,
 #: including page-local selectors (SEO view, slow-endpoint sort,
-#: referrer view/relation). Journey/security maps arrive with T4b2;
-#: comparison inside-halves semantics arrive with T4c.
+#: referrer view/relation, journey view/sort/min-requests).
+#: Comparison inside-halves semantics arrive with T4c.
 REPORT_PAGE_MAP = {
     "performance": "/performance",
     "slow_endpoints": "/performance",
@@ -35,8 +35,8 @@ REPORT_PAGE_MAP = {
     "seo_ai_only": "/seo",
     "referrer_404s": "/referrers",
     "referrer_urls": "/referrers",
-    "journeys": "/",
-    "journey_entries": "/",
+    "journeys": "/journeys",
+    "journey_entries": "/journeys",
     "comparison": "/",
 }
 
@@ -53,6 +53,8 @@ REPORT_PAGE_EXTRAS: dict[str, dict[str, object]] = {
     "seo_ai_only": {"view": "ai_only"},
     "referrer_404s": {"view": "broken", "relation": "all"},
     "referrer_urls": {"view": "all", "relation": "all"},
+    "journeys": {"view": "journeys", "sort": "requests_desc", "min_requests": 1},
+    "journey_entries": {"view": "entries", "min_requests": 1},
 }
 
 

@@ -28,6 +28,8 @@ from app.analytics.contracts import (
     AnalyticsFilter,
     BotTableQuery,
     ExplorerQuery,
+    JourneyIdQuery,
+    JourneyQuery,
     SlowEndpointsQuery,
     TimeWindow,
     TopPathsQuery,
@@ -1106,9 +1108,12 @@ def _finding_support_link(site: str, filt: AnalyticsFilter, finding: Finding) ->
 
     Findings are immutable dataclasses, so cards render from plain view
     dicts. A link is only attached when the target page actually lists the
-    underlying rows: error evidence links to the error groups, everything
-    else links to the overview timeline and tables. Links are supporting
-    context, never labelled complete evidence.
+    underlying rows: error evidence links to the error groups, offender
+    evidence links to the Requests explorer scoped to that client
+    pseudonym, conflicting-identity evidence links to the crawler claims,
+    and anything else links to the Requests explorer in the shared scope.
+    Links are supporting context, never labelled complete evidence; the
+    overview is never used as a fallback now that proper pages exist.
     """
     envelope = {
         "site_id": site,
@@ -1123,7 +1128,12 @@ def _finding_support_link(site: str, filt: AnalyticsFilter, finding: Finding) ->
     )
     if has_errors:
         return _evidence_url("/errors", envelope)
-    return _evidence_url("/", envelope)
+    client_pseudonym = evidence.get("client_pseudonym")
+    if isinstance(client_pseudonym, str) and client_pseudonym:
+        return _evidence_url("/requests", {**envelope, "client": client_pseudonym})
+    if evidence.get("agents"):
+        return _evidence_url("/crawlers", envelope)
+    return _evidence_url("/requests", envelope)
 
 
 def _finding_view(site: str, filt: AnalyticsFilter, finding: Finding) -> dict:
@@ -1187,6 +1197,18 @@ def _security_context(request: Request, conn, params):
         _finding_view(site, filt, finding) for finding in findings_all[offset : offset + limit]
     ]
     _attach_observed_options(conn, context, filt, request.app.state.rules)
+    chart_rows = []
+    for view in items:
+        counts = view.get("counts") if isinstance(view, dict) else None
+        total = 0
+        if isinstance(counts, dict):
+            total = int(counts.get("requests", counts.get("errors", 0) or 0))
+        label = str(view.get("title", "")) if isinstance(view, dict) else ""
+        evidence = view.get("evidence") if isinstance(view, dict) else None
+        client = evidence.get("client_pseudonym") if isinstance(evidence, dict) else None
+        if isinstance(client, str) and client:
+            label = f"{label} · {client[:12]}…"
+        chart_rows.append({"label": label, "requests": total})
     context.update(
         {
             "summary": summary,
@@ -1197,6 +1219,7 @@ def _security_context(request: Request, conn, params):
                 if row["status"] in (401, 403, 404, 429)
             ],
             "findings": items,
+            "chart_rows": chart_rows,
             "paging": _paging_nav("/security", params, site, len(findings_all)),
             "fragment_url": "/partials/security",
         }
@@ -1495,6 +1518,141 @@ def _referrers_context(request: Request, conn, params):
     context["canonical_url"] = _page_url(
         "/referrers", params, site, relation=raw_relation, view=raw_view
     )
+    return context, None
+
+
+#: Allowlisted journey views for the Journeys page: the ranked journey
+#: list (with a sort and a minimum-requests floor) and the entry-path
+#: aggregation over the same eligible journeys. Page-local, like a
+#: sort: never part of the shared navigation scope.
+JOURNEY_VIEWS = ("journeys", "entries")
+
+#: Allowlisted journey rankings. Every option maps to one fixed server
+#: ORDER BY over the whole filtered scope (never a page-only reorder);
+#: ties break deterministically by stable journey ID.
+JOURNEY_SORTS = ("requests_desc", "start_asc", "start_desc", "duration_desc")
+
+
+def _parse_min_requests(q) -> tuple[int | None, str | None]:
+    """Allowlisted minimum-requests floor; unknown values reject."""
+    raw = (q.get("min_requests") or "").strip() or None
+    if raw is None:
+        return 1, None
+    try:
+        value = int(raw)
+    except ValueError:
+        return None, "error.bad_params"
+    if not 1 <= value <= 1000:
+        return None, "error.bad_params"
+    return value, None
+
+
+def _journeys_context(request: Request, conn, params):
+    site, sites, error = _site_or_error(conn, params)
+    if error is not None:
+        return None, error
+    error = _source_or_error(conn, site, params["source"])
+    if error is not None:
+        return None, error
+    try:
+        context = _base_context(request, params, site, sites, "/journeys", request.app.state.rules)
+    except _InvalidFilter:
+        return None, "error.bad_params"
+    filt = context["filt"]
+    query_params = request.query_params
+    raw_view = (query_params.get("view") or "").strip() or "journeys"
+    if raw_view not in JOURNEY_VIEWS:
+        return None, "error.bad_params"
+    journey_sort, error = _parse_sort(query_params, JOURNEY_SORTS, "requests_desc")
+    if error is not None:
+        return None, error
+    min_requests, error = _parse_min_requests(query_params)
+    if error is not None:
+        return None, error
+    assert journey_sort is not None and min_requests is not None
+    page_filt = filt.model_copy(update={"limit": params["limit"], "offset": params["offset"]})
+    try:
+        journeys_report = service.journeys(
+            conn,
+            JourneyQuery(filt=page_filt, sort=journey_sort, min_requests=min_requests),  # type: ignore[arg-type]
+            request.app.state.rules,
+        )
+        entries_report = service.journey_entry_paths(
+            conn, page_filt, request.app.state.rules, min_requests=min_requests
+        )
+    except ValueError:
+        return None, "error.bad_params"
+    # Opaque journey timeline detail: all three list-issued selectors
+    # must travel together (never a guessed User-Agent from a
+    # truncated display field and never a raw address in the URL).
+    detail = None
+    detail_error = None
+    raw_journey_id = (query_params.get("journey_id") or "").strip() or None
+    raw_client = (query_params.get("journey_client") or "").strip() or None
+    raw_start = (query_params.get("journey_start") or "").strip() or None
+    detail_selectors = [
+        value for value in (raw_journey_id, raw_client, raw_start) if value is not None
+    ]
+    if detail_selectors:
+        if raw_journey_id is None or raw_client is None or raw_start is None:
+            return None, "error.bad_params"
+        try:
+            start = datetime.fromisoformat(raw_start)
+            if start.tzinfo is None:
+                return None, "error.bad_params"
+            detail = service.journey_timeline_by_id(
+                conn,
+                JourneyIdQuery(
+                    filt=page_filt,
+                    client_pseudonym=raw_client,
+                    journey_start=start,
+                    journey_id=raw_journey_id,
+                ),
+                request.app.state.rules,
+            )
+        except ValueError:
+            return None, "error.bad_params"
+        except KeyError:
+            detail = None
+            detail_error = "journeys.detail_not_found"
+    summary = service.summarize(conn, filt, request.app.state.rules)
+    _attach_observed_options(conn, context, filt, request.app.state.rules)
+    view_total = (
+        int(journeys_report["total_groups"])
+        if raw_view == "journeys"
+        else int(entries_report["total_groups"])
+    )
+    extra: dict[str, object] = {
+        "view": raw_view,
+        "sort": journey_sort,
+        "min_requests": min_requests,
+    }
+    if raw_journey_id is not None:
+        extra.update(
+            {
+                "journey_id": raw_journey_id,
+                "journey_client": raw_client,
+                "journey_start": raw_start,
+            }
+        )
+    context.update(
+        {
+            "summary": summary,
+            "totals": summary["totals"],
+            "journey_view": raw_view,
+            "journey_sort": journey_sort,
+            "min_requests": min_requests,
+            "journeys": journeys_report,
+            "journey_items": journeys_report["items"],
+            "entries": entries_report,
+            "entry_items": entries_report["items"],
+            "detail": detail,
+            "detail_error": detail_error,
+            "paging": _paging_nav("/journeys", params, site, view_total, extra),
+            "fragment_url": "/partials/journeys",
+        }
+    )
+    context["canonical_url"] = _page_url("/journeys", params, site, **extra)
     return context, None
 
 
@@ -2165,6 +2323,44 @@ def referrers_partial(request: Request):
         )
     context["oob_notice"] = True
     response = templates.TemplateResponse(request, "partials/referrers_content.html", context)
+    response.headers["HX-Push-Url"] = context["canonical_url"]
+    return response
+
+
+@router.get("/journeys", response_class=HTMLResponse)
+def journeys_page(request: Request):
+    params, gate = _data_page(request)
+    if gate == "redirect":
+        return _redirect_to_login(request)
+    if gate is not None:
+        return _error_page(request, gate, 400)
+    with read_store(request) as conn:
+        context, error = _journeys_context(request, conn, params)
+    if error is not None:
+        return _error_page(request, error, 400 if error != "error.unknown_site" else 404)
+    return templates.TemplateResponse(request, "pages/journeys.html", context)
+
+
+@router.get("/partials/journeys", response_class=HTMLResponse)
+def journeys_partial(request: Request):
+    if _session_or_none(request) is None:
+        return HTMLResponse(
+            f'<p class="alert alert-warning" role="alert">{t("auth.login.title")}</p>',
+            status_code=401,
+        )
+    params, gate = _data_page(request)
+    if gate is not None:
+        return HTMLResponse(
+            f'<p class="alert alert-error" role="alert">{t(gate)}</p>', status_code=400
+        )
+    with read_store(request) as conn:
+        context, error = _journeys_context(request, conn, params)
+    if error is not None:
+        return HTMLResponse(
+            f'<p class="alert alert-error" role="alert">{t(error)}</p>', status_code=400
+        )
+    context["oob_notice"] = True
+    response = templates.TemplateResponse(request, "partials/journeys_content.html", context)
     response.headers["HX-Push-Url"] = context["canonical_url"]
     return response
 
