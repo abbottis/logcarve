@@ -1,136 +1,147 @@
 # LogCarve
 
-AI-assisted, self-hosted web access-log analytics for security, crawler activity and development.
+Self-hosted web access-log analytics: reproducible traffic, crawler, SEO and security insight from your own Nginx and Apache logs.
 
-**Acceptance readiness — 2 November 2026.** The parser, SQLite storage,
-deterministic analytics, authenticated REST API, bounded Meta assistant,
-browser dashboard and local synthetic demo are implemented. Fundamental
-traffic graphs, traffic selection with a 77-rule bot catalog, bot sorting
-and drilldowns, and a sanitized request explorer are available from the
-clean application source `bb272a9` (reviewed public source branch
-`feature/acceptance-polish-2026-11-01`; canonical equivalent `ad6d74f`
-on `local/acceptance-readiness-2026-11-01`). The LogWerk-parity slice
-T1–T5 is likewise implemented and locally activated at clean code anchor
-`84f440f2c593c9c32f4608e608c3530ad1cfed61` (see the
-[verification history](docs/verification.md) final receipts); live demo
-runs schema 8 at `http://127.0.0.1:8080`.
+[![License Apache-2.0](https://img.shields.io/badge/License-Apache--2.0-blue?style=flat-square)](LICENSE)
+[![Python 3.12 or later](https://img.shields.io/badge/Python-3.12%2B-blue?style=flat-square)](https://www.python.org/)
+[![Built with FastAPI](https://img.shields.io/badge/Backend-FastAPI-green?style=flat-square)](https://fastapi.tiangolo.com/)
+[![Runs with Docker Compose](https://img.shields.io/badge/Run-Docker_Compose-blue?style=flat-square)](https://docs.docker.com/compose/)
+[![Built with Muse Code](https://img.shields.io/badge/Built_with-Muse_Code-purple?style=flat-square)](https://developers.meta.com/)
+[![Preview status](https://img.shields.io/badge/Status-Preview-orange?style=flat-square)](docs/verification.md)
 
-The owner-UX review slice (Stage A labels/offsets/dropdowns/Crawlers/
-Help/starter/quick views + Stage B 8-column Requests explorer,
-conflicting-bot candidate, Largest-responses retarget) is complete and
-independently verified at public HEAD `f0182fb` on
-`feature/owner-ux-review-2026-11-01` (application anchor `ffaf737`;
-later commits tests/docs only; runtime image built from `a087c3e`).
-Independent runtime verification is recorded in the
-[verification history](docs/verification.md). Owner manual acceptance
-is pending; no full release or QA-01 certification is claimed. No
-`main` merge, release claim or production deployment is included; the
-local persistent demo was updated in place with the exact tested
-image. Inspect `git status` for the active checkout rather than
-assuming a branch name.
+## What it is
 
-## Run the local synthetic demo
+LogCarve imports NCSA Combined access logs (Nginx and Apache), including measured-timing presets, gzip archives and bounded administrator custom formats, normalizes them locally into SQLite, and serves one deterministic analytics layer to three consumers: a browser dashboard, an authenticated read-only REST API and a small stdlib client. The dashboard, the API and the internal assistant all read the same numbers — with chat disabled, no model key and no Internet.
 
-Requires Docker with Docker Compose, host Python 3 and curl. From the repository directory:
+LogCarve covers one site and one configured source at a time. Hostname and alias filtering selects within that site; it is not a multi-site platform.
+
+Who benefits:
+
+- **SEO and marketing** — crawler activity, bot versus browser-like traffic shares, referrers, broken inbound links and AI-observed paths.
+- **Developers** — slow endpoints, measured latency where the format supplies it, error groups, status classes and a sortable request explorer.
+- **Security reviewers** — deterministic investigation candidates (for example conflicting bot identity or 401/403 sequences) with rule and evidence references. User-Agent matches are claimed identities, never verified bots, and candidates are starting points, never confirmed attacks.
+
+What LogCarve does not claim: visits, visitors, sessions, conversions, search rankings or training use cannot be derived from access logs alone. Missing timing stays `unavailable`, never zero. Country estimates describe where an observed address is registered, never who visited.
+
+## Features
+
+- Replay-safe batch imports, retention and online backups in local SQLite (WAL, migrations, one writer).
+- Opt-in incremental follow with durable checkpoints, generation identity and rotation handling (`follow`, `replay-archive`); schema-gated `/readyz`. The browser starts no watcher.
+- Overview graphs, timelines and weekday/hour heatmaps over an explicit display timezone.
+- 77-rule bot catalog with traffic, category, provider and purpose filters, plus named-bot drilldowns.
+- Sortable Requests explorer with per-row details, exact and full-text search, and country filtering.
+- Performance (latency percentiles, slow endpoints), SEO (bot statuses, AI-observed paths), Referrers (sanitized URLs, broken inbound 404s), Journeys and Security pages.
+- Saved filter views, current-versus-baseline comparison windows and full-result CSV/JSON export with reproducibility metadata.
+- Authenticated read-only API (`/api/v1`) with scoped `analytics:read` tokens, plus a stdlib-only Python client.
+- Local-first browser UI: bundled assets with no CDN or tracking, light and dark themes, English UI, server pagination.
+- Privacy by default: query values discarded, Referer minimized, secrets masked, client addresses pseudonymized with a secret HMAC key.
+
+## Quickstart: synthetic demo
+
+This quickstart runs a persistent 120-row synthetic demo on loopback. It imports no real logs and needs no model key.
+
+Prerequisites:
+
+- Git and curl on the host.
+- Docker with the Compose plugin (recent enough for optional `env_file` `required: false`).
+- Host Python 3 for the API client examples.
 
 ```bash
+git clone --branch feature/logwerk-parity-ready-2026-11-02 https://github.com/abbottis/logcarve.git
+cd logcarve
 ./scripts/demo/init.sh
 ./scripts/demo/start.sh
 ./scripts/demo/health.sh
 ```
 
-Open the [fixed demo window](http://127.0.0.1:8080/?site=default&range=custom&from=2026-10-26T00:00:00%2B00:00&to=2026-11-01T00:00:00%2B00:00&tz=Europe%2FBerlin&source=example-combined).
-It covers all 120 synthetic events (30 legacy rows 26–28 Oct plus 90 rich
-rows 29–31 Oct) and remains usable after the default seven-day window has
-moved beyond the fixture dates.
+What the scripts do:
 
-Log in as `demo-admin`; the generated password is in the protected local
-`artifacts/local-demo-secrets/demo.env` file (`LOGCARVE_ADMIN_PASSWORD`).
-Never publish that file. The standalone demo forces AI off and an empty
-model key. Sources are read-only, the container runs as a non-root user,
-and the port is published only on `127.0.0.1:8080`.
+- `init.sh` is first-time setup only: it creates the protected `artifacts/local-demo-secrets/demo.env` file and refuses to overwrite it.
+- `start.sh` builds the image, starts the service and seeds the combined 120-row synthetic dataset (idempotent).
+- `health.sh` checks public liveness and gated readiness without printing secrets.
+- `stop.sh` stops the demo and keeps its data.
 
-See [demo operation](docs/demo.md), [deployment](docs/deployment.md) and
-[backup/restore](docs/backup-restore.md). `stop.sh` keeps data; `reset.sh`
-replays the verified synthetic fixture without resetting auth or usage.
+Then open the fixed window covering all 120 synthetic rows:
 
-## What is available
+[Open the demo overview (all 120 rows)](http://127.0.0.1:8080/?site=default&range=custom&from=2026-10-26T00:00:00%2B00:00&to=2026-11-01T00:00:00%2B00:00&tz=Europe%2FBerlin&source=example-combined)
 
-- Bounded Nginx/Apache NCSA Combined parsing with privacy minimization.
-- SQLite migrations, replay-safe batch imports, retention and online backups.
-- Opt-in incremental follow with durable checkpoints, generation identity and rotation handling (`logcarve-import follow` / `replay-archive`); schema-gated `/readyz` readiness.
-- One deterministic analytics layer shared by the dashboard, API and tools.
-- Server-side admin sessions and separate scoped, site-bound API tokens.
-- Overview, Security, Crawlers, Errors, Requests, Ask AI, Settings and Data Sources.
-- Fundamental request/error/byte timelines, traffic and bot shares, paths,
-  referrers, resource kinds, claimed browser/OS distributions, weekday/hour
-  heatmap and pseudonymized client aggregates.
-- Traffic selection (all / browser-like / claimed bot / automation /
-  unknown), 77-rule named-bot catalog with category/provider/purpose,
-  allowlisted bot sorting, named-bot drilldowns and a sanitized paginated
-  request explorer.
-- Locally served assets, themes, charts, table alternatives and pagination.
-- An independent [read-only external API](docs/external-api.md) and
-  [stdlib client](clients/logcarve_api_client.py) that need no model key.
+[Open the Requests explorer (same window)](http://127.0.0.1:8080/requests?site=default&range=custom&from=2026-10-26T00:00:00%2B00:00&to=2026-11-01T00:00:00%2B00:00&tz=Europe%2FBerlin&source=example-combined)
 
-## Verification and remaining work
+Log in as `demo-admin`. The generated password is in `artifacts/local-demo-secrets/demo.env` (`LOGCARVE_ADMIN_PASSWORD`). Never publish that file. The demo forces AI off with an empty model key, mounts sources read-only, runs as a non-root user and publishes only on `127.0.0.1:8080`.
 
-The earlier (historical) independently verified analytics closeout at
-`e81d2d0` on `feature/traffic-analytics` passed 428 unit/integration
-tests, 22 protected browser E2E tests, a 53/53 synthetic API probe, Ruff
-check and format on 152 files, `uv lock --check` on 40 packages, the asset
-build with no-external-references check, fully redacted Gitleaks
-tracked-export and full-history scans (only the known
-`technical-spec.md:787` cost-heading false positive), an 8/0 Docker Compose
-candidate run, a 24/0 internal-network offline smoke run and a 32-case
-built-image browser matrix on both the isolated candidate and the updated
-persistent demo. At the acceptance-readiness anchor `bb272a9`
-(reviewed public source branch `feature/acceptance-polish-2026-11-01`,
-canonical equivalent `ad6d74f`), the display-timezone catalogue, three
-offline AI corrections and the technical local gates are likewise
-complete and independently verified: 480 unit/integration tests, 24
-protected browser E2E tests, a 121-check offline mock probe, semantic
-evidence checks, the 599-zone catalogue, an 8/0 candidate Compose run,
-a 24/0 offline smoke run and a 32-case browser matrix on candidate and
-persistent demo plus 7/7 timezone acceptance on both. The owner-UX slice
-at `f0182fb` (app anchor `ffaf737`, image from `a087c3e`) is likewise
-complete and independently verified: 536 unit/integration tests, 29
-protected browser E2E tests, 78+53 API checks, a 121-check offline mock
-probe, Ruff/lock/diff checks, 8/0 candidate and 24/0 offline Compose
-runs, and 36+8+12 browser checks on both the built candidate and the
-updated persistent demo. These are observed results reported by the
-independent local runner on macOS ARM64 / Linux ARM64 containers;
-native Linux x86-64 installation and standalone Linux host install are
-**NOT RUN**, and no full release, hackathon or all-project QA approval
-is claimed.
+The seeded dataset holds 120 synthetic rows on source `example-combined`: 30 legacy rows (26–28 Oct 2026) plus 90 enriched rows (29–31 Oct 2026). The fixed window above covers both, so it stays complete after the default seven-day window has moved past the fixture dates. `reset.sh` replays the same verified fixtures without touching auth or usage state.
 
-Deferred scope stays deferred: sessions, webhooks and the MCP product server. The LogWerk-parity slice implements gzip ingest with presets and custom formats, measured-timing analytics, SEO/journeys/security reports, full-result export, opt-in command-line follow/rotation, saved views, comparison windows and genuine offline GeoIP (PAR-01–10, locally activated at `84f440f`); continuous ingestion beyond bounded opt-in follow, shipped translations and a browser file-import UI stay excluded. Owner manual acceptance and video rehearsal remain open; native Linux x86-64 is NOT RUN.
-The product AI path stays off in the demo (AI disabled, empty model key,
-no Internet in offline proof); the separately authorized real Meta test
-completed two investigations with tool evidence while the third stopped at
-its context bound, so the three-case AI demonstration remains
-**incomplete**. The offline context-minimization, exact settled-cost
-display and citation/observation corrections are complete and verified;
-the settled usage ledger and execution caps were unaffected by the
-display issue. No additional real or paid model calls are authorized by
-this snapshot. Owner manual acceptance is pending (see the
-[acceptance checklist](docs/acceptance-checklist.md)). Muse coding-model
-usage is separate from product app caps and the product Standard
-data-mode gate.
+## Using the dashboard
 
-See [verification history](docs/verification.md), [checkpoint notes](docs/publication.md)
-and [next-session tasks](docs/next-session.md). The local demo uses a normal
-bridge network; separate internal-network tests establish offline behavior.
+- Overview shows aggregate charts; Requests is the individual log-line explorer with one sortable row per request.
+- Filters apply with **Apply**; column headers sort; **Details** expands a row; full downloads appear below the table.
+- Country results need a separately mounted genuine database; without it, GeoIP honestly reports `unavailable`. Rows without a known country stay `Unknown`.
+- Without the optional encrypted original-IP setup, original addresses stay uncaptured and the related display shows `unavailable`.
+- Pages share one filter engine: Overview, Requests, Crawlers, Performance, SEO, Referrers, Journeys, Security, Errors, Comparison, saved views and Help.
 
-## Development and project documents
+A scoped `analytics:read` token (issued at seed time, shown once) reads the same analytics over HTTP:
 
-- [Project rules](AGENTS.md), [MVP](docs/mvp.md), [architecture](docs/architecture.md)
-- [Acceptance criteria](docs/acceptance-criteria.md), [decisions](docs/decisions/README.md)
-- [Security](docs/security.md), [privacy/data egress](docs/privacy-and-security.md)
-- [Development tools](docs/development-tools.md), [Muse Code workflow](docs/muse-code.md)
-- [Specification snapshot](docs/technical-spec.md) and [its provenance](docs/spec-provenance.md)
-- [Contribution provenance](docs/hackathon-contributions.md)
+```bash
+export LOGCARVE_API_TOKEN="lc_..."
+curl -s -H "Authorization: Bearer $LOGCARVE_API_TOKEN" \
+  "http://127.0.0.1:8080/api/v1/summary?site_id=default&from=2026-10-26T00:00:00%2B00:00&to=2026-11-01T00:00:00%2B00:00"
+```
 
-Original LogCarve code and documentation use [Apache-2.0](LICENSE).
-[Third-party components](THIRD_PARTY_NOTICES.md) retain their own licenses.
-No LogWerk code or assets have been imported.
+The [stdlib client](clients/logcarve_api_client.py) performs the same calls without dependencies; see the [external API](docs/external-api.md) for all endpoints. Full-result exports cover the entire filtered selection (no silent truncation); selections above 250000 rows are refused with `export_too_large` so you narrow the window instead.
+
+## Your own logs
+
+Production use is operator-configured, not a one-command setup: approved source roots and source IDs mounted read-only, secrets provided through the environment (see [.env.example](.env.example)), and CLI ingestion. The base Compose file requires operator secrets; do not copy demo credentials elsewhere. No real-log sample is shipped in this repository.
+
+Start here:
+
+- [Deployment](docs/deployment.md) — hosts, mounts, secrets, offline behavior.
+- [Log formats](docs/log-formats.md) — Combined, timing presets, gzip, custom mappings.
+- [Privacy and data egress](docs/privacy-and-security.md) — pseudonymization, masking, model boundaries.
+- [Security](docs/security.md) — auth, tokens, CSRF, review guidance.
+- [External API](docs/external-api.md) — endpoints, tokens, export contract.
+- [Backup and restore](docs/backup-restore.md) — online backups, retention.
+
+## Configuration at a glance
+
+All product settings come from the environment; see [.env.example](.env.example) for the full contract with no real secrets inside:
+
+- `LOGCARVE_LOG_PATHS`, `DATABASE_PATH`, `DEFAULT_TIMEZONE`, `RETENTION_DAYS` — where logs are read and state is kept.
+- `SESSION_SECRET`, `HMAC_KEY` — distinct server secrets for sessions and address pseudonymization.
+- `ORIGINAL_IP_KEY` — separate key for the optional encrypted original-IP store; empty keeps originals uncaptured.
+- `GEOIP_DB_PATH` — optional path of the operator-mounted genuine country database; empty keeps lookups honestly `unavailable`.
+- `AI_ENABLED=false` with an empty `MODEL_API_KEY` — the safe default; enabling chat additionally requires verified provider, data mode and budget settings.
+
+## Repository map
+
+- `app/` — ingestion, deterministic analytics, API transport, model adapter and web rendering.
+- `config/` — bot and security rule catalogs plus configuration examples.
+- `clients/` — the stdlib-only external API client.
+- `scripts/demo/` — the synthetic demo lifecycle (`init`, `start`, `health`, `stop`, `reset`).
+- `docs/` — MVP, architecture, formats, API, deployment, verification and provenance records.
+
+## Optional assistant
+
+An internal Meta assistant is available server-side when explicitly enabled with your own account, API access, data mode and usage limits. It uses bounded read-only analytics tools and reports evidence IDs, filters, coverage and limitations with every finding. The dashboard and the API work fully without it, and the synthetic demo keeps it disabled. Model failure never takes deterministic analytics offline.
+
+## Documentation
+
+- [Demo operation](docs/demo.md) and [deployment](docs/deployment.md)
+- [Log formats](docs/log-formats.md), [external API](docs/external-api.md), [backup and restore](docs/backup-restore.md)
+- [Acceptance criteria](docs/acceptance-criteria.md), [verification history](docs/verification.md), [acceptance checklist](docs/acceptance-checklist.md)
+- [Architecture](docs/architecture.md), [MVP scope](docs/mvp.md), [security](docs/security.md), [privacy and data egress](docs/privacy-and-security.md)
+- [Contribution provenance](docs/hackathon-contributions.md), [third-party notices](THIRD_PARTY_NOTICES.md)
+
+## Status
+
+Preview ready for local evaluation. Linux ARM64 container, offline and browser proofs are recorded in the [verification history](docs/verification.md); native Linux x86-64 is not yet verified and owner manual acceptance is pending. See the [acceptance criteria](docs/acceptance-criteria.md) for precise scope.
+
+## Hackathon
+
+LogCarve is a project developed for the [Meta Global AI Developer Hackathon (2026)](https://dev.meta.ai/events/global-hackathon), Indie developer track, an event built around Muse Code and Meta models. This states participation only; it implies no award, eligibility certification, official endorsement or submitted status.
+
+Thank you to Meta AI for the models, the developer tools and the hackathon opportunity. LogCarve was developed with Muse Code and Muse Spark 1.3 assistance, alongside independent planning, review and testing — no exclusive authorship is claimed.
+
+## License and provenance
+
+Original LogCarve code and documentation are [Apache-2.0](LICENSE). Seventy bot-catalog patterns and labels were adapted from the public LogWerk rule catalog and retain their upstream MIT notice; see [third-party notices](THIRD_PARTY_NOTICES.md). No LogWerk application code or assets were copied. The GeoIP database is operator-mounted data (DB-IP Country Lite, CC BY 4.0) and is never bundled or committed.
