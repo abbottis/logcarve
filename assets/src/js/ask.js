@@ -44,10 +44,13 @@
     };
     const text = (name, key) => {
       const value = root.getAttribute(`data-${name}`);
+      // Case is preserved where meaningful: matchers replay verbatim,
+      // so the question can never silently broaden the visible scope.
       if (value !== null && value !== "") body[key || name] = value;
     };
     text("method");
     text("path-prefix", "path_prefix");
+    text("path-exact", "path_exact");
     text("referer-host", "referer_host");
     text("status-class", "status_class");
     text("traffic");
@@ -56,6 +59,31 @@
     text("provider");
     text("purpose");
     text("search");
+    text("client");
+    text("server-host", "server_host");
+    text("http-version", "http_version");
+    text("mime-type", "mime_type");
+    text("cache-status", "cache_status");
+    text("tls-protocol", "tls_protocol");
+    const flag = (name, key) => {
+      // Selected false travels as native false, never dropped: an
+      // availability narrowing stays a narrowing on the wire.
+      const value = root.getAttribute(`data-${name}`);
+      if (value === "yes") body[key] = true;
+      else if (value === "no") body[key] = false;
+    };
+    flag("timing-available", "timing_available");
+    flag("upstream-available", "upstream_available");
+    const num = (name, key) => {
+      // Selected 0 travels as native 0, never dropped.
+      const value = root.getAttribute(`data-${name}`);
+      if (value !== null && value !== "") {
+        const parsed = Number(value);
+        if (Number.isFinite(parsed) && parsed >= 0) body[key] = parsed;
+      }
+    };
+    num("timing-min-ms", "timing_min_ms");
+    num("timing-max-ms", "timing_max_ms");
     const source = root.getAttribute("data-source");
     if (source) body.source_id = source;
     const status = root.getAttribute("data-status");

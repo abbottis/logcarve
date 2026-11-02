@@ -352,7 +352,9 @@ def test_new_selectors_travel_to_evidence_and_links(cenv):
     for fragment in (
         "path_exact=%2Fmeasured-fast",
         "server_host=example.org",
-        "timing_available=True",
+        # Booleans ride as yes/no so the link replays through the
+        # filter-bar parser instead of silently dropping the matcher.
+        "timing_available=yes",
         "timing_min_ms=0",
     ):
         assert fragment in href, fragment

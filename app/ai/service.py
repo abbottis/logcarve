@@ -166,6 +166,7 @@ class ValidatedScope:
     provider_claim: str | None = None
     purpose: str | None = None
     search: str | None = None
+    client: str | None = None
     server_host: str | None = None
     http_version: str | None = None
     mime_type: str | None = None
@@ -305,6 +306,7 @@ def validate_scope(
     provider_claim: str | None = None,
     purpose: str | None = None,
     search: str | None = None,
+    client: str | None = None,
     server_host: str | None = None,
     http_version: str | None = None,
     mime_type: str | None = None,
@@ -350,6 +352,12 @@ def validate_scope(
             raise InvestigationError(
                 "invalid_request", f"The requested {name} selector is invalid."
             )
+    if client is not None and (
+        not isinstance(client, str)
+        or len(client) != 64
+        or any(char not in "0123456789abcdef" for char in client)
+    ):
+        raise InvestigationError("invalid_request", "The requested client selector is invalid.")
     if status is not None and (
         not isinstance(status, int) or isinstance(status, bool) or not 100 <= status <= 599
     ):
@@ -433,6 +441,7 @@ def validate_scope(
         provider_claim=provider_claim,
         purpose=purpose,
         search=search,
+        client=client,
         server_host=server_host,
         http_version=http_version,
         mime_type=mime_type,
@@ -595,6 +604,7 @@ def run_investigation(
     provider_claim: str | None = None,
     purpose: str | None = None,
     search: str | None = None,
+    client: str | None = None,
     server_host: str | None = None,
     http_version: str | None = None,
     mime_type: str | None = None,
@@ -667,6 +677,7 @@ def run_investigation(
         provider_claim=provider_claim,
         purpose=purpose,
         search=search,
+        client=client,
         server_host=server_host,
         http_version=http_version,
         mime_type=mime_type,
@@ -775,6 +786,7 @@ def run_investigation(
             provider_claim=scope.provider_claim,
             purpose=scope.purpose,
             search=scope.search,
+            client=scope.client,
             server_host=scope.server_host,
             http_version=scope.http_version,
             mime_type=scope.mime_type,
@@ -812,6 +824,7 @@ def run_investigation(
                 provider_claim=scope.provider_claim,
                 purpose=scope.purpose,
                 search=scope.search,
+                client=scope.client,
                 server_host=scope.server_host,
                 http_version=scope.http_version,
                 mime_type=scope.mime_type,
@@ -998,6 +1011,7 @@ def run_investigation(
                         provider_claim=scope.provider_claim,
                         purpose=scope.purpose,
                         search=scope.search,
+                        client=scope.client,
                         server_host=scope.server_host,
                         http_version=scope.http_version,
                         mime_type=scope.mime_type,
@@ -1161,6 +1175,7 @@ def _compose_user_text(
     provider_claim: str | None = None,
     purpose: str | None = None,
     search: str | None = None,
+    client: str | None = None,
     server_host: str | None = None,
     http_version: str | None = None,
     mime_type: str | None = None,
@@ -1190,6 +1205,7 @@ def _compose_user_text(
         f"provider: {provider_claim or '-'}",
         f"purpose: {purpose or '-'}",
         f"search: {search or '-'}",
+        f"client: {client or '-'}",
         f"server_host: {server_host or '-'}",
         f"http_version: {http_version or '-'}",
         f"mime_type: {mime_type or '-'}",
@@ -1235,6 +1251,7 @@ def _compose_prompt(
     provider_claim: str | None = None,
     purpose: str | None = None,
     search: str | None = None,
+    client: str | None = None,
     server_host: str | None = None,
     http_version: str | None = None,
     mime_type: str | None = None,
@@ -1267,6 +1284,7 @@ def _compose_prompt(
             provider_claim=provider_claim,
             purpose=purpose,
             search=search,
+            client=client,
             server_host=server_host,
             http_version=http_version,
             mime_type=mime_type,
@@ -1431,6 +1449,7 @@ def _execute_bounded_tool(
     provider_claim: str | None = None,
     purpose: str | None = None,
     search: str | None = None,
+    client: str | None = None,
     server_host: str | None = None,
     http_version: str | None = None,
     mime_type: str | None = None,
@@ -1469,6 +1488,11 @@ def _execute_bounded_tool(
     scoped["provider"] = _inherit_narrowing(provider_claim, model.get("provider"), None)
     scoped["purpose"] = _inherit_narrowing(purpose, model.get("purpose"), None)
     scoped["search"] = _inherit_narrowing(search, model.get("search"), None)
+    # Trusted exact client: a selected pseudonym can never be changed by
+    # the model (scope wins); an unset scope leaves bounded model
+    # narrowing to the typed tool contract. Either way no original
+    # address is involved and HMAC identities are never rekeyed here.
+    scoped["client"] = _inherit_narrowing(client, model.get("client"), None)
     scoped["server_host"] = _inherit_narrowing(server_host, model.get("server_host"), None)
     scoped["http_version"] = _inherit_narrowing(http_version, model.get("http_version"), None)
     scoped["mime_type"] = _inherit_narrowing(mime_type, model.get("mime_type"), None)

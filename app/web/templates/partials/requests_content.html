@@ -123,10 +123,11 @@
                   {% endif %}
                   {% if row.timing_available %}
                   <div><dt class="inline text-base-content/70">{{ t("requests.request_time") }}: </dt><dd class="inline tech">{{ row.request_time_ms }} ms</dd></div>
+                  {% endif %}
                   {% if row.upstream_available %}
                   <div><dt class="inline text-base-content/70">{{ t("requests.upstream_time") }}: </dt><dd class="inline tech">{{ row.upstream_time_ms }} ms{% if row.upstream_count %} ({{ row.upstream_count }}×){% endif %}</dd></div>
                   {% endif %}
-                  {% else %}
+                  {% if not row.timing_available and not row.upstream_available %}
                   <div><dd class="text-base-content/70">{% include "icons/clock.svg" %}{{ t("data.response_time_unavailable") }}</dd></div>
                   {% endif %}
                 </dl>

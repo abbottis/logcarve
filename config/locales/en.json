@@ -159,6 +159,7 @@
   "error.title": "Something needs attention",
   "error.bad_params": "The requested filters are invalid. Adjust the time range and try again.",
   "error.export_too_large": "The selected scope is too large to export. Narrow the time range or filters.",
+  "error.form_too_large": "The submitted form was too large. Keep the entry short and try again.",
   "error.unknown_site": "The requested site is unknown.",
   "error.back": "Back to Overview",
   "crawler.claimed": "Identified bot",

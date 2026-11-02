@@ -101,6 +101,16 @@ class ToolArguments(BaseModel):
     provider: str | None = Field(default=None, min_length=1, max_length=120)
     purpose: str | None = Field(default=None, min_length=1, max_length=120)
     search: str | None = Field(default=None, min_length=1, max_length=128)
+    client: str | None = Field(
+        default=None,
+        min_length=64,
+        max_length=64,
+        pattern="^[0-9a-f]{64}$",
+        description=(
+            "Exact client equality on one stable HMAC pseudonym (64 lowercase hex), "
+            "never an original address. Intersects with every other selector."
+        ),
+    )
     path_exact: str | None = Field(default=None, min_length=1, max_length=1024)
     server_host: str | None = Field(default=None, min_length=1, max_length=253)
     http_version: str | None = Field(default=None, min_length=1, max_length=16)
@@ -186,6 +196,8 @@ def _evidence_filters(args: ToolArguments, filt: AnalyticsFilter) -> dict[str, o
         filters["purpose"] = filt.purpose
     if filt.search is not None:
         filters["search"] = filt.search
+    if filt.client is not None:
+        filters["client"] = filt.client
     # ``is not None`` keeps selected False/0.0 travelling: a parent
     # matcher for ``timing_available=False`` or ``timing_min_ms=0``
     # is a real selection, never an omitted dimension.
@@ -235,6 +247,7 @@ def _filter(args: ToolArguments) -> AnalyticsFilter:
             provider=args.provider,
             purpose=args.purpose,
             search=args.search,
+            client=args.client,
             server_host=args.server_host,
             http_version=args.http_version,
             mime_type=args.mime_type,

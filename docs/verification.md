@@ -2472,3 +2472,41 @@ report pages/nav/charts (T4b), saved views/comparison/refresh/Help
 coverage (T4c), follow/rotation and genuine GeoIP (T5) explicitly
 not claimed. Stopping for independent review; no overall release or
 owner-acceptance claim.
+
+## 2026-11-02 — Parity T4a corrections (warm-review findings, implementer run)
+
+Owner-authorized bounded T4a corrections BEFORE T4b1 on
+`feature/logwerk-parity-2026-11-01` (frozen anchor `b1d17b4` clean,
+prior HEAD preserved, no amend), exact model
+`muse-spark-1.3-contributor` / medium / Contributor ON; sandbox +
+approval ON, sole writer, no subagents, no new approval loop, no
+private parent files/logs/keys/history, no provider/product calls, no
+live activation/push/main/deploy/allowance reset. Public synthetic
+fixtures only; prior work, 120-row fixtures, 77 bot rules, HMAC/auth,
+usage accounting, no-browser-imports/no-translations preserved.
+
+Frozen-tree probes reproduced every listed defect first: the exact-IP
+POST returned 303 but matched 3 rows instead of 1 (a second client's
+User-Agent and a third client's path both embedded the target HMAC
+while only the general `search` selector existed), the selected
+explorer sort was dropped from the redirect, an oversized chunked POST
+streamed unbounded through `request.body()`, Ask JS serialized only
+the old selector allowlist, the banner printed the raw
+`private_unavailable:no_key` code, and an upstream-only row hid its
+measured 12.5ms value.
+
+`uv run --locked --offline pytest tests/unit tests/integration`
+(994 passed, 2 skipped — same pre-existing live-loopback category —
+exit status visible, no tail-masking) plus focused suites below.
+
+| Check | Result | Evidence |
+| --- | --- | --- |
+| New `tests/integration/test_parity_t4a_corrections.py` | PASS | 23 passed: exact client ignores adversarial UA/path embeddings (4-row general search vs 2-row exact), unknown HMAC yields empty, malformed pseudonyms 400, exact+text intersection, IP-search redirect sets `client` (raw IP absent) preserving search/sort/limit with offset 0, service/API/export(CSV+JSON)/tool/comparison agreement, chat POST carries full trusted scope with model override losing to scope, malformed client 400 with no provider egress, 413s without echo, counted early-stop chunk bound (3 receives of 11, lying Content-Length ignored), duplicate/malformed forms 400, invalid-Unicode CSRF 403, banner guidance mapping (unit + page), upstream-only 12.5ms render and zero-stays-zero, both-missing note exactly once, settings canonical redirect (unknown dropped, malformed 400 without write), bool yes/no evidence round-trip |
+| Updated replay/evidence contracts | PASS | `test_exact_replay_preserves_valid_values` extended with the exact-`client` matcher key; `test_new_selectors_travel_to_evidence_and_links` now asserts `timing_available=yes` (old `True` spelling could not replay through the filter-bar parser) |
+| Existing T4a/assistant/traffic suites | PASS | 99 passed across `test_parity_t4a_web.py`, `test_assistant_corrections.py`, `test_assistant_scope.py`, `test_external_client.py`, `test_traffic_api.py` |
+| `ruff check` + `ruff format --check` | PASS | Both clean over `app` + `tests` (`--fix` applied to two function-import blocks only; `en.json` kept to its one added key) |
+| `uv lock --check --offline` | PASS | No manifest/lock delta: no new dependencies (stdlib urlencoded parsing; `python-multipart` absent) |
+| Assets | PASS | `assets/src/js/ask.js` authored (full selector scope, native false/0); served `app/web/static/js/ask.js` synced by the exact `build:js` copy step and `node --check` clean (served tree is gitignored build output, not committed, `.gitignore` unchanged) |
+| 120-row fixture / HMAC / 77-rule catalog | PASS | Untouched: no fixture, rule or config changes in tree; new tests use tmp stores only |
+| Protected E2E incl. new chat-POST capture test | BLOCKED (environmental) | Chromium fails at launch in this shell sandbox (`TargetClosedError`, Mach IPC `Permission denied` — identical for the two pre-existing tests, so not caused by this change); coordinator executes `uv run --locked pytest tests/e2e/test_parity_t4a.py -q` with the browser sandbox ON (updated `client=` redirect assertion plus new `test_ask_posts_full_trusted_scope` capturing the stubbed outgoing POST with native false/0) |
+| Real AI / real acceptance / release | NOT RUN | No production transport, key, account or paid call; no native Linux/release claim; no overall parity/T4 claim; stopping for independent review before T4b1 |

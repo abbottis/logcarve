@@ -64,6 +64,7 @@ def evidence_url(page_path: str, envelope_filters: dict, tz_name: str = "UTC") -
         "path_exact",
         "referer_host",
         "search",
+        "client",
         "traffic",
         "bot",
         "category",
@@ -83,8 +84,17 @@ def evidence_url(page_path: str, envelope_filters: dict, tz_name: str = "UTC") -
         "offset",
         "bucket",
     ):
-        if envelope_filters.get(key) is not None:
-            query[key] = envelope_filters[key]
+        value = envelope_filters.get(key)
+        if value is None:
+            continue
+        # The filter bar parses availability matchers from ``yes``/``no``;
+        # serializing Python ``True`` would emit ``True`` and silently
+        # drop the matcher on reload, breaking evidence-link replay.
+        if value is True:
+            value = "yes"
+        elif value is False:
+            value = "no"
+        query[key] = value
     return page_path + "?" + urlencode(query)
 
 

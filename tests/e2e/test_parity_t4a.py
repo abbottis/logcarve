@@ -145,7 +145,7 @@ def test_private_display_search_settings_flows(page, t4a_base):
     with page.expect_navigation():
         page.locator('[data-ip-search] button[type="submit"]').click()
     assert V4 not in page.url
-    assert "search=" in page.url
+    assert "client=" in page.url
     expect(page.locator("body")).to_contain_text("/shop/item")
     assert "/style.css" not in page.content()
 
@@ -210,4 +210,61 @@ def test_narrow_viewport_and_dark_theme(page, t4a_base):
     with page.expect_navigation():
         page.locator('[data-ip-search] button[type="submit"]').click()
     expect(page.locator("body")).to_contain_text("/style.css")
+    assert errors == [], errors
+
+
+def test_ask_posts_full_trusted_scope(page, t4a_base):
+    """Browser capture: the Ask POST carries every visible selector.
+
+    No paid call: the chat endpoint is stubbed at the network layer
+    (fake response, outbound-denied equivalent), and the test proves
+    the actual UI wire values — including the exact client, native
+    ``false`` and ``0`` — instead of only the server context.
+    """
+    from app.ingestion.combined import pseudonymize_client
+
+    errors: list[str] = []
+    page.on("pageerror", lambda exc: errors.append(str(exc)))
+    base = t4a_base
+    _login(page, base)
+    target = pseudonymize_client(V4, b"synthetic-test-hmac-key")
+    scope = (
+        f"site=default&{STATE.split('site=default&', 1)[1]}"
+        f"&client={target}&path_exact=%2Fshop%2Fitem&server_host=example.org"
+        "&http_version=HTTP%2F1.1&mime_type=text%2Fhtml&cache_status=MISS"
+        "&tls_protocol=TLSv1.3&timing_available=no&upstream_available=yes"
+        "&timing_min_ms=0&timing_max_ms=200"
+    )
+    page.goto(f"{base}/ask?{scope}")
+    expect(page.locator("[data-ask]")).to_have_attribute("data-client", target)
+    expect(page.locator("[data-ask]")).to_have_attribute("data-timing-available", "no")
+    captured: dict = {}
+
+    def _stub(route):
+        captured.update(route.request.post_data_json)
+        route.fulfill(
+            status=200,
+            content_type="application/json",
+            body='{"answer": "Scoped answer.", "evidence": []}',
+        )
+
+    page.route("**/api/v1/chat/ask", _stub)
+    page.fill("[data-ask-input]", "How many requests carry the exact client?")
+    page.locator("[data-ask-send]").click()
+    expect(page.locator("[data-ask-answer]")).to_contain_text("Scoped answer.", timeout=10000)
+    assert captured["question"] == "How many requests carry the exact client?"
+    assert captured["client"] == target
+    assert captured["path_exact"] == "/shop/item"
+    assert captured["server_host"] == "example.org"
+    assert captured["http_version"] == "HTTP/1.1"
+    assert captured["mime_type"] == "text/html"
+    assert captured["cache_status"] == "MISS"
+    assert captured["tls_protocol"] == "TLSv1.3"
+    assert captured["timing_available"] is False
+    assert captured["upstream_available"] is True
+    assert captured["timing_min_ms"] == 0
+    assert captured["timing_max_ms"] == 200
+    # The stubbed answer renders without navigation: the canonical scope
+    # stays exactly where the server put it.
+    assert f"client={target}" in page.url
     assert errors == [], errors

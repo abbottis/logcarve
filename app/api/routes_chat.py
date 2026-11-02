@@ -76,6 +76,9 @@ class ChatBody(BaseModel):
     purpose: str | None = Field(default=None, min_length=1, max_length=120)
     status_class: str | None = Field(default=None, min_length=1, max_length=8)
     search: str | None = Field(default=None, min_length=1, max_length=128)
+    client: str | None = Field(
+        default=None, min_length=64, max_length=64, pattern=r"^[0-9a-f]{64}$"
+    )
     server_host: str | None = Field(default=None, min_length=1, max_length=253)
     http_version: str | None = Field(default=None, min_length=1, max_length=16)
     mime_type: str | None = Field(default=None, min_length=1, max_length=128)
@@ -186,6 +189,7 @@ def post_chat(request: Request, body: ChatBody):
                 purpose=body.purpose,
                 status_class=body.status_class,
                 search=body.search,
+                client=body.client,
                 server_host=body.server_host,
                 http_version=body.http_version,
                 mime_type=body.mime_type,

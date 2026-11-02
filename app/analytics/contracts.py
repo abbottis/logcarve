@@ -96,6 +96,19 @@ class AnalyticsFilter(BaseModel):
     path_exact: str | None = Field(default=None, min_length=1, max_length=1024)
     referer_host: str | None = Field(default=None, min_length=1, max_length=253)
     search: str | None = Field(default=None, min_length=1, max_length=MAX_SEARCH_LEN)
+    #: Exact client selector: equality on ONE stable HMAC pseudonym
+    #: (64 lowercase hex), never an original address. Unlike ``search``
+    #: (a widening ``LIKE`` that also matches path, User-Agent and
+    #: referrer host), this matches exactly one pseudonym and intersects
+    #: with every other matcher, including ``search`` itself. Unknown
+    #: pseudonyms yield zero rows, never fuzzy neighbours. Trusted
+    #: callers (exact-IP lookup, pinned client drilldowns) set this;
+    #: the model transport can inherit it from the trusted scope but
+    #: can never widen it, and it never reaches URLs carrying originals
+    #: (only the HMAC travels) or any original-IP permission change.
+    client: str | None = Field(
+        default=None, min_length=64, max_length=64, pattern=r"^[0-9a-f]{64}$"
+    )
     traffic: TrafficFilter = "all"
     bot: str | None = Field(default=None, min_length=1, max_length=64)
     category: str | None = Field(default=None, min_length=1, max_length=64)

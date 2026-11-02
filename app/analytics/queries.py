@@ -219,6 +219,12 @@ def _matcher_clauses(
     if filt.timing_max_ms is not None:
         clauses.append("request_time_ms <= ?")
         params.append(filt.timing_max_ms)
+    if filt.client is not None:
+        # Exact client equality: ONE stable HMAC pseudonym, parameterized.
+        # Independent of (and intersecting with) the widening text search
+        # below: embedding the HMAC in a UA/path never matches here.
+        clauses.append("client_pseudonym = ?")
+        params.append(filt.client)
     if filt.search is not None:
         # LogWerk-style explorer search over stored sanitized fields only:
         # query-stripped path, truncated-at-read user agent, minimized

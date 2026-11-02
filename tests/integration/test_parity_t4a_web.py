@@ -415,7 +415,7 @@ def test_exact_ip_search_translates_to_safe_pseudonym(t4a):
     location = response.headers["location"]
     assert V4 not in location
     expected = _pseudo(V4)
-    assert f"search={expected}" in location
+    assert f"client={expected}" in location
     assert "site=default" in location and "tz=UTC" in location
     followed = client.get(location).text
     assert "/shop/item" in followed
@@ -430,8 +430,8 @@ def test_exact_ip_search_keeps_legacy_spelling_identity(t4a):
     # Equivalent spellings hash distinctly (legacy byte identity): the
     # compressed search must not match the expanded row and vice versa.
     assert _pseudo(V6_SHORT) != _pseudo(V6_LONG)
-    assert f"search={_pseudo(V6_SHORT)}" in short.headers["location"]
-    assert f"search={_pseudo(V6_LONG)}" in long.headers["location"]
+    assert f"client={_pseudo(V6_SHORT)}" in short.headers["location"]
+    assert f"client={_pseudo(V6_LONG)}" in long.headers["location"]
     assert "/style.css" in client.get(short.headers["location"]).text
     assert "/style.css" not in client.get(long.headers["location"]).text
 
@@ -457,7 +457,7 @@ def test_exact_ip_search_scoped_form_never_leaks_zone(t4a):
     assert response.status_code == 303
     location = response.headers["location"]
     assert "eth0" not in location and "fe80" not in location
-    assert f"search={_pseudo('fe80::1%eth0')}" in location
+    assert f"client={_pseudo('fe80::1%eth0')}" in location
     followed = client.get(location).text
     assert "eth0" not in followed
 

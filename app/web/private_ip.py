@@ -111,6 +111,16 @@ def _display_for(
     return rendered, "shown", None
 
 
+def banner_key(code: str | None) -> str:
+    """Central English guidance key for the page-level IP banner.
+
+    The raw ``private_unavailable:*`` store codes are never locale keys;
+    rendering them would leak internal codes as raw labels. Every code
+    maps to one fixed ``privacy.ip_*`` guidance string instead.
+    """
+    return _notice_for(code)
+
+
 def _notice_for(code: str | None) -> str:
     """Fixed recovery guidance per unavailable cause; never echoes input."""
     if code == private.UNAVAILABLE_NO_KEY:

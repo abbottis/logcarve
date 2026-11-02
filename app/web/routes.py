@@ -14,7 +14,7 @@ from dataclasses import asdict
 from datetime import UTC, datetime, timedelta
 from http import HTTPStatus
 from pathlib import Path
-from urllib.parse import parse_qsl, quote, urlencode
+from urllib.parse import quote, urlencode
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 from fastapi import APIRouter, Request
@@ -279,6 +279,14 @@ def _parse_matchers(q) -> tuple[dict | None, str | None]:
         len(search) > 128 or any(ord(char) < 0x20 or ord(char) == 0x7F for char in search)
     ):
         return None, "error.bad_params"
+    # Exact client equality: ONE stable HMAC pseudonym (64 lowercase
+    # hex), never an original address. Unknown pseudonyms replay
+    # honestly (usually to zero rows), never fuzzy.
+    client = (q.get("client") or "").strip().lower() or None
+    if client is not None and (
+        len(client) != 64 or any(char not in "0123456789abcdef" for char in client)
+    ):
+        return None, "error.bad_params"
     enriched, error = _parse_enrichment_matchers(q)
     if error is not None:
         return None, error
@@ -290,6 +298,7 @@ def _parse_matchers(q) -> tuple[dict | None, str | None]:
         "referer_host": referer_host,
         "traffic": traffic,
         "search": search,
+        "client": client,
         **selectors,
         **enriched,
     }, None
@@ -476,6 +485,7 @@ MATCHER_KEYS = (
     "path_exact",
     "referer_host",
     "traffic",
+    "client",
     "bot",
     "category",
     "provider",
@@ -615,6 +625,7 @@ def _base_filter(params, site: str) -> AnalyticsFilter:
         path_exact=matchers.get("path_exact"),
         referer_host=matchers["referer_host"],
         search=matchers.get("search"),
+        client=matchers.get("client"),
         traffic=matchers.get("traffic") or "all",
         bot=matchers.get("bot"),
         category=matchers.get("category"),
@@ -1453,7 +1464,10 @@ def _requests_context(request: Request, conn, params, ip_search_error: str | Non
     if display_state.get("corrupt"):
         ip_banner = "privacy.ip_corrupt"
     elif display_state.get("mode") != private_store.IP_DISPLAY_PSEUDONYM_ONLY and key is None:
-        ip_banner = key_code or "privacy.ip_unavailable_no_key"
+        # Never render the raw ``private_unavailable:*`` store code: the
+        # central catalog holds no such locale key, so it would print
+        # verbatim internal codes. Map to fixed English guidance.
+        ip_banner = private_view.banner_key(key_code)
     else:
         ip_banner = None
     context.update(
@@ -1581,30 +1595,95 @@ def _settings_context(request: Request, conn, settings_error: str | None = None)
     }
 
 
-def _form_fields(request: Request, body: bytes) -> dict[str, str]:
-    """URL-encoded HTML form fields parsed with the standard library.
+#: Documented small cap for the two admin HTML form bodies (IP
+#: display settings and the exact-IP search). Bodies stream through
+#: ``request.stream()`` and reject above this size BEFORE buffering or
+#: parsing the full body — including absent, false or lying
+#: Content-Length and chunked transfer (a declared length alone is
+#: never trusted). The dashboard posts plain forms (no file inputs),
+#: so ``application/x-www-form-urlencoded`` bodies parse without any
+#: extra dependency; no multipart/upload path is added.
+FORM_BODY_MAX_BYTES = 16 * 1024
+#: Bounded field policy for those forms: at most this many pairs,
+#: keys/values length-capped, duplicates rejected, strict UTF-8 and
+#: strict percent-escapes (a ``%`` not followed by two hex digits is
+#: malformed). Violations fail closed with a fixed 400; oversize
+#: fails closed with a fixed 413. No input is ever reflected.
+FORM_MAX_FIELDS = 50
+FORM_MAX_KEY_CHARS = 128
+FORM_MAX_VALUE_CHARS = 4096
 
-    The dashboard posts plain forms (no file inputs), so
-    ``application/x-www-form-urlencoded`` bodies are parsed without
-    any extra dependency. Other content types, undecodable bytes or
-    malformed pairs yield no fields and fail closed downstream —
-    never an exception from a missing multipart parser.
+_HEX_DIGITS = frozenset("0123456789ABCDEFabcdef")
+
+
+async def _read_bounded_form(request: Request) -> tuple[dict[str, str], str]:
+    """Stream one urlencoded form under the documented byte cap.
+
+    Returns ``(fields, status)`` with status ``"ok"``, ``"too_large"``
+    or ``"malformed"``. Stops consuming the receive channel as soon as
+    the streamed total exceeds the cap, so oversized remainders never
+    enter the app buffer; declared Content-Length alone is never
+    trusted. Malformed covers wrong content type, undecodable bytes,
+    malformed pairs, duplicate keys and bound violations — callers
+    treat it as empty fields and continue to the normal CSRF check
+    (bad body plus bad header stays a safe 403), while ``"too_large"``
+    answers a fixed 413.
     """
+    from urllib.parse import unquote_plus
+
     content_type = request.headers.get("content-type", "").split(";")[0].strip().lower()
     if content_type != "application/x-www-form-urlencoded":
-        return {}
+        return {}, "malformed"
+    total = 0
+    chunks: list[bytes] = []
+    async for chunk in request.stream():
+        total += len(chunk)
+        if total > FORM_BODY_MAX_BYTES:
+            # Over the cap: stop reading here; the remaining chunks
+            # are never consumed into the app buffer.
+            return {}, "too_large"
+        if chunk:
+            chunks.append(chunk)
+    raw = b"".join(chunks)
     try:
-        text = body.decode("utf-8")
+        text = raw.decode("utf-8")
     except UnicodeDecodeError:
-        return {}
+        return {}, "malformed"
+    if not text:
+        return {}, "ok"
+    pairs = text.split("&")
+    if len(pairs) > FORM_MAX_FIELDS:
+        return {}, "malformed"
     fields: dict[str, str] = {}
-    try:
-        pairs = parse_qsl(text, keep_blank_values=True)
-    except (ValueError, TypeError):
-        return {}
-    for key, value in pairs:
-        fields.setdefault(key, value)
-    return fields
+    for pair in pairs:
+        if "=" in pair:
+            raw_key, raw_value = pair.split("=", 1)
+        else:
+            raw_key, raw_value = pair, ""
+        for segment in (raw_key, raw_value):
+            index = 0
+            while True:
+                mark = segment.find("%", index)
+                if mark == -1:
+                    break
+                if len(segment) < mark + 3 or (
+                    segment[mark + 1] not in _HEX_DIGITS or segment[mark + 2] not in _HEX_DIGITS
+                ):
+                    return {}, "malformed"
+                index = mark + 3
+        try:
+            key = unquote_plus(raw_key, encoding="utf-8", errors="strict")
+            value = unquote_plus(raw_value, encoding="utf-8", errors="strict")
+        except (UnicodeDecodeError, ValueError):
+            return {}, "malformed"
+        if len(key) > FORM_MAX_KEY_CHARS or len(value) > FORM_MAX_VALUE_CHARS:
+            return {}, "malformed"
+        if key in fields:
+            # Unambiguous duplicate policy: repeated keys reject
+            # instead of silently keeping first or last.
+            return {}, "malformed"
+        fields[key] = value
+    return fields, "ok"
 
 
 def _valid_csrf_field(presented: object, expected: object) -> bool:
@@ -1929,7 +2008,14 @@ async def settings_ip_display_update(request: Request):
 
     request_id = request.state.request_id
     header_ok = require_csrf(request, session, request_id) is None
-    body = _form_fields(request, await request.body())
+    # Auth first, then the streamed bounded body: oversize rejects with
+    # a fixed 413 before buffering or parsing; malformed behaves like
+    # an empty form so a bad body plus a bad token stays a safe 403.
+    body, form_status = await _read_bounded_form(request)
+    if form_status == "too_large":
+        with read_store(request) as conn:
+            context = _settings_context(request, conn, "error.form_too_large")
+        return templates.TemplateResponse(request, "pages/settings.html", context, status_code=413)
     field_token = body.get("csrf_token")
     if not header_ok and not _valid_csrf_field(field_token, session.csrf_token):
         return _error_page(request, "error.csrf_required", 403)
@@ -1946,6 +2032,15 @@ async def settings_ip_display_update(request: Request):
         with read_store(request) as conn:
             context = _settings_context(request, conn, "error.bad_params")
         return templates.TemplateResponse(request, "pages/settings.html", context, status_code=400)
+    # Validate the return state BEFORE writing: only the allowlisted
+    # window/filter/TZ set survives into the redirect, and malformed
+    # state rejects without copying any raw query value. The path is
+    # fixed (never from input), so only safe local targets arise.
+    nav_params, nav_error = _parse_view_params(request, datetime.now(UTC))
+    if nav_error is not None:
+        with read_store(request) as conn:
+            context = _settings_context(request, conn, "error.bad_params")
+        return templates.TemplateResponse(request, "pages/settings.html", context, status_code=400)
     from app.db.database import writer_transaction
 
     try:
@@ -1956,8 +2051,21 @@ async def settings_ip_display_update(request: Request):
         with read_store(request) as conn:
             context = _settings_context(request, conn, "error.bad_params")
         return templates.TemplateResponse(request, "pages/settings.html", context, status_code=400)
-    redirect_query = ("?" + str(request.url.query)) if request.url.query else ""
-    return RedirectResponse(url=f"/settings{redirect_query}", status_code=303)
+    # Return target rebuilt from the validated state above — never from
+    # raw query text — so only safe local filter/window/TZ state
+    # survives and unknown values cannot leak into the redirect.
+    return_target: dict[str, object] = {
+        "range": nav_params["range"],
+        "from": nav_params["window"].time_from.isoformat(),
+        "to": nav_params["window"].time_to.isoformat(),
+        "tz": nav_params["tz_name"],
+    }
+    if nav_params["site"] is not None:
+        return_target["site"] = nav_params["site"]
+    if nav_params["source"] is not None:
+        return_target["source"] = nav_params["source"]
+    return_target.update(_matcher_query(nav_params))
+    return RedirectResponse(url="/settings?" + urlencode(return_target), status_code=303)
 
 
 @router.post("/requests/ip-search", response_class=HTMLResponse)
@@ -1968,8 +2076,13 @@ async def requests_ip_search(request: Request):
     transiently (IPv4/IPv6, bounded body, exact source spelling kept
     for the legacy HMAC input) and translated server-side to the safe
     stable pseudonym: the 303 redirect carries only the pseudonym as
-    the normal ``search`` filter, preserving the current window and
-    every other matcher. The entered address is never echoed into
+    the shared exact ``client`` selector — never the general text
+    search (which intentionally also matches path, User-Agent and
+    referrer) and never the original address. The current window,
+    every other matcher, the independent text search, the limit, the
+    timezone and the source survive; the page offset resets
+    deliberately for the new search while the allowlisted explorer
+    sort is preserved. The entered address is never echoed into
     HTML, attributes, errors, redirects, URLs, history, bookmarks,
     logs or model state, and the form re-renders empty. Invalid input
     re-renders with a fixed localized error. Bearer [REDACTED] never
@@ -1982,7 +2095,12 @@ async def requests_ip_search(request: Request):
 
     request_id = request.state.request_id
     header_ok = require_csrf(request, session, request_id) is None
-    body = _form_fields(request, await request.body())
+    # Auth first, then the streamed bounded body: oversize rejects with
+    # a fixed 413 before buffering or parsing; malformed behaves like
+    # an empty form so a bad body plus a bad token stays a safe 403.
+    body, form_status = await _read_bounded_form(request)
+    if form_status == "too_large":
+        return await _requests_ip_search_error(request, "error.form_too_large", status=413)
     field_token = body.get("csrf_token")
     if not header_ok and not _valid_csrf_field(field_token, session.csrf_token):
         return _error_page(request, "error.csrf_required", 403)
@@ -2004,12 +2122,18 @@ async def requests_ip_search(request: Request):
 
     pseudonym = pseudonymize_client(candidate, hmac_key)
     # Rebuild the redirect from the posted action query: same window,
-    # site, source, timezone and matchers survive; only the text search
-    # becomes the safe pseudonym (the raw address never leaves the POST
-    # body, which is discarded after this translation).
+    # site, source, timezone, matchers (including an independent text
+    # search) and limit survive; only the exact ``client`` selector
+    # becomes the safe pseudonym (the raw address never leaves the
+    # POST body, which is discarded after this translation). The page
+    # offset resets deliberately for the new search while the
+    # allowlisted explorer sort is preserved.
     params, error = _parse_view_params(request, datetime.now(UTC))
     if error is not None:
         return _error_page(request, error, 400)
+    sort, sort_error = _parse_sort(request.query_params, EXPLORER_SORTS, "newest")
+    if sort_error is not None:
+        return _error_page(request, sort_error, 400)
     target: dict[str, object] = {
         "site": params["site"] or "",
         "range": params["range"],
@@ -2020,22 +2144,25 @@ async def requests_ip_search(request: Request):
     if params["source"] is not None:
         target["source"] = params["source"]
     for key in MATCHER_KEYS:
-        if key == "search":
+        if key == "client":
             continue
         value = params["matchers"].get(key)
         if value is not None:
             target[key] = _matcher_url_value(value)
-    target["search"] = pseudonym
+    target["client"] = pseudonym
     target["limit"] = params["limit"]
     target["offset"] = 0
+    target["sort"] = sort
     return RedirectResponse(url="/requests?" + urlencode(target), status_code=303)
 
 
-async def _requests_ip_search_error(request: Request, message_key: str) -> HTMLResponse:
-    """Re-render the Requests page with a fixed search error (400).
+async def _requests_ip_search_error(
+    request: Request, message_key: str, status: int = 400
+) -> HTMLResponse:
+    """Re-render the Requests page with a fixed search error.
 
     The entered address is never reflected: the message carries no
-    input value and the form renders empty.
+    input value and the form renders empty. Oversized bodies use 413.
     """
     params, error = _parse_view_params(request, datetime.now(UTC))
     if error is not None:
@@ -2057,7 +2184,7 @@ async def _requests_ip_search_error(request: Request, message_key: str) -> HTMLR
             request, context_error, 400 if context_error != "error.unknown_site" else 404
         )
     context["request"] = request
-    return templates.TemplateResponse(request, "pages/requests.html", context, status_code=400)
+    return templates.TemplateResponse(request, "pages/requests.html", context, status_code=status)
 
 
 @router.get("/data-sources", response_class=HTMLResponse)

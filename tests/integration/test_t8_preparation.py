@@ -214,6 +214,7 @@ def test_exact_replay_preserves_valid_values():
         "referer_host": "Example.ORG",
         "traffic": None,
         "search": None,
+        "client": None,
         "bot": None,
         "category": None,
         "provider": None,
