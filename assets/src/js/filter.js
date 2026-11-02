@@ -61,16 +61,27 @@
   // state. The target renders server-side on full loads but lives
   // outside #page-content, so a successful htmx Apply would leave it
   // stale (missing the just-applied search, client or page-local
-  // filters). Only a 2xx fragment response updates it, from the
-  // server-issued HX-Push-Url (validated canonical state, never raw
-  // input): failures keep the last displayed state untouched, and the
-  // stored URL can carry no CSRF token or raw address because the
-  // canonical builder never emits them.
-  document.addEventListener("htmx:afterRequest", function (event) {
+  // filters). Only an ACCEPTED (actually swapped) 2xx fragment
+  // response updates it, from the server-issued HX-Push-Url
+  // (validated canonical state, never raw input): failures keep the
+  // last displayed state untouched, and so does a stale automatic
+  // response that refresh.js cancelled before the swap (a discarded
+  // 200 still fires htmx:afterRequest, so that event must never move
+  // the target — hence htmx:afterSwap plus the shared stale marker).
+  // The stored URL can carry no CSRF token or raw address because
+  // the canonical builder never emits them.
+  document.addEventListener("htmx:afterSwap", function (event) {
     var target = targetOf(event);
     if (!target || target.id !== "page-content") return;
     var xhr = event.detail && event.detail.xhr ? event.detail.xhr : null;
     if (!xhr || xhr.status < 200 || xhr.status >= 300) return;
+    // refresh.js marks a cancelled stale automatic response on its
+    // own record ("_logcarveSentState".discarded) with the
+    // "_logcarveStaleCancelled" boolean as backup: either marker
+    // means this 200 was discarded, not displayed.
+    if (xhr._logcarveStaleCancelled) return;
+    var rec = xhr._logcarveSentState;
+    if (rec && rec.discarded) return;
     var push = null;
     try {
       push = xhr.getResponseHeader("HX-Push-Url");

@@ -155,6 +155,14 @@ def test_country_unknown_breakdown_and_drilldown(page, c5_base):
     expect(page.locator("body")).to_contain_text("Unknown")
     expect(page.locator("body")).to_contain_text("IP Geolocation by DB-IP")
     assert page.locator('a[href="https://db-ip.com"]').count() >= 1
+    # Local country chart alongside the accessible table.
+    expect(page.locator("#overview-countries-chart")).to_be_visible(timeout=10000)
+    assert page.locator("#overview-countries-chart").evaluate("el => el.width > 0 && el.height > 0")
+    # These rows were stored while no database could be read: the
+    # copy names that past fact and never claims the server has no
+    # database configured.
+    expect(page.locator("body")).to_contain_text("stored while no country database could be read")
+    assert "No country database is configured" not in page.content()
     drilldown = page.locator('section:has(#country-h) a[href*="country="]')
     assert drilldown.count() >= 1
     href = drilldown.first.get_attribute("href")
@@ -222,6 +230,32 @@ def test_country_saved_view_and_ask_carriage(page, c5_base):
     # The Ask page carries the country filter into the tool scope.
     page.goto(f"{base}/ask?{STATE}&country=UNKNOWN")
     assert page.locator('[data-country="UNKNOWN"]').count() >= 1
+
+    assert failed == [], failed
+    assert outside == [], outside
+    assert errors == [], errors
+
+
+def test_country_credit_on_every_filtered_page(page, c5_base):
+    errors, failed, outside = _watch(page)
+    base = c5_base
+    _login(page, base)
+
+    # Every page with country-derived results or filters carries the
+    # single shared DB-IP credit anchor.
+    for path in (
+        "/performance",
+        "/seo",
+        "/referrers",
+        "/journeys",
+        "/security",
+        "/crawlers",
+        "/errors",
+        "/comparison",
+    ):
+        page.goto(f"{base}{path}?{STATE}")
+        expect(page.locator('a[href="https://db-ip.com"]')).to_have_count(1, timeout=10000)
+        expect(page.locator("body")).to_contain_text("IP Geolocation by DB-IP")
 
     assert failed == [], failed
     assert outside == [], outside
