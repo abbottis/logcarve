@@ -1,0 +1,8 @@
+blank_issues_enabled: false
+contact_links:
+  - name: Report a vulnerability privately
+    url: https://github.com/abbottis/logcarve/security/advisories/new
+    about: Suspected security issues only. Do not open a public issue for vulnerabilities.
+  - name: Documentation and demo help
+    url: https://github.com/abbottis/logcarve/blob/feature/logwerk-parity-ready-2026-11-02/docs/demo.md
+    about: Start with the demo and deployment guides before opening an issue.

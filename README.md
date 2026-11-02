@@ -9,6 +9,8 @@ Self-hosted web access-log analytics: reproducible traffic, crawler, SEO and sec
 [![Built with Muse Code](https://img.shields.io/badge/Built_with-Muse_Code-purple?style=flat-square)](https://dev.meta.ai/docs/muse-code/interactive)
 [![Preview status](https://img.shields.io/badge/Status-Preview-orange?style=flat-square)](docs/verification.md)
 
+![LogCarve social preview: self-hosted log analytics dashboard showing traffic, SEO and security API insights](.github/assets/logcarve-social-preview.png)
+
 ## What it is
 
 LogCarve imports NCSA Combined access logs (Nginx and Apache), including measured-timing presets, gzip archives and bounded administrator custom formats, normalizes them locally into SQLite, and serves one deterministic analytics layer to a browser dashboard, an authenticated read-only REST API and a small stdlib client. The dashboard, the API and the client share the same numbers and work with chat disabled, no model key and no Internet; the optional server-side Meta assistant uses that same layer when enabled.
@@ -131,6 +133,7 @@ An internal Meta assistant is available server-side when explicitly enabled with
 - [Acceptance criteria](docs/acceptance-criteria.md), [verification history](docs/verification.md), [acceptance checklist](docs/acceptance-checklist.md)
 - [Architecture](docs/architecture.md), [MVP scope](docs/mvp.md), [security](docs/security.md), [privacy and data egress](docs/privacy-and-security.md)
 - [Contribution provenance](docs/hackathon-contributions.md), [third-party notices](THIRD_PARTY_NOTICES.md)
+- [Contributing](CONTRIBUTING.md), [security reporting](SECURITY.md)
 
 ## Status
 
