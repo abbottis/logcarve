@@ -426,6 +426,56 @@ def insert_events(conn: sqlite3.Connection, rows: list[tuple]) -> int:
     return conn.total_changes - before
 
 
+#: Stored-vs-consumed core columns compared by the replay guard, in
+#: order. The tuple covers the immutable event identity (timestamps,
+#: request line, status, size, sanitized referrer/UA hosts and HMAC
+#: pseudonym); enrichment metadata is excluded on purpose.
+REPLAY_CORE_COLUMNS = (
+    "ts_utc",
+    "method",
+    "path",
+    "status",
+    "bytes",
+    "referer_host",
+    "user_agent",
+    "client_pseudonym",
+    "duration_ms",
+)
+
+
+def find_core_mismatches(
+    conn: sqlite3.Connection,
+    *,
+    source_id: str,
+    file_fingerprint: str,
+    cores: dict[int, tuple],
+) -> set[int]:
+    """Offsets whose stored core differs from the consumed core.
+
+    ``cores`` maps a record byte offset to the consumed core tuple in
+    :data:`REPLAY_CORE_COLUMNS` order. Offsets with no stored row (new
+    rows) are never reported: only a replayed offset whose stored
+    event no longer matches the consumed bytes is a mismatch. Used by
+    batch import and follow before attaching an encrypted original, so
+    a source mutation between fingerprinting and reading cannot bind a
+    mismatched original to an existing event.
+    """
+    if not cores:
+        return set()
+    columns = ", ".join(REPLAY_CORE_COLUMNS)
+    placeholders = ", ".join(["?"] * len(cores))
+    mismatched: set[int] = set()
+    for stored in conn.execute(
+        f"SELECT byte_offset, {columns} FROM requests WHERE source_id = ?"
+        f" AND file_fingerprint = ? AND byte_offset IN ({placeholders})",
+        (source_id, file_fingerprint, *cores.keys()),
+    ).fetchall():
+        offset = int(stored[0])
+        if tuple(stored[1:]) != tuple(cores[offset]):
+            mismatched.add(offset)
+    return mismatched
+
+
 def count_events(conn: sqlite3.Connection, *, source_id: str | None = None) -> int:
     if source_id is None:
         return conn.execute("SELECT COUNT(*) FROM requests").fetchone()[0]

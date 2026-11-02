@@ -158,6 +158,17 @@ class ImportResult:
     consumed_sha256: str | None = None
     rejected_by_reason: dict[str, int] = field(default_factory=dict)
     originals_captured: int = 0
+    originals_skipped_mismatch: int = 0
+
+
+#: Indexes of the replay-guard core inside one :func:`_event_row` batch
+#: tuple, in :data:`repositories.REPLAY_CORE_COLUMNS` order.
+_BATCH_CORE_INDEXES = (6, 7, 8, 9, 10, 11, 12, 13, 14)
+
+
+def _batch_core(row: tuple) -> tuple:
+    """Consumed core tuple of one batch row for the replay guard."""
+    return tuple(row[index] for index in _BATCH_CORE_INDEXES)
 
 
 def _check_source_binding(db_path: Path, *, source_id: str, site_id: str) -> None:
@@ -407,8 +418,29 @@ def run_import(
         )
 
     def _flush_batch(conn) -> None:
-        """Insert one batch and store captured originals encrypted (same transaction)."""
-        nonlocal inserted, originals_captured
+        """Insert one batch and store captured originals encrypted (same transaction).
+
+        A replayed offset (an event row already stored under this
+        identity) gains an encrypted original only when the stored
+        core/HMAC still matches the consumed record. A source mutation
+        between fingerprinting and reading can otherwise attach a
+        mismatched original to the existing row; such inconsistent
+        associations are skipped (counted, never stored, no plaintext
+        in diagnostics) while legitimate new-row and matching-replay
+        captures proceed.
+        """
+        nonlocal inserted, originals_captured, private_skipped_mismatch
+        # Replayed offsets whose stored core no longer matches the
+        # consumed record (same writer transaction): attaching an
+        # original to those rows is refused below.
+        mismatched: set[int] = set()
+        if capture_originals and batch_private:
+            mismatched = repositories.find_core_mismatches(
+                conn,
+                source_id=source.source_id,
+                file_fingerprint=fingerprint,
+                cores={int(row[4]): _batch_core(row) for row in batch},
+            )
         inserted += repositories.insert_events(conn, batch)
         if capture_originals and batch_private and private_key is not None:
             placeholders = ",".join(["?"] * len(batch))
@@ -421,6 +453,13 @@ def run_import(
             for offset, captured in batch_private:
                 request_id = id_by_offset.get(offset)
                 if request_id is None:
+                    continue
+                if offset in mismatched:
+                    # The existing row predates a mutated read: keep
+                    # its stored core/HMAC and refuse the inconsistent
+                    # original. The T6 mismatch warning already flags
+                    # the content change; no plaintext is recorded.
+                    private_skipped_mismatch += 1
                     continue
                 aad = _private.build_aad(
                     site_id=site_id,
@@ -437,6 +476,7 @@ def run_import(
     stream_report = ImportReport(source_id=source.source_id, format_id=source.format_id)
     inserted = 0
     originals_captured = 0
+    private_skipped_mismatch = 0
     batch: list[tuple] = []
     batch_private: list[tuple[int, CapturedOriginal]] = []
     batch_index = 0
@@ -584,6 +624,7 @@ def run_import(
         consumed_sha256=consumed,
         rejected_by_reason=dict(stream_report.rejected_by_reason),
         originals_captured=originals_captured,
+        originals_skipped_mismatch=private_skipped_mismatch,
     )
 
 
