@@ -42,7 +42,7 @@
         <button id="nav-button" type="button" class="btn btn-ghost btn-square btn-sm lg:hidden" aria-expanded="false" aria-controls="side-nav" aria-label="{{ t("nav.menu") }}">
           {% include "icons/menu.svg" %}
         </button>
-        <a href="/" class="text-lg font-semibold">{{ t("app.name") }}</a>
+        <a href="/" class="brand-home inline-flex min-w-0 items-center" aria-label="{{ t("app.name") }}"><span class="sr-only">{{ t("app.name") }}</span>{% include "partials/brand_wordmark.html" %}</a>
         <div class="ms-auto flex items-center gap-1">
           <label class="sr-only" for="theme-select">{{ t("theme.choice") }}</label>
           <select id="theme-select" class="select select-bordered select-sm" data-theme-select>

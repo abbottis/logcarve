@@ -1,10 +1,13 @@
 {% extends "base.html" %}
 {% set bare = True %}
 {% block bare_content %}
+<div class="brand-hero mb-6 flex flex-col items-center gap-3 text-center">
+  {% include "partials/brand_wordmark.html" %}
+  <p class="text-sm text-base-content/70">{{ t("app.tagline") }}</p>
+</div>
 <div class="card bg-base-100 shadow">
   <div class="card-body">
-    <h1 class="card-title">{{ t("auth.login.title") }} — {{ t("app.name") }}</h1>
-    <p class="text-sm text-base-content/70">{{ t("app.tagline") }}</p>
+    <h1 class="card-title text-xl">{{ t("auth.login.title") }}</h1>
     <form data-login-form data-next="{{ next }}" method="post" action="/api/v1/admin/login" novalidate
       data-msg-generic="{{ t("auth.login.generic_error") }}"
       data-msg-rate-limited="{{ t("auth.login.rate_limited") }}"

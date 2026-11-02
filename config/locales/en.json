@@ -1,6 +1,6 @@
 {
   "app.name": "LogCarve",
-  "app.tagline": "Self-hosted access-log analytics",
+  "app.tagline": "Self-hosted log analytics",
   "nav.overview": "Overview",
   "nav.security": "Security",
   "nav.crawlers": "Crawlers",

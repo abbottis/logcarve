@@ -3019,3 +3019,52 @@ real MMDB pipeline ran (outside Contributor, independently PASS);
 live is schema 8, not schema 4. Earlier superseded entries above
 (NOT RUN / BLOCKED / pending coordinator rerun) are preserved as
 history.
+
+## Branding slice — 2026-11-02 (implementer-observed, feature branch)
+
+Bounded owner-authorized branding change on
+`feature/logwerk-parity-ready-2026-11-02` from clean `564fc8b`.
+Sole writer, exact Muse Spark 1.3 Contributor / medium /
+protections ON, no agents. No dependencies, settings, auth/API/DB/
+model logic, schema, fixture, rule or artwork changes; social
+preview PNG and README/GitHub settings untouched.
+
+Shared inline-SVG wordmark (`Log` in `currentColor` foreground,
+`Carve` in sky theme accent via external authored CSS only; text/
+tspan elements reusing the bundled Inter Variable font, explicit
+`viewBox 0 0 288 72` with intrinsic sizing, no embedded PNG/
+base64, no script/foreignObject, no `style` attributes, no remote
+URLs/fonts, no element IDs): new
+`app/web/templates/partials/brand_wordmark.html`, used by both
+the login hero (`app/web/templates/pages/login.html`: centred
+brand block above the form, wordmark `min(280px, 72vw)`, exact
+central-locale tagline below) and the authenticated header home
+link (`app/web/templates/base.html`: compact `160px` /
+`max-width 42vw`, same `href="/"`, accessible name `LogCarve`
+via `aria-label` + screen-reader text, SVG `aria-hidden`).
+`config/locales/en.json` `app.tagline` is now exactly
+`Self-hosted log analytics`. Login keeps a clear `Log in`
+heading and unchanged fields/autocomplete/actions/redirect/
+errors/rate-limit/CSRF flow. Dark renders white/slate `Log` +
+light-sky `Carve`; light renders dark/slate `Log` +
+contrast-safe sky-600 `Carve`. New focused repeatable scenario
+`tests/e2e/test_branding.py::test_login_and_header_wordmark`
+(light 1440 + dark 390: hero/home SVG bounds, exact tagline and
+home accessible name, login/navigation controls usable, no page
+overflow, no console errors, same-origin requests only).
+
+| Check | Result | Evidence |
+| --- | --- | --- |
+| Focused login/web integration | PASS | `test_web_hardening.py` + `test_web_overview.py` + `test_owner_ux_labels.py`: 31 passed; `test_web_corrections.py` + `test_web_oob_notice.py`: 17 passed (project `.venv`, synthetic fixtures) |
+| Locale coverage after tagline edit | PASS | `test_parity_t4c_web.py` locale trio (keys cover strings, placeholders, no language chooser): 3 passed |
+| Asset build + external guard | PASS | `npm run build` (vendor + js + Tailwind CSS) then `npm run check:external`: `no external references in served assets/templates`; built `app/web/static/app.css` contains the brand classes |
+| Ruff on new test | PASS | `ruff check` All checks passed; `ruff format --check` already formatted |
+| Server-rendered markup probe | PASS | `/login` 200: one `brand-hero`, one inline SVG, zero `<img>`, exact tagline present, old tagline absent, zero `style="`; seeded dashboard 200: one `brand-home` home link `href="/"`, `aria-label="LogCarve"`, theme/logout/nav controls intact |
+| Focused branding E2E | BLOCKED | `tests/e2e/test_branding.py` (and pre-existing `tests/e2e/test_dashboard.py`, same run) cannot launch Chromium inside this shell sandbox: `bootstrap_check_in ... Permission denied (1100)` / `TargetClosedError` at browser launch, before any app code runs. Sandbox and Chromium protections left ON per instructions; no retry loop. Root runs the selected `test_branding.py` node once after freeze |
+| Full 1270-test suite, Docker image build/activation | NOT RUN | Coordinator-owned (root checks actual built image); no success claimed beyond the focused evidence above |
+
+Maps to UI-01 (central `en` tagline, exact wording), UI-02
+(login + header navigation intact, same home-link behavior) and
+UI-03 (theme/narrow behavior implemented; final browser
+confirmation pending root run, recorded BLOCKED above, not
+claimed).

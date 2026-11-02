@@ -79,6 +79,38 @@
   font-variant-numeric: tabular-nums;
 }
 
+/* Brand wordmark: reusable inline SVG ("Log" in the surrounding
+   foreground via currentColor, "Carve" in the sky theme accent).
+   Sizing comes from the placement context so one partial serves the
+   prominent login hero and the compact header. Large bold wordmark
+   text keeps 3:1 contrast in both themes (sky-600 on light,
+   sky-400 on dark). */
+.brand-logo {
+  display: block;
+  height: auto;
+}
+.brand-logo text {
+  font-family: "Inter Variable", ui-sans-serif, system-ui, sans-serif;
+  font-weight: 800;
+  letter-spacing: -0.02em;
+}
+.brand-logo .brand-log {
+  fill: currentColor;
+}
+.brand-logo .brand-carve {
+  fill: var(--color-sky-600);
+}
+[data-theme="dark"] .brand-logo .brand-carve {
+  fill: var(--color-sky-400);
+}
+.brand-hero .brand-logo {
+  width: min(280px, 72vw);
+}
+.brand-home .brand-logo {
+  width: 160px;
+  max-width: 42vw;
+}
+
 /* Charts keep a readable minimum height; their data tables remain the
    primary content for assistive technology. */
 .chart-frame {
