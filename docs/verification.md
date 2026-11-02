@@ -2735,3 +2735,65 @@ tokens/real logs).
 | New `tests/e2e/test_parity_t4c.py` + fixed `tests/e2e/test_parity_t4b2.py` | BLOCKED (environmental) | Both collect cleanly; Chromium fails at launch in this shell sandbox (`TargetClosedError`, EPERM/kill — identical for pre-existing T4a/T4b1 e2e, browsers installed at `artifacts/playwright-browsers`, browser sandbox kept ON, no weakening); coordinator executes `uv run --locked pytest tests/e2e/test_parity_t4c.py tests/e2e/test_parity_t4b2.py -q` (T4c: actual Apply-kept journey state, Berlin instants, security labels, bookmark roundtrip, previous comparison chart/table, refresh opt-in toggle, Help, 1440/390 both themes, keyboard focus, no external requests/console errors; T4b2: same flow with 12-accepted fixture assert) |
 | Full maintained E2E | BLOCKED (environmental) | Same sandbox launch block; same coordinator command covers `tests/e2e` |
 | Follow/real-GeoIP/native-Linux/model-checks/owner-acceptance | NOT RUN | Not implemented or claimed; stopping for independent review |
+
+## 2026-11-02 — Parity T4c independent-review corrections (Muse-only run)
+
+Owner-authorized bounded T4c corrections ONLY (no T5a), after the
+frozen independent review `artifacts/task-inputs/parity-t4c-independent-review.txt`
+plus `parity-t4c-warm-review.txt` as repro data (not authorization).
+Same protections: exact model `muse-spark-1.3-contributor` / medium /
+Contributor ON, sole writer, no subagents/new approval loop, current
+public/synthetic workspace only, no parent private files/keys/logs/
+history/Docker/product/provider calls/allowance resets/push/main/
+deployment. No UI import, no translations; all commits, 120-row
+fixtures, 77 rules, core HMAC/auth/usage preserved; no T5a claim or
+paid call. All six confirmed findings closed with reproductions:
+
+1. Save-current replays the displayed canonical validated state
+(global client + page-local filters): `filter.js` updates the
+`#save-view-target` hidden input from the server-issued `HX-Push-Url`
+only on 2xx `#page-content` responses; failures retain the last
+displayed state; canonical builder still emits no CSRF/raw-IP.
+2. Comparison previous/custom baselines survive `#filter-bar`
+serialization/Apply/native-GET/htmx/HX-Push/refresh via canonical
+hidden baseline state; absent baseline still renders the explicit
+choice with no default/widening; explicit controls retained.
+3. Shared `_utc_input` UTC formatter: offset-free valid
+`datetime-local` values with dividing steps, minute-only form kept
+where exact, nonzero seconds/microseconds retained (1us incl.
++/-offset equivalent instants); unchanged global Apply no longer
+floors fractional/seconds evidence windows; URLs/API stay canonical
+aware UTC; backend 1us/gap semantics untouched.
+4. Refresh shows central ON/OFF state immediately on check/uncheck,
+re-reads the last successfully applied state via GET-only fragment
+requests, pauses (honest central paused note) on unapplied drafts —
+never sending them — and stays silent-paused while hidden/modal/
+focused; no hardcoded English fallback (server-rendered central
+attributes, initial-text fallback); OFF default, finite intervals,
+all selectors/baselines preserved, no stale private-IP DOM.
+5. Saved-view update is now a real owner-only UI control per owned
+view (prefilled validated target, CSRF, per-user ownership, human
+labels); templates still create/rename/delete.
+6. Saved-view path ids bound to positive signed SQLite 64-bit
+(`_checked_view_id`) before DB binding for rename/update/delete:
+max-boundary/zero/negative/overflow/overlong-digit/non-numeric ids
+answer the fixed missing-view 404 with no exception/path/SQL text
+and no DB mutation; unauthorized/CSRF/foreign boundaries and the
+16 KiB body bound kept; no blanket catches; `read_store`
+type-discrimination untouched.
+
+One pre-existing assertion legitimately evolved (not weakened):
+`test_preset_window_prefills_normalized_values` now accepts valid
+offset-free seconds/fractional prefills for live `now`-anchored
+presets (the mandated no-flooring contract); the sibling minute-exact
+custom-window assertions still pin the minute-only form.
+
+| Check | Result | Evidence |
+| --- | --- | --- |
+| `tests/integration/test_parity_t4c_web.py` + `test_web_corrections.py` | PASS | 33 passed in T4c file (25 prior + 8 new: formatter precision incl. 1us and offset-equivalent instants, fractional global Apply round-trip, valid UTC baseline controls, baseline survival through partial push + hidden state for previous/custom with no-baseline honesty, save-target canonical header + replay, UI update form + retained filters + hostile 400, id-bound units + 3x6 HTTP 404 probes with fixed message/no-leak/no-mutation + preserved 403 gate, central refresh messages + no hardcoded English in `refresh.js`); corrections-file preset assertion evolved for the no-flooring contract |
+| `tests/unit tests/integration` clean AND conflicting (`AI_ENABLED=true LLM_WARN_AT_USD=999`) | PASS | 1061 passed, 2 skipped (pre-existing live-loopback skips) in each configuration, actual exit statuses observed (`--junitxml` run, no pipe masking) |
+| `ruff check .` + `ruff format --check .` + `uv lock --check --offline` | PASS | All checks passed; 203 files already formatted; 42 packages resolved, no manifest/lock delta |
+| `npm run build` + `node scripts/check_no_external.mjs` + `node --check` | PASS | Vendor/js/css rebuilt; no external references in served assets/templates; served `app/web/static/js/*` remains gitignored build output; tracked `app.css` byte-identical after rebuild (no new classes) |
+| `tests/e2e/test_parity_t4c.py` (3 new: real Apply→Save→Open incl. failure-retained state, baseline Apply + true `input.value` for both modes, fake-clock refresh past 30s asserting URLs/methods/default/dirty+hidden+modal+focus pause and resume; prior refresh-toggle assertion kept, not relaxed) | BLOCKED (environmental) | Collects cleanly (6 tests); Chromium fails at launch in this shell sandbox (`TargetClosedError`, Mach-port `Permission denied`, kill EPERM — identical to the pre-existing T4a/T4b1/T4c block, browser sandbox kept ON, recorded once, no retry/weakening); coordinator runs `uv run --locked pytest tests/e2e/test_parity_t4c.py -q` outside the sandbox |
+| Prior PASS boundaries | PASS | All 11 bounded reports `<=1600`/trusted-client, host-only referrer URL groups with paths withheld, exact-IP search/private modes/chunk body cap, journey Apply/TZ/microduration/semantic SQL, privacy/model-budget scope — covered by the unchanged green suites above |
+| T5a, release, owner acceptance | NOT RUN | Not implemented or claimed; independent review of these corrections stays pending |

@@ -232,6 +232,197 @@ def test_saved_views_bookmark_flow(page, c4_base):
     assert errors == [], errors
 
 
+def test_save_current_replays_applied_state(page, c4_base):
+    errors, failed, outside = _watch(page)
+    base = c4_base
+    _login(page, base)
+
+    # Apply a search through the real htmx filter bar, then read the
+    # Save-current hidden target: it must carry the applied state.
+    page.goto(f"{base}/journeys?{STATE}")
+    page.fill("#f-search", "/login")
+    page.click("#filter-bar button[type=submit]")
+    page.wait_for_function(
+        "() => (document.querySelector('#save-view-target') || {}).value "
+        "&& document.querySelector('#save-view-target').value.includes('search=')",
+        timeout=10000,
+    )
+    target = page.evaluate("() => document.querySelector('#save-view-target').value")
+    assert "search=%2Flogin" in target
+    assert "csrf_token" not in target and "raw_ip" not in target
+    # A failed Apply keeps the last displayed state, never the draft.
+    page.fill("#f-from", "2026-10-28T00:00")
+    page.fill("#f-to", "2026-10-27T00:00")
+    page.click("#filter-bar button[type=submit]")
+    expect(page.locator("[data-filter-error]")).to_be_visible(timeout=10000)
+    assert page.evaluate("() => document.querySelector('#save-view-target').value") == target
+    # Save the good state and open it: the stored view replays it.
+    page.goto(f"{base}/journeys?{STATE}")
+    page.fill("#f-search", "/login")
+    page.click("#filter-bar button[type=submit]")
+    page.wait_for_function(
+        "() => document.querySelector('#save-view-target').value.includes('search=')",
+        timeout=10000,
+    )
+    page.fill("#save-view-name", "Applied watch")
+    with page.expect_navigation():
+        page.locator("form[data-save-current] button[type=submit]").click()
+    assert "/saved-views" in page.url
+    expect(page.locator("body")).to_contain_text("Applied watch")
+    with page.expect_navigation():
+        page.locator('a:has-text("/journeys?")').first.click()
+    assert "search=%2Flogin" in page.url
+
+    assert failed == [], failed
+    assert outside == [], outside
+    assert errors == [], errors
+
+
+def test_comparison_baseline_survives_apply_and_controls(page, c4_base):
+    errors, failed, outside = _watch(page)
+    base = c4_base
+    _login(page, base)
+
+    # Custom baseline controls show valid UTC values, not blank inputs.
+    page.goto(
+        f"{base}/comparison?{STATE}"
+        "&baseline_from=2026-10-26T00%3A00%3A00%2B00%3A00"
+        "&baseline_to=2026-10-27T00%3A00%3A00%2B00%3A00"
+    )
+    expect(page.locator("#compare-metrics-chart")).to_be_visible(timeout=10000)
+    assert page.input_value("#c-bfrom") == "2026-10-26T00:00"
+    assert page.input_value("#c-bto") == "2026-10-27T00:00"
+    # An actual filter-bar Apply keeps the custom baseline in the URL.
+    page.click("#filter-bar button[type=submit]")
+    page.wait_for_function("() => window.location.href.includes('baseline_from=')", timeout=10000)
+    assert "baseline_from=2026-10-26" in page.url
+    assert "baseline_to=2026-10-27" in page.url
+    expect(page.locator("#compare-metrics-chart")).to_be_visible(timeout=10000)
+    # Previous mode survives the same serialization round-trip.
+    page.goto(f"{base}/comparison?{STATE}&baseline=previous")
+    expect(page.locator("#compare-metrics-chart")).to_be_visible(timeout=10000)
+    assert page.input_value("#c-bfrom") != ""
+    assert page.input_value("#c-bto") != ""
+    page.click("#filter-bar button[type=submit]")
+    page.wait_for_function(
+        "() => window.location.href.includes('baseline=previous')", timeout=10000
+    )
+    assert "baseline=previous" in page.url
+
+    assert failed == [], failed
+    assert outside == [], outside
+    assert errors == [], errors
+
+
+def test_refresh_clock_behavior(page, c4_base):
+    errors, failed, outside = _watch(page)
+    base = c4_base
+    _login(page, base)
+    page.clock.install()
+    try:
+        page.goto(f"{base}/journeys?{STATE}")
+        partials: list[str] = []
+        methods: list[str] = []
+        page.on(
+            "request",
+            lambda req: (
+                (
+                    partials.append(req.url),
+                    methods.append(req.method),
+                )
+                if "/partials/journeys" in req.url
+                else None
+            ),
+        )
+        toggle = page.locator("#refresh-toggle")
+        expect(toggle).not_to_be_checked()
+        expect(page.locator("body")).to_contain_text("Auto-refresh is off.")
+        page.select_option("#refresh-interval", "30")
+        # Checking shows the ON state immediately, before any tick.
+        toggle.check()
+        expect(page.locator("body")).to_contain_text("Auto-refresh is on;")
+        # Advancing past 30s re-reads with the applied state via GET.
+        page.clock.fast_forward(31000)
+        page.wait_for_timeout(500)
+        assert len(partials) >= 1, partials
+        assert set(methods) == {"GET"}, methods
+        assert all("site=default" in url for url in partials)
+        seen = len(partials)
+        # Draft edits pause the refresh: move focus away without Apply,
+        # then no request, an honest paused note, and the draft value
+        # never reaches the server.
+        page.fill("#f-search", "typed-but-unapplied")
+        page.locator("h1").click()
+        page.clock.fast_forward(31000)
+        page.wait_for_timeout(500)
+        assert len(partials) == seen, partials
+        expect(page.locator("body")).to_contain_text("paused while unsaved")
+        assert all("typed-but-unapplied" not in url for url in partials)
+        # Applying resumes with the ON state and the applied value.
+        page.click("#filter-bar button[type=submit]")
+        page.wait_for_function(
+            "() => window.location.href.includes('search=typed-but-unapplied')",
+            timeout=10000,
+        )
+        page.clock.fast_forward(31000)
+        page.wait_for_timeout(500)
+        assert len(partials) > seen, partials
+        assert "search=typed-but-unapplied" in partials[-1]
+        expect(page.locator("body")).to_contain_text("Auto-refresh is on;")
+        seen = len(partials)
+        # A focused input pauses; moving focus away from the unchanged
+        # form resumes.
+        page.locator("#f-search").focus()
+        page.clock.fast_forward(31000)
+        page.wait_for_timeout(500)
+        assert len(partials) == seen, partials
+        page.locator("h1").click()
+        page.clock.fast_forward(31000)
+        page.wait_for_timeout(500)
+        assert len(partials) > seen, partials
+        seen = len(partials)
+        # An open modal pauses; closing it resumes.
+        page.evaluate(
+            "() => { const d = document.createElement('dialog');"
+            " d.id = 't4c-probe-dialog'; d.setAttribute('open', '');"
+            " d.textContent = 'probe'; document.body.appendChild(d); }"
+        )
+        page.clock.fast_forward(31000)
+        page.wait_for_timeout(500)
+        assert len(partials) == seen, partials
+        page.evaluate("() => document.querySelector('#t4c-probe-dialog').remove()")
+        page.clock.fast_forward(31000)
+        page.wait_for_timeout(500)
+        assert len(partials) > seen, partials
+        seen = len(partials)
+        # A hidden tab pauses; becoming visible resumes.
+        page.evaluate(
+            "() => Object.defineProperty(document, 'hidden', {value: true, configurable: true})"
+        )
+        page.clock.fast_forward(31000)
+        page.wait_for_timeout(500)
+        assert len(partials) == seen, partials
+        page.evaluate(
+            "() => Object.defineProperty(document, 'hidden', {value: false, configurable: true})"
+        )
+        page.clock.fast_forward(31000)
+        page.wait_for_timeout(500)
+        assert len(partials) > seen, partials
+        # Unchecking stops the timer with the OFF state.
+        toggle.uncheck()
+        expect(page.locator("body")).to_contain_text("Auto-refresh is off.")
+        seen = len(partials)
+        page.clock.fast_forward(61000)
+        page.wait_for_timeout(500)
+        assert len(partials) == seen, partials
+    finally:
+        page.clock.resume()
+
+    assert failed == [], failed
+    assert outside == [], outside
+    assert errors == [], errors
+
+
 def test_comparison_refresh_help_and_layout(page, c4_base):
     errors, failed, outside = _watch(page)
     base = c4_base

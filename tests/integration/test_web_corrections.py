@@ -78,7 +78,12 @@ def test_preset_window_prefills_normalized_values(web):
     values = re.findall(r'type="datetime-local" value="([^"]*)"', html)
     assert len(values) == 2
     for value in values:
-        assert re.fullmatch(r"\d{4}-\d{2}-\d{2}T\d{2}:\d{2}", value), value
+        # T4c correction: the shared UTC formatter keeps the established
+        # minute-only form only when the instant is minute-exact; a
+        # live `now`-anchored preset legitimately carries seconds, which
+        # must survive instead of being floored. Either way the value
+        # stays offset-free and valid for datetime-local controls.
+        assert re.fullmatch(r"\d{4}-\d{2}-\d{2}T\d{2}:\d{2}(:\d{2}(\.\d{1,6})?)?", value), value
 
 
 def test_fragment_refreshes_observation_window(web):

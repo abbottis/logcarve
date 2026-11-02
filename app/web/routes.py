@@ -176,12 +176,16 @@ def _parse_view_params(request: Request, now: datetime, default_limit: int = 20)
         window = TimeWindow(time_from=time_from, time_to=time_to)
     except ValidationError:
         return None, "error.bad_params"
-    # datetime-local controls accept only `YYYY-MM-DDTHH:MM` without an
-    # offset; normalize the applied window into exactly that display
-    # form (explicitly UTC, as labelled) so custom values survive Apply.
+    # datetime-local controls take offset-free UTC values (explicitly
+    # UTC, as labelled): minute-exact windows keep the established
+    # minute form while seconds/microseconds survive Apply unchanged.
+    display_from, display_from_step = _utc_input(window.time_from)
+    display_to, display_to_step = _utc_input(window.time_to)
     display = {
-        "from": window.time_from.astimezone(UTC).strftime("%Y-%m-%dT%H:%M"),
-        "to": window.time_to.astimezone(UTC).strftime("%Y-%m-%dT%H:%M"),
+        "from": display_from,
+        "to": display_to,
+        "from_step": display_from_step,
+        "to_step": display_to_step,
     }
     matchers, error = _parse_matchers(q)
     if error is not None:
@@ -204,6 +208,8 @@ def _parse_view_params(request: Request, now: datetime, default_limit: int = 20)
         "window": window,
         "display_from": display["from"],
         "display_to": display["to"],
+        "display_from_step": display["from_step"],
+        "display_to_step": display["to_step"],
         "matchers": matchers,
         "limit": page["limit"],
         "offset": page["offset"],
@@ -564,6 +570,27 @@ def _format_bucket(iso_value: str, tz: ZoneInfo, bucket: str) -> str:
     if bucket == "hour":
         return moment.strftime("%Y-%m-%d %H:00")
     return moment.strftime("%Y-%m-%d")
+
+
+def _utc_input(moment: datetime) -> tuple[str, str]:
+    """Offset-free UTC ``(value, step)`` for a ``datetime-local`` control.
+
+    The applied window is always UTC (naive values are labelled UTC at
+    parse), so controls render the UTC instant without an offset suffix
+    (``+00:00`` is not a valid ``datetime-local`` value and renders
+    blank). Minute-exact instants keep the established ``YYYY-MM-DDTHH:MM``
+    form; nonzero seconds add ``:SS`` and nonzero microseconds add
+    ``.ffffff``, so an unchanged global Apply never floors a fractional
+    or seconds evidence window to minutes. The step always divides the
+    value (minute/second/microsecond precision), so native submits never
+    trip step validation on a server-issued value.
+    """
+    utc_moment = moment.astimezone(UTC) if moment.tzinfo is not None else moment.replace(tzinfo=UTC)
+    if utc_moment.microsecond:
+        return utc_moment.strftime("%Y-%m-%dT%H:%M:%S.%f"), "0.000001"
+    if utc_moment.second:
+        return utc_moment.strftime("%Y-%m-%dT%H:%M:%S"), "1"
+    return utc_moment.strftime("%Y-%m-%dT%H:%M"), "60"
 
 
 def _display_instant(iso_value: object, tz: ZoneInfo, tz_name: str) -> tuple[str, str]:
@@ -1130,6 +1157,8 @@ def _base_context(request: Request, params, site: str, sites, path: str, rules=N
         "oob_notice": False,
         "display_from": params["display_from"],
         "display_to": params["display_to"],
+        "display_from_step": params["display_from_step"],
+        "display_to_step": params["display_to_step"],
         "window_from": filt.window.time_from.isoformat(),
         "window_to": filt.window.time_to.isoformat(),
         "canonical_url": _canonical(path, params, site),
@@ -2896,6 +2925,35 @@ SAVED_VIEW_MAX_QUERY = 2000
 #: UTC window pair.
 COMPARISON_BASELINES = ("previous",)
 
+#: SQLite row ids are signed 64-bit. Saved-view path ids arrive as
+#: route text and must fit before any DB binding: an oversized value
+#: would otherwise raise ``OverflowError`` at bind time (a 500 with a
+#: driver message) instead of the fixed missing-view answer.
+SQLITE_MAX_ROW_ID = 2**63 - 1
+
+
+def _checked_view_id(raw: object) -> int | None:
+    """Positive signed-64-bit saved-view id, or None when invalid.
+
+    Digits only (ASCII, no sign, no whitespace surprises), within
+    ``1..2**63-1``. Zero, negatives, overflow, overlong digit strings
+    and non-numeric ids all return None so callers answer the fixed
+    missing-view page with no exception, no path/SQL text and no DB
+    mutation. Only narrow input validation lives here: storage errors
+    still surface through their own paths.
+    """
+    if not isinstance(raw, str):
+        return None
+    text = raw.strip()
+    if not text or not text.isascii() or not text.isdigit():
+        return None
+    if len(text) > len(str(SQLITE_MAX_ROW_ID)):
+        return None
+    value = int(text)
+    if not 1 <= value <= SQLITE_MAX_ROW_ID:
+        return None
+    return value
+
 
 def _synthetic_view_request(query_string: str) -> Request:
     """GET request shell carrying one stored/pasted query for validation.
@@ -3201,7 +3259,7 @@ async def saved_views_create(request: Request):
 
 
 @router.post("/saved-views/{view_id}/rename", response_class=HTMLResponse)
-async def saved_views_rename(request: Request, view_id: int):
+async def saved_views_rename(request: Request, view_id: str):
     """Rename one owned saved view; foreign ids stay invisible (404)."""
     from app.db import saved_views as view_store
     from app.db.database import writer_transaction
@@ -3214,17 +3272,20 @@ async def saved_views_rename(request: Request, view_id: int):
     if denied is not None:
         return denied
     assert session is not None
+    checked_id = _checked_view_id(view_id)
+    if checked_id is None:
+        return _error_page(request, "views.error_missing", 404)
     name, name_error = _validate_view_name(body.get("name"))
     if name_error is not None or name is None:
         return _saved_views_page(request, name_error or "views.error_name", status=400)
     with writer_transaction(request.app.state.db_path) as conn:
-        if not view_store.rename(conn, view_id, session.user_id, name):
+        if not view_store.rename(conn, checked_id, session.user_id, name):
             return _error_page(request, "views.error_missing", 404)
     return RedirectResponse(url="/saved-views", status_code=303)
 
 
 @router.post("/saved-views/{view_id}/update", response_class=HTMLResponse)
-async def saved_views_update(request: Request, view_id: int):
+async def saved_views_update(request: Request, view_id: str):
     """Re-point one owned saved view at a newly validated target."""
     from app.db import saved_views as view_store
     from app.db.database import writer_transaction
@@ -3237,6 +3298,9 @@ async def saved_views_update(request: Request, view_id: int):
     if denied is not None:
         return denied
     assert session is not None
+    checked_id = _checked_view_id(view_id)
+    if checked_id is None:
+        return _error_page(request, "views.error_missing", 404)
     target = body.get("target") if isinstance(body.get("target"), str) else ""
     assert isinstance(target, str)
     if not target.startswith("/") or target.startswith("//") or "\\" in target:
@@ -3246,13 +3310,13 @@ async def saved_views_update(request: Request, view_id: int):
     if error is not None:
         return _saved_views_page(request, error, status=400)
     with writer_transaction(request.app.state.db_path) as conn:
-        if not view_store.retarget(conn, view_id, session.user_id, path, normalized):
+        if not view_store.retarget(conn, checked_id, session.user_id, path, normalized):
             return _error_page(request, "views.error_missing", 404)
     return RedirectResponse(url="/saved-views", status_code=303)
 
 
 @router.post("/saved-views/{view_id}/delete", response_class=HTMLResponse)
-async def saved_views_delete(request: Request, view_id: int):
+async def saved_views_delete(request: Request, view_id: str):
     """Delete one owned saved view; foreign ids stay invisible (404)."""
     from app.db import saved_views as view_store
     from app.db.database import writer_transaction
@@ -3265,8 +3329,11 @@ async def saved_views_delete(request: Request, view_id: int):
     if denied is not None:
         return denied
     assert session is not None
+    checked_id = _checked_view_id(view_id)
+    if checked_id is None:
+        return _error_page(request, "views.error_missing", 404)
     with writer_transaction(request.app.state.db_path) as conn:
-        if not view_store.delete(conn, view_id, session.user_id):
+        if not view_store.delete(conn, checked_id, session.user_id):
             return _error_page(request, "views.error_missing", 404)
     return RedirectResponse(url="/saved-views", status_code=303)
 
@@ -3379,6 +3446,27 @@ def _comparison_context(request: Request, conn, params):
         extra["baseline_from"] = baseline_from
     if baseline_to is not None:
         extra["baseline_to"] = baseline_to
+    # Custom-baseline controls need offset-free UTC datetime-local values
+    # (a verbatim aware ISO with `+00:00` renders blank); the parsed
+    # baseline window converts through the shared formatter, so seconds
+    # and microseconds survive and other offsets replay as the same UTC
+    # instant. The filter bar carries the canonical aware ISO pair so an
+    # Apply replays the exact baseline instead of dropping it.
+    baseline_input_from: str | None = None
+    baseline_input_to: str | None = None
+    baseline_input_from_step = "60"
+    baseline_input_to_step = "60"
+    filter_baseline: str | None = None
+    filter_baseline_from: str | None = None
+    filter_baseline_to: str | None = None
+    if previous is not None:
+        baseline_input_from, baseline_input_from_step = _utc_input(previous.window.time_from)
+        baseline_input_to, baseline_input_to_step = _utc_input(previous.window.time_to)
+        if mode == "previous":
+            filter_baseline = "previous"
+        elif mode == "custom":
+            filter_baseline_from = previous.window.time_from.isoformat()
+            filter_baseline_to = previous.window.time_to.isoformat()
     context.update(
         {
             "summary": summary,
@@ -3386,8 +3474,13 @@ def _comparison_context(request: Request, conn, params):
             "compared": compared,
             "compare_error": compare_error,
             "baseline_mode": baseline_mode or mode,
-            "baseline_from": baseline_from,
-            "baseline_to": baseline_to,
+            "baseline_from": baseline_input_from,
+            "baseline_to": baseline_input_to,
+            "baseline_from_step": baseline_input_from_step,
+            "baseline_to_step": baseline_input_to_step,
+            "filter_baseline": filter_baseline,
+            "filter_baseline_from": filter_baseline_from,
+            "filter_baseline_to": filter_baseline_to,
             "fragment_url": "/partials/comparison",
         }
     )

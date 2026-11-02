@@ -111,3 +111,25 @@ real logs, keys, provider calls, push/main/deploy or
 release/acceptance claims. Independent review stays required;
 E2E recorded BLOCKED in this shell sandbox for coordinator
 execution, follow/real-GeoIP not claimed.
+
+## Parity T4c independent-review corrections, 2 November 2026
+
+Owner-authorized bounded corrections of the six confirmed T4c
+independent-review findings (no T5a), implemented solely by Muse
+Spark 1.3 Contributor (medium, Contributor ON) with sandbox +
+approval ON: save-current replay of the displayed canonical state
+after successful htmx Apply (failure retains last state, no raw
+IP/CSRF in URLs); comparison previous/custom baselines surviving
+filter-bar Apply/push/refresh with no silent default; shared UTC
+datetime-local formatter keeping minute-only form where exact and
+seconds/microseconds otherwise (global Apply no longer floors
+fractional evidence windows); immediate central refresh ON/OFF state
+with dirty/hidden/modal/focus pause and no hardcoded English;
+owner-only saved-view update UI control; positive signed-64-bit
+saved-view id bounds before DB binding with fixed missing-view
+answers. Original LogCarve code remains Apache-2.0; no LogWerk
+application code was imported (70-pattern MIT rule adaptation of
+2026-11-01 unchanged). Synthetic fixtures only; no real logs, keys,
+provider calls, push/main/deploy or release/acceptance claims.
+Independent review stays required; protected E2E recorded BLOCKED in
+this shell sandbox for coordinator execution.

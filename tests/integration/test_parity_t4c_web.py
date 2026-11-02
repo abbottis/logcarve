@@ -668,3 +668,277 @@ def test_help_covers_operators_and_declares_boundaries(t4c):
     assert "never uploads" in html
     assert 'type="file"' not in html
     assert "multipart" not in lowered
+
+
+# --- T4c independent-correction regressions (findings 1-6). ---
+
+
+def test_utc_input_formatter_precision():
+    from app.web.routes import _utc_input
+
+    # Minute-exact instants keep the established minute-only form.
+    assert _utc_input(datetime.fromisoformat("2026-10-27T00:00:00+00:00")) == (
+        "2026-10-27T00:00",
+        "60",
+    )
+    # Nonzero seconds add :SS with a dividing step.
+    assert _utc_input(datetime.fromisoformat("2026-10-27T12:00:05+00:00")) == (
+        "2026-10-27T12:00:05",
+        "1",
+    )
+    # Nonzero microseconds (the 1us backend precision) survive.
+    assert _utc_input(datetime.fromisoformat("2026-10-27T12:00:00.000001+00:00")) == (
+        "2026-10-27T12:00:00.000001",
+        "0.000001",
+    )
+    # Positive/negative offsets replay as the same UTC instant.
+    berlin_noon = _utc_input(datetime.fromisoformat("2026-10-27T12:00:00+05:00"))
+    la_noon = _utc_input(datetime.fromisoformat("2026-10-26T23:00:00-08:00"))
+    assert berlin_noon == la_noon == ("2026-10-27T07:00", "60")
+    # Naive values are labelled UTC, never shifted.
+    assert _utc_input(datetime.fromisoformat("2026-10-27T12:00:00")) == (
+        "2026-10-27T12:00",
+        "60",
+    )
+
+
+def test_global_fractional_window_survives_apply(t4c):
+    client = t4c["client"]
+    # A 1us evidence window must render as a valid control value with a
+    # dividing step, and the canonical URL must keep full precision.
+    url = (
+        "/requests?site=default&range=custom"
+        "&from=2026-10-27T12%3A00%3A00.000000%2B00%3A00"
+        "&to=2026-10-27T12%3A00%3A00.000001%2B00%3A00&tz=UTC"
+    )
+    html = _page(client, url)
+    assert 'id="f-from" name="from" type="datetime-local" value="2026-10-27T12:00"' in html
+    assert 'id="f-to" name="to" type="datetime-local" value="2026-10-27T12:00:00.000001"' in html
+    assert 'step="0.000001"' in html
+    assert "from=2026-10-27T12%3A00%3A00%2B00%3A00" in html
+    assert "to=2026-10-27T12%3A00%3A00.000001%2B00%3A00" in html
+    # Resubmitting the displayed control values replays the same window.
+    replay = _page(
+        client,
+        "/requests?site=default&range=custom&from=2026-10-27T12:00:00"
+        "&to=2026-10-27T12:00:00.000001&tz=UTC",
+    )
+    assert "to=2026-10-27T12%3A00%3A00.000001%2B00%3A00" in replay
+    # Seconds precision survives the same round-trip.
+    seconds = _page(
+        client,
+        "/requests?site=default&range=custom&from=2026-10-27T12:00:05"
+        "&to=2026-10-27T12:00:35&tz=UTC",
+    )
+    assert 'value="2026-10-27T12:00:05"' in seconds
+    assert 'value="2026-10-27T12:00:35"' in seconds
+
+
+def test_custom_baseline_controls_show_valid_utc(t4c):
+    client = t4c["client"]
+    extra = (
+        "&baseline_from=2026-10-26T00%3A00%3A00%2B00%3A00"
+        "&baseline_to=2026-10-27T00%3A00%3A00%2B00%3A00"
+    )
+    html = _page(client, f"/comparison?{BASE}{extra}")
+    # Offset-free UTC values: the controls render instead of blanking.
+    assert (
+        'id="c-bfrom" name="baseline_from" type="datetime-local" value="2026-10-26T00:00"' in html
+    )
+    assert 'id="c-bto" name="baseline_to" type="datetime-local" value="2026-10-27T00:00"' in html
+    assert "+00:00" not in html.split('id="c-bfrom"')[1].split(">")[0]
+    # The previous-period mode fills the computed previous window.
+    previous = _page(client, f"/comparison?{BASE}&baseline=previous")
+    assert 'value="2026-10-26T00:00"' in previous
+    # A +05:00 pair replays as the same UTC instant as +00:00.
+    offset = _page(
+        client,
+        f"/comparison?{BASE}"
+        "&baseline_from=2026-10-26T05%3A00%3A00%2B05%3A00"
+        "&baseline_to=2026-10-27T05%3A00%3A00%2B05%3A00",
+    )
+    assert 'value="2026-10-26T00:00"' in offset
+    assert 'value="2026-10-27T00:00"' in offset
+
+
+def test_comparison_baseline_survives_filter_apply(t4c):
+    client = t4c["client"]
+    # Previous mode plus a global matcher: the fragment push keeps both.
+    partial = client.get(f"/partials/comparison?{BASE}&baseline=previous&search=%2Flogin")
+    assert partial.status_code == 200, partial.text[:400]
+    push = partial.headers.get("hx-push-url", "")
+    assert "baseline=previous" in push and "search=%2Flogin" in push
+    # The full page carries the baseline as filter-bar hidden state.
+    html = _page(client, f"/comparison?{BASE}&baseline=previous&search=%2Flogin")
+    assert 'name="baseline" value="previous"' in html
+    assert "Compare with previous period" in html
+    # Custom mode: the canonical aware pair survives serialization.
+    extra = (
+        "&baseline_from=2026-10-26T00%3A00%3A00%2B00%3A00"
+        "&baseline_to=2026-10-27T00%3A00%3A00%2B00%3A00"
+    )
+    custom_push = client.get(f"/partials/comparison?{BASE}{extra}").headers.get("hx-push-url", "")
+    assert "baseline_from=2026-10-26" in custom_push
+    assert "baseline_to=2026-10-27" in custom_push
+    custom_html = _page(client, f"/comparison?{BASE}{extra}")
+    assert 'name="baseline_from" value="2026-10-26T00:00:00+00:00"' in custom_html
+    assert 'name="baseline_to" value="2026-10-27T00:00:00+00:00"' in custom_html
+    # No baseline means no silent default anywhere in the push.
+    bare_push = client.get(f"/partials/comparison?{BASE}").headers.get("hx-push-url", "")
+    assert bare_push.startswith("/comparison?")
+    assert "baseline" not in bare_push
+    # Empty and zero baselines still render their honest notes via Apply.
+    zero = client.get(
+        "/partials/comparison?site=default&range=custom"
+        "&from=2026-10-27T00%3A00%3A00%2B00%3A00&to=2026-10-28T00%3A00%3A00%2B00%3A00&tz=UTC"
+        "&baseline_from=2026-10-20T00%3A00%3A00%2B00%3A00"
+        "&baseline_to=2026-10-21T00%3A00%3A00%2B00%3A00"
+    )
+    assert zero.status_code == 200, zero.text[:400]
+    assert "Zero baseline" in zero.text
+
+
+def test_save_target_header_carries_full_state(t4c):
+    client = t4c["client"]
+    # Global search plus page-local journey state travel in the push URL.
+    partial = client.get(
+        f"/partials/journeys?{BASE}&search=%2Flogin&view=entries&sort=duration_desc&min_requests=5"
+    )
+    assert partial.status_code == 200, partial.text[:400]
+    push = partial.headers.get("hx-push-url", "")
+    assert "search=%2Flogin" in push
+    assert "view=entries" in push and "sort=duration_desc" in push and "min_requests=5" in push
+    assert "csrf_token" not in push and "raw_ip" not in push
+    # The full-page Save-current target matches that canonical state, and
+    # saving it replays the exact read.
+    html = _page(
+        client, f"/journeys?{BASE}&search=%2Flogin&view=entries&sort=duration_desc&min_requests=5"
+    )
+    assert 'id="save-view-target"' in html
+    assert "search=%2Flogin" in html.split('id="save-view-target"')[1].split(">")[0]
+    created = _save(
+        client,
+        t4c["csrf"],
+        "Applied watch",
+        f"/journeys?{BASE}&search=%2Flogin&view=entries&sort=duration_desc&min_requests=5",
+    )
+    assert created.status_code == 303
+    conn = connect(t4c["db"], read_only=True)
+    try:
+        rows = view_store.list_for_user(conn, 1)
+    finally:
+        conn.close()
+    assert len(rows) == 1
+    replay = _page(client, rows[0]["url"])
+    assert "search" in rows[0]["url"] and "view=entries" in rows[0]["url"]
+    assert "Entry paths" in replay
+
+
+def test_saved_view_update_from_ui(t4c):
+    client, csrf = t4c["client"], t4c["csrf"]
+    created = _save(client, csrf, "Movable", f"/?{BASE}")
+    assert created.status_code == 303
+    listed = _page(client, "/saved-views")
+    # Every owned view offers an update control prefilled with its target.
+    assert 'button:has-text("Update")' in listed or ">Update</button>" in listed
+    assert 'name="target"' in listed
+    conn = connect(t4c["db"], read_only=True)
+    try:
+        rows = view_store.list_for_user(conn, 1)
+    finally:
+        conn.close()
+    view_id = rows[0]["id"]
+    assert f"/saved-views/{view_id}/update" in listed
+    # Updating through the UI form retains the full new filter set.
+    retarget = _form(
+        client,
+        f"/saved-views/{view_id}/update",
+        {"csrf_token": csrf, "target": f"/security?{BASE}&status=404"},
+    )
+    assert retarget.status_code == 303, retarget.text[:400]
+    updated = _page(client, "/saved-views")
+    assert "/security" in updated and "status=404" in updated
+    conn = connect(t4c["db"], read_only=True)
+    try:
+        kept = view_store.list_for_user(conn, 1)
+    finally:
+        conn.close()
+    replay = _page(client, kept[0]["url"])
+    assert "status=404" in kept[0]["url"]
+    assert "404" in replay
+    # A hostile update target through the same form fails closed.
+    hostile = _form(
+        client, f"/saved-views/{view_id}/update", {"csrf_token": csrf, "target": "/help"}
+    )
+    assert hostile.status_code == 400
+
+
+def test_saved_view_id_bounds_before_db(t4c):
+    from app.web.routes import SQLITE_MAX_ROW_ID, _checked_view_id
+
+    assert SQLITE_MAX_ROW_ID == 2**63 - 1
+    assert _checked_view_id("1") == 1
+    assert _checked_view_id(str(2**63 - 1)) == 2**63 - 1
+    assert _checked_view_id("007") == 7
+    for bad in (
+        "0",
+        "-1",
+        str(2**63),
+        "9" * 30,
+        "abc",
+        "12ab",
+        "",
+        "   ",
+        "1.5",
+        "+3",
+        "１２３",
+        None,
+        5,
+        5.0,
+    ):
+        assert _checked_view_id(bad) is None, repr(bad)
+    client = t4c["client"]
+    before = _import_count(t4c["db"])
+    conn = connect(t4c["db"], read_only=True)
+    try:
+        views_before = view_store.list_for_user(conn, 1)
+    finally:
+        conn.close()
+    for action in ("rename", "update", "delete"):
+        fields = {"csrf_token": t4c["csrf"], "name": "X", "target": f"/?{BASE}"}
+        for probe in (str(2**63), "0", "-1", "9" * 40, "nope", str(2**63 - 1)):
+            response = _form(client, f"/saved-views/{probe}/{action}", fields)
+            assert response.status_code == 404, (action, probe, response.status_code)
+            assert "That saved view does not exist." in response.text, (action, probe)
+            lowered = response.text.lower()
+            assert "overflow" not in lowered and "traceback" not in lowered
+            assert "sqlite" not in lowered and "internal server error" not in lowered
+            if len(probe) > 19:
+                assert probe not in response.text, (action, probe)
+    # Bad CSRF with an overflowing id still fails closed at the gate.
+    denied = _form(client, f"/saved-views/{2**63!s}/delete", {"csrf_token": "wrong"})
+    assert denied.status_code == 403
+    # No DB mutation from any probe.
+    conn = connect(t4c["db"], read_only=True)
+    try:
+        assert view_store.list_for_user(conn, 1) == views_before
+    finally:
+        conn.close()
+    assert _import_count(t4c["db"]) == before
+
+
+def test_refresh_control_uses_central_messages(t4c):
+    from app.web.locales import load_catalog
+
+    catalog = load_catalog("en")
+    html = _page(t4c["client"], f"/journeys?{BASE}")
+    assert 'data-msg-refresh-off="Auto-refresh is off."' in html
+    assert 'data-msg-refresh-on="Auto-refresh is on;' in html
+    assert "data-msg-refresh-paused=" in html
+    assert catalog["refresh.paused_note"] in html
+    assert "Auto-refresh is off." in html
+    assert 'value="30"' in html and 'value="60"' in html and 'value="300"' in html
+    source = (ROOT / "assets" / "src" / "js" / "refresh.js").read_text()
+    assert "Auto-refresh is off." not in source
+    assert "Auto-refresh is on" not in source
+    assert "paused while unsaved" not in source

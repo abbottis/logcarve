@@ -29,11 +29,11 @@
       {% if params_source %}<input type="hidden" name="source" value="{{ params_source }}">{% endif %}
       <div class="form-control">
         <label class="label py-1" for="c-bfrom"><span class="label-text">{{ t("compare.baseline_from") }}</span></label>
-        <input id="c-bfrom" name="baseline_from" type="datetime-local" value="{{ baseline_from or "" }}" class="input input-bordered input-sm tech">
+        <input id="c-bfrom" name="baseline_from" type="datetime-local" value="{{ baseline_from or "" }}" step="{{ baseline_from_step }}" class="input input-bordered input-sm tech">
       </div>
       <div class="form-control">
         <label class="label py-1" for="c-bto"><span class="label-text">{{ t("compare.baseline_to") }}</span></label>
-        <input id="c-bto" name="baseline_to" type="datetime-local" value="{{ baseline_to or "" }}" class="input input-bordered input-sm tech">
+        <input id="c-bto" name="baseline_to" type="datetime-local" value="{{ baseline_to or "" }}" step="{{ baseline_to_step }}" class="input input-bordered input-sm tech">
       </div>
       <button type="submit" class="btn btn-primary btn-sm">{{ t("compare.apply_baseline") }}</button>
     </form>

@@ -56,4 +56,33 @@
     if (!target || target.id !== "page-content") return;
     showBanner(target, message(formFor(target)));
   });
+
+  // Keep the Save-current hidden target on the displayed canonical
+  // state. The target renders server-side on full loads but lives
+  // outside #page-content, so a successful htmx Apply would leave it
+  // stale (missing the just-applied search, client or page-local
+  // filters). Only a 2xx fragment response updates it, from the
+  // server-issued HX-Push-Url (validated canonical state, never raw
+  // input): failures keep the last displayed state untouched, and the
+  // stored URL can carry no CSRF token or raw address because the
+  // canonical builder never emits them.
+  document.addEventListener("htmx:afterRequest", function (event) {
+    var target = targetOf(event);
+    if (!target || target.id !== "page-content") return;
+    var xhr = event.detail && event.detail.xhr ? event.detail.xhr : null;
+    if (!xhr || xhr.status < 200 || xhr.status >= 300) return;
+    var push = null;
+    try {
+      push = xhr.getResponseHeader("HX-Push-Url");
+    } catch (err) {
+      push = null;
+    }
+    if (!push || push.charAt(0) !== "/") return;
+    var inputs = document.querySelectorAll(
+      'form[data-save-current] input[name="target"]'
+    );
+    for (var i = 0; i < inputs.length; i += 1) {
+      inputs[i].value = push;
+    }
+  });
 })();

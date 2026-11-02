@@ -30,6 +30,12 @@
               <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
               <button type="submit" class="btn btn-outline btn-xs">{{ t("views.delete") }}</button>
             </form>
+            <form method="post" action="/saved-views/{{ view.id }}/update" class="flex flex-wrap items-center gap-2">
+              <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+              <label class="sr-only" for="update-{{ view.id }}">{{ t("views.update_label", name=view.name) }}</label>
+              <input id="update-{{ view.id }}" name="target" type="text" value="{{ view.url }}" maxlength="2000" class="input input-bordered input-sm tech">
+              <button type="submit" class="btn btn-outline btn-xs">{{ t("views.update") }}</button>
+            </form>
           </div>
           <p class="mt-1 text-sm text-base-content/70">{{ t("views.updated", date=view.updated_at) }}</p>
         </li>
