@@ -74,7 +74,7 @@ def test_unknown_persisted_provider_rejected_not_replaced(tmp_path, monkeypatch)
     # A stored unknown provider is kept verbatim so the gate rejects
     # it; it is never silently replaced with the env Meta default.
     monkeypatch.setenv("AI_SETTINGS_KEY", TEST_KEY_HEX)
-    db = _db_with(tmp_path, [("ai.provider", "nope"), ("ai.model", "gpt-6-luna")])
+    db = _db_with(tmp_path, [("ai.provider", "nope"), ("ai.model", "gpt-6.1-terra")])
     resolved = ai_effective.resolve(db, _base())
     assert resolved.model_provider == "nope"
     with pytest.raises(GateBlocked) as exc:
@@ -138,7 +138,7 @@ def test_base_settings_key_used_for_decrypt(tmp_path, monkeypatch):
         tmp_path,
         [
             ("ai.provider", "openai"),
-            ("ai.model", "gpt-6-luna"),
+            ("ai.model", "gpt-6.1-terra"),
             ("ai.key.openai", blob),
             ("ai.policy.openai", "synthetic"),
         ],
@@ -147,7 +147,7 @@ def test_base_settings_key_used_for_decrypt(tmp_path, monkeypatch):
         db,
         _base(
             model_provider="openai",
-            model_id="gpt-6-luna",
+            model_id="gpt-6.1-terra",
             ai_settings_key=SecretStr(TEST_KEY_HEX),
             ai_synthetic_source=True,
         ),
@@ -158,7 +158,7 @@ def test_base_settings_key_used_for_decrypt(tmp_path, monkeypatch):
         db,
         _base(
             model_provider="openai",
-            model_id="gpt-6-luna",
+            model_id="gpt-6.1-terra",
             ai_settings_key=SecretStr("44" * 32),
             ai_synthetic_source=True,
         ),

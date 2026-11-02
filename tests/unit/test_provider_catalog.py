@@ -25,11 +25,11 @@ def test_display_labels_have_no_underscores():
 
 def test_vetted_models_only():
     assert catalog.models_for("meta") == ("muse-spark-1.3",)
-    assert catalog.models_for("openai") == ("gpt-6-luna",)
-    assert catalog.models_for("gemini") == ("gemini-3.5-flash-lite",)
-    assert catalog.models_for("anthropic") == ("claude-haiku-5-5",)
-    assert catalog.default_model("openai") == "gpt-6-luna"
-    entry = catalog.validate_pair("gemini", "gemini-3.5-flash-lite")
+    assert catalog.models_for("openai") == ("gpt-6.1-terra",)
+    assert catalog.models_for("gemini") == ("gemini-3.8-flash",)
+    assert catalog.models_for("anthropic") == ("claude-sonnet-5-5",)
+    assert catalog.default_model("openai") == "gpt-6.1-terra"
+    entry = catalog.validate_pair("gemini", "gemini-3.8-flash")
     assert entry.tier == "paid"
     assert catalog.CATALOG["anthropic"].tier == "api"
     assert catalog.CATALOG["meta"].tier == "standard"
@@ -42,31 +42,32 @@ def test_unknown_pairs_fail_closed():
     with pytest.raises(KeyError):
         catalog.models_for("nope")
     with pytest.raises((KeyError, ValueError)):
-        catalog.validate_pair("meta", "gpt-6-luna")
+        catalog.validate_pair("meta", "gpt-6.1-terra")
     with pytest.raises((KeyError, ValueError)):
         catalog.validate_pair("openai", "muse-spark-1.3")
     with pytest.raises((KeyError, ValueError)):
-        catalog.validate_pair("gemini", "claude-haiku-5-5")
+        catalog.validate_pair("gemini", "claude-sonnet-5-5")
     with pytest.raises((KeyError, ValueError)):
-        catalog.validate_pair("anthropic", "gpt-6-luna")
+        catalog.validate_pair("anthropic", "gpt-6.1-terra")
     with pytest.raises((KeyError, ValueError)):
         registry.entry_for("nope")
     with pytest.raises((KeyError, ValueError)):
-        registry.endpoint_for("meta", "gpt-6-luna")
+        registry.endpoint_for("meta", "gpt-6.1-terra")
 
 
 def test_exact_native_endpoints():
     assert registry.endpoint_for("meta", "muse-spark-1.3") == "https://api.meta.ai:443/v1/responses"
     assert (
-        registry.endpoint_for("openai", "gpt-6-luna") == "https://api.openai.com:443/v1/responses"
+        registry.endpoint_for("openai", "gpt-6.1-terra")
+        == "https://api.openai.com:443/v1/responses"
     )
     assert (
-        registry.endpoint_for("gemini", "gemini-3.5-flash-lite")
+        registry.endpoint_for("gemini", "gemini-3.8-flash")
         == "https://generativelanguage.googleapis.com:443/v1beta/models/"
-        "gemini-3.5-flash-lite:generateContent"
+        "gemini-3.8-flash:generateContent"
     )
     assert (
-        registry.endpoint_for("anthropic", "claude-haiku-5-5")
+        registry.endpoint_for("anthropic", "claude-sonnet-5-5")
         == "https://api.anthropic.com:443/v1/messages"
     )
 

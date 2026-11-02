@@ -34,7 +34,7 @@ def _valid_fields(**overrides):
     fields = {
         "ai_enabled": "1",
         "ai_provider": "openai",
-        "ai_model": "gpt-6-luna",
+        "ai_model": "gpt-6.1-terra",
         "ai_policy": "synthetic",
         "ai_synthetic_source": "1",
         "ai_workspace": "",
@@ -82,9 +82,9 @@ def test_settings_page_shows_providers_without_key_material(web, key_env):
     text = response.text
     for label in ("Meta", "OpenAI", "Google Gemini", "Anthropic Claude"):
         assert label in text
-    assert "gpt-6-luna" in text
-    assert "gemini-3.5-flash-lite" in text
-    assert "claude-haiku-5-5" in text
+    assert "gpt-6.1-terra" in text
+    assert "gemini-3.8-flash" in text
+    assert "claude-sonnet-5-5" in text
     assert TEST_SETTINGS_KEY not in text
     # Password inputs never carry values.
     assert 'type="password"' in text
@@ -103,11 +103,11 @@ def test_save_rejects_unknown_provider_model_and_policy(web, key_env):
     client, _ = web
     csrf = _login(client)
     for fields in (
-        _valid_fields(ai_provider="nope", ai_model="gpt-6-luna"),
+        _valid_fields(ai_provider="nope", ai_model="gpt-6.1-terra"),
         _valid_fields(ai_provider="openai", ai_model="muse-spark-1.3"),
-        _valid_fields(ai_provider="openai", ai_model="gpt-6-luna", ai_policy="free"),
+        _valid_fields(ai_provider="openai", ai_model="gpt-6.1-terra", ai_policy="free"),
         _valid_fields(ai_provider="meta", ai_model="muse-spark-1.3", ai_workspace="wrkspc_x"),
-        _valid_fields(ai_provider="openai", ai_model="gpt-6-luna", ai_key_openai="x" * 513),
+        _valid_fields(ai_provider="openai", ai_model="gpt-6.1-terra", ai_key_openai="x" * 513),
     ):
         assert _post_ai(client, csrf, fields).status_code == 400
 
@@ -205,7 +205,7 @@ def test_provider_switch_does_not_inherit_policy(web, key_env):
         _post_ai(
             client,
             csrf,
-            _valid_fields(ai_provider="openai", ai_model="gpt-6-luna", ai_policy="real"),
+            _valid_fields(ai_provider="openai", ai_model="gpt-6.1-terra", ai_policy="real"),
         ).status_code
         == 303
     )
@@ -220,7 +220,7 @@ def test_provider_switch_does_not_inherit_policy(web, key_env):
             csrf,
             _valid_fields(
                 ai_provider="gemini",
-                ai_model="gemini-3.5-flash-lite",
+                ai_model="gemini-3.8-flash",
                 ai_policy="real",
                 ai_policy_provider="openai",
             ),
@@ -239,7 +239,7 @@ def test_provider_switch_does_not_inherit_policy(web, key_env):
             csrf,
             _valid_fields(
                 ai_provider="gemini",
-                ai_model="gemini-3.5-flash-lite",
+                ai_model="gemini-3.8-flash",
                 ai_policy="synthetic",
                 ai_policy_provider="gemini",
             ),
@@ -253,7 +253,7 @@ def test_provider_switch_does_not_inherit_policy(web, key_env):
             csrf,
             _valid_fields(
                 ai_provider="anthropic",
-                ai_model="claude-haiku-5-5",
+                ai_model="claude-sonnet-5-5",
                 ai_policy="synthetic",
                 ai_policy_provider="gemini",
                 ai_policy_confirm="1",
@@ -348,7 +348,7 @@ def test_restart_persistence_rereads_same_overlay(web, key_env):
             csrf,
             _valid_fields(
                 ai_provider="anthropic",
-                ai_model="claude-haiku-5-5",
+                ai_model="claude-sonnet-5-5",
                 ai_policy="synthetic",
                 ai_synthetic_source="1",
                 ai_workspace="wrkspc_test123",
@@ -362,12 +362,12 @@ def test_restart_persistence_rereads_same_overlay(web, key_env):
     second = ai_effective.resolve(db, load_settings())
     assert (first.model_provider, first.model_id, first.ai_policy) == (
         "anthropic",
-        "claude-haiku-5-5",
+        "claude-sonnet-5-5",
         "synthetic",
     )
     assert (second.model_provider, second.model_id, second.ai_policy) == (
         "anthropic",
-        "claude-haiku-5-5",
+        "claude-sonnet-5-5",
         "synthetic",
     )
     assert second.workspace_id == "wrkspc_test123"

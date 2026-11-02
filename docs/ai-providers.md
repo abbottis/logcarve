@@ -16,9 +16,9 @@ per-model pricing with provenance.
 | Provider | Model | Native endpoint | Tier | Live verification |
 |---|---|---|---|---|
 | Meta | `muse-spark-1.3` | `https://api.meta.ai:443/v1/responses` | Standard | Owner-authorized synthetic run PASS (see [verification](verification.md)) |
-| OpenAI | `gpt-6-luna` | `https://api.openai.com:443/v1/responses` | Standard | NOT RUN (native offline tests PASS; no owner key or call) |
-| Google Gemini | `gemini-3.5-flash-lite` | `https://generativelanguage.googleapis.com:443/v1beta/models/gemini-3.5-flash-lite:generateContent` | Paid API | NOT RUN (native offline tests PASS; no owner key or call) |
-| Anthropic Claude | `claude-haiku-5-5` | `https://api.anthropic.com:443/v1/messages` | API | NOT RUN (native offline tests PASS; no owner key or call) |
+| OpenAI | `gpt-6.1-terra` | `https://api.openai.com:443/v1/responses` | Standard | Offline tests PASS; live runs pending coordinator (owner-supplied keys) |
+| Google Gemini | `gemini-3.8-flash` | `https://generativelanguage.googleapis.com:443/v1beta/models/gemini-3.8-flash:generateContent` | Paid API | Offline tests PASS; live runs pending coordinator (owner-supplied keys) |
+| Anthropic Claude | `claude-sonnet-5-5` | `https://api.anthropic.com:443/v1/messages` | API | Offline tests PASS; live runs pending coordinator (owner-supplied keys) |
 
 Tiers are labeled honestly: Gemini Paid/API and Anthropic API are
 never presented as Meta Standard. Pricing provenance per model:
@@ -162,10 +162,26 @@ below are what the service records (see `app/ai/service.py`).
 | Analytics store unreadable during scoping | `store_unavailable` (HTTP 503) | The genuine local `InvestigationError` code for an unreadable analytics data store during scope validation — emitted by the API handler, distinct from the settings-store attribute above |
 | Answer cannot be shown | (evidence filter) | Provider answer failed the safe-text check; deterministic pages are unaffected |
 
-Other-provider account live checks are NOT RUN in this repository:
-live verification requires owner keys and explicit per-call
-authorization, which only the Meta Standard synthetic run has
-received. See [deployment](deployment.md) for host operation,
+Model update 2026-11-02 (owner-authorized): OpenAI input
+`input_tokens` includes cached-input and cache-write subsets
+(ordinary input = total minus cached minus write); unreported write
+retention is accounted conservatively at the 12h rate and the
+per-step reservation uses the worst-case write rate. Gemini pins
+fixed cheap thinking `LOW`; paid intro pricing (input 0.75/cached
+0.075/output 3.75 per 1M incl. thoughts) holds through 2026-12-31,
+rising to 1.50/0.15/7.50 from 2027-01-01 — reverify before any 2027
+usage. Sonnet uses `thinking: {"type": "between_tools"}` (`disabled`
+returns 400) with fixed `output_config: {"effort": "low"}`; flat
+Sonnet pricing (no 100k tier) with disjoint input/cache-write
+(5m/1h)/cache-read counts. Sonnet replays the exact original
+assistant blocks (text/thinking/redacted_thinking/tool_use in
+original order, verbatim original inputs) carried once on the first
+call's replay metadata; execution still uses server-overridden args,
+and opaque thinking never reaches answer/UI/DB/log/evidence.
+
+Other-provider live runs are pending coordinator execution with
+owner-supplied keys and explicit per-call authorization; only the
+Meta Standard synthetic run has completed. See [deployment](deployment.md) for host operation,
 [privacy and data egress](privacy-and-security.md) for the full
 boundary, and [ADR 0004](decisions/0004-multi-provider-ai.md) for the
 accepted scope.

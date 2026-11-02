@@ -122,7 +122,7 @@ def test_ai_settings_save_masking_and_status(page, ai_base):
     # Save: enable, OpenAI, Luna, synthetic demo mode + synthetic assertion.
     page.check("#f-ai-enabled")
     page.select_option("#f-ai-provider", "openai")
-    page.select_option("#f-ai-model", "gpt-6-luna")
+    page.select_option("#f-ai-model", "gpt-6.1-terra")
     page.select_option("#f-ai-policy", "synthetic")
     page.check("#f-ai-synthetic")
     secret = "synthetic-e2e-openai-key"
@@ -132,7 +132,7 @@ def test_ai_settings_save_masking_and_status(page, ai_base):
 
     # Status reflects the save; no key material is ever rendered.
     expect(page.locator("#set-ai-h").locator("..")).to_contain_text("OpenAI")
-    expect(page.locator("#set-ai-h").locator("..")).to_contain_text("gpt-6-luna")
+    expect(page.locator("#set-ai-h").locator("..")).to_contain_text("gpt-6.1-terra")
     expect(page.locator("#set-ai-h").locator("..")).to_contain_text("Configured")
     content = page.content()
     assert secret not in content
@@ -144,7 +144,7 @@ def test_ai_settings_save_masking_and_status(page, ai_base):
     # (no carry-over of the previous acknowledgment), rebinds the
     # policy identity and shows provider-correct guidance.
     page.select_option("#f-ai-provider", "gemini")
-    expect(page.locator("#f-ai-model")).to_have_value("gemini-3.5-flash-lite")
+    expect(page.locator("#f-ai-model")).to_have_value("gemini-3.8-flash")
     expect(page.locator("#f-ai-policy")).to_have_value("")
     expect(page.locator("#f-ai-policy-provider")).to_have_value("gemini")
     expect(page.locator("#ai-provider-guide")).to_contain_text("Paid API")

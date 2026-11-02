@@ -152,6 +152,16 @@ def cost_for(provider: str, usage: dict) -> int:
             cache_creation_5m_tokens=five,
             cache_creation_1h_tokens=one_h,
         )
+    if provider == "openai":
+        from app.ai.providers import openai_responses
+
+        write = usage.get("cache_write_tokens", 0)
+        return openai_responses.cost_micro_usd(
+            input_tokens=usage["input_tokens"],
+            cached_tokens=usage.get("cached_tokens", 0),
+            output_tokens=usage["output_tokens"],
+            cache_write_tokens=write,
+        )
     cost = entry["cost_micro_usd"]
     return cost(
         input_tokens=usage["input_tokens"],
@@ -164,12 +174,13 @@ def step_cap_for(provider: str, *, input_upper: int, max_output_tokens: int) -> 
     """Conservative per-step reservation for the exact immutable body size.
 
     The Anthropic reservation prices the whole input upper bound as
-    worst-case 1-hour cache creation (unknown TTL): creation can bill
-    at 2x the input rate, so reserving only 1x input would let the
-    actual charge exceed its reservation. The validated usage bound
-    (``input_upper``) stays far below the large-tier threshold, so the
-    small-tier 1-hour rate applies; the large tier remains enforced
-    inside the cost function as defense in depth.
+    worst-case 1-hour cache creation (unknown TTL): creation bills
+    above the input rate, so reserving only 1x input would let the
+    actual charge exceed its reservation. The OpenAI reservation
+    likewise prices the whole input upper bound as worst-case
+    cache-write (retention is not reported, so the conservative
+    12-hour write rate applies). Every supported usage composition
+    for the provider stays at or below the returned cap.
     """
     entry = entry_for(provider)
     framing = entry["framing_tokens"]
@@ -182,6 +193,15 @@ def step_cap_for(provider: str, *, input_upper: int, max_output_tokens: int) -> 
             cache_creation_tokens=total_upper,
             cache_read_tokens=0,
             output_tokens=max_output_tokens,
+        )
+    if provider == "openai":
+        from app.ai.providers import openai_responses
+
+        return openai_responses.cost_micro_usd(
+            input_tokens=total_upper,
+            cached_tokens=0,
+            output_tokens=max_output_tokens,
+            cache_write_tokens=total_upper,
         )
     cost = entry["cost_micro_usd"]
     return cost(input_tokens=total_upper, cached_tokens=0, output_tokens=max_output_tokens)

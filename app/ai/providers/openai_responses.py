@@ -41,14 +41,22 @@ ENDPOINT_HOST = "api.openai.com"
 ENDPOINT_PORT = 443
 ENDPOINT_PATH = "/v1/responses"
 
-#: Verified Luna Standard pricing, task reference 2026-11-02
-#: (https://developers.openai.com/api/docs/pricing): input USD 0.10/M,
-#: cached input USD 0.01/M (a SUBSET of input), output USD 0.50/M.
-#: Never add cached tokens on top of the input total.
+#: Verified Terra Standard pricing, owner task reference 2026-11-02
+#: (https://developers.openai.com/api/docs/models/gpt-6.1-terra):
+#: input USD 1.00/M, cached input USD 0.05/M (a SUBSET of input),
+#: cache-write input USD 1.25/M (30-minute retention) or USD 2.50/M
+#: (12-hour retention, also a SUBSET of input), output USD 5.00/M.
+#: ``input_tokens`` already includes the cached and cache-write
+#: subsets (ordinary input = input - cached - write); never add
+#: either subset on top of the input total. Retention is not
+#: reported in usage, so writes bill conservatively at the 12-hour
+#: USD 2.50/M rate and reservations assume the worst-case write
+#: rate for the whole input bound.
 PRICING_VERSION = "2026-11-02-developers.openai.com"
-PRICE_INPUT_MICRO_PER_M = 100_000
-PRICE_CACHED_MICRO_PER_M = 10_000
-PRICE_OUTPUT_MICRO_PER_M = 500_000
+PRICE_INPUT_MICRO_PER_M = 1_000_000
+PRICE_CACHED_MICRO_PER_M = 50_000
+PRICE_WRITE_MICRO_PER_M = 2_500_000
+PRICE_OUTPUT_MICRO_PER_M = 5_000_000
 MICRO_PER_TOKEN_UNIT = 1_000_000
 
 #: Small documented framing margin added to the exact immutable body
@@ -231,32 +239,56 @@ def validate_body(wire: bytes, *, expected_model: str) -> None:
             raise ProviderError("The provider dispatch tools are malformed.")
 
 
-def cost_micro_usd(*, input_tokens: int, cached_tokens: int, output_tokens: int) -> int:
-    """Integer micro-USD charge; cached is a subset of input."""
+def cost_micro_usd(
+    *,
+    input_tokens: int,
+    cached_tokens: int,
+    output_tokens: int,
+    cache_write_tokens: int = 0,
+) -> int:
+    """Integer micro-USD charge; cached and write are subsets of input.
+
+    Ordinary input is ``input - cached - write`` and bills at the
+    input rate; the cached subset bills at the cached rate and the
+    write subset at the conservative 12-hour write rate (retention
+    is not reported). Nothing is double-counted or dropped.
+    """
     if (
         isinstance(input_tokens, bool)
         or isinstance(cached_tokens, bool)
         or isinstance(output_tokens, bool)
+        or isinstance(cache_write_tokens, bool)
         or not isinstance(input_tokens, int)
         or not isinstance(cached_tokens, int)
         or not isinstance(output_tokens, int)
+        or not isinstance(cache_write_tokens, int)
         or input_tokens < 0
         or cached_tokens < 0
         or output_tokens < 0
-        or cached_tokens > input_tokens
+        or cache_write_tokens < 0
+        or cached_tokens + cache_write_tokens > input_tokens
     ):
         raise ProviderError("The provider usage is malformed.")
-    uncached = input_tokens - cached_tokens
+    ordinary = input_tokens - cached_tokens - cache_write_tokens
     total = (
-        uncached * PRICE_INPUT_MICRO_PER_M
+        ordinary * PRICE_INPUT_MICRO_PER_M
         + cached_tokens * PRICE_CACHED_MICRO_PER_M
+        + cache_write_tokens * PRICE_WRITE_MICRO_PER_M
         + output_tokens * PRICE_OUTPUT_MICRO_PER_M
     )
     return max(1, (total + MICRO_PER_TOKEN_UNIT - 1) // MICRO_PER_TOKEN_UNIT)
 
 
 def validate_usage(payload: object, *, max_output_tokens: int, input_upper: int) -> dict:
-    """Validate a Responses ``usage`` object into safe counts."""
+    """Validate a Responses ``usage`` object into safe counts.
+
+    Both ``input_tokens_details.cached_tokens`` and
+    ``input_tokens_details.cache_write_tokens`` (prompt-caching
+    guide) are subsets of ``input_tokens``: ordinary input is
+    ``input - cached - write``. An absent details object (or
+    absent fields) means zero for that subset; a null, boolean,
+    negative or over-total subset fails closed.
+    """
     if not isinstance(payload, dict):
         raise ProviderError("The provider usage is malformed.")
     for name in ("input_tokens", "output_tokens", "total_tokens"):
@@ -264,16 +296,26 @@ def validate_usage(payload: object, *, max_output_tokens: int, input_upper: int)
         if isinstance(tokens, bool) or not isinstance(tokens, int) or tokens < 0:
             raise ProviderError("The provider usage is malformed.")
     details_in = payload.get("input_tokens_details", {})
-    cached = details_in.get("cached_tokens", 0) if isinstance(details_in, dict) else None
-    if isinstance(cached, bool) or not isinstance(cached, int) or cached < 0:
+    if details_in is None:
+        details_in = {}
+    if not isinstance(details_in, dict):
         raise ProviderError("The provider usage is malformed.")
+    cached = details_in.get("cached_tokens", 0)
+    write = details_in.get("cache_write_tokens", 0)
+    for tokens in (cached, write):
+        if isinstance(tokens, bool) or not isinstance(tokens, int) or tokens < 0:
+            raise ProviderError("The provider usage is malformed.")
+    for key in details_in:
+        if key not in ("cached_tokens", "cache_write_tokens"):
+            raise ProviderError("The provider usage is malformed.")
     usage = {
         "input_tokens": payload["input_tokens"],
         "output_tokens": payload["output_tokens"],
         "cached_tokens": cached,
+        "cache_write_tokens": write,
         "reasoning_tokens": 0,
     }
-    if cached > usage["input_tokens"]:
+    if cached + write > usage["input_tokens"]:
         raise ProviderError("The provider usage is malformed.")
     if payload["total_tokens"] != usage["input_tokens"] + usage["output_tokens"]:
         raise ProviderError("The provider usage is malformed.")

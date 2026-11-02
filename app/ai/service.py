@@ -701,12 +701,22 @@ def _validate_response_shape(
     return parsed
 
 
+#: Allowlisted larger replay blob: the Anthropic exact original
+#: assistant content JSON the adapter validated (bounded text/
+#: thinking/tool_use blocks, original inputs verbatim). Kept under
+#: the wire cap so the next dispatch still fits MAX_WIRE_BYTES.
+_ANTHROPIC_CONTENT_KEY = "anthropic_assistant_content"
+_ANTHROPIC_CONTENT_MAX_CHARS = 65536
+
+
 def _validate_call_metadata(raw: object) -> dict:
     """Validate opaque provider replay metadata; never inspect content.
 
     Only small bounded string maps pass (e.g. Gemini thoughtSignature
-    blobs the adapter already validated). Anything else fails closed
-    instead of replaying arbitrary provider text into the next dispatch.
+    blobs the adapter already validated), plus the single allowlisted
+    Anthropic exact-content blob (bounded to the wire cap). Anything
+    else fails closed instead of replaying arbitrary provider text
+    into the next dispatch.
     """
     if raw is None:
         return {}
@@ -716,12 +726,14 @@ def _validate_call_metadata(raw: object) -> dict:
         raise InvestigationError("invalid_response", "A provider tool call is malformed.")
     clean: dict = {}
     for key, value in raw.items():
-        if (
-            not isinstance(key, str)
-            or not 1 <= len(key) <= 64
-            or not isinstance(value, str)
-            or not 1 <= len(value) <= 8192
-        ):
+        if not isinstance(key, str) or not 1 <= len(key) <= 64:
+            raise InvestigationError("invalid_response", "A provider tool call is malformed.")
+        limit = _ANTHROPIC_CONTENT_MAX_CHARS if key == _ANTHROPIC_CONTENT_KEY else 8192
+        if key == _ANTHROPIC_CONTENT_KEY and set(raw.keys()) != {_ANTHROPIC_CONTENT_KEY}:
+            # The exact-content blob rides alone on the first call of
+            # its turn; mixing it with other replay keys is malformed.
+            raise InvestigationError("invalid_response", "A provider tool call is malformed.")
+        if not isinstance(value, str) or not 1 <= len(value) <= limit:
             raise InvestigationError("invalid_response", "A provider tool call is malformed.")
         clean[key] = value
     return clean

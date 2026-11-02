@@ -47,15 +47,22 @@ ENDPOINT_PORT = 443
 ENDPOINT_PATH_PREFIX = "/v1beta/models/"
 ENDPOINT_PATH_SUFFIX = ":generateContent"
 
-#: Verified Gemini 3.5 Flash-Lite Standard paid text pricing, task
-#: reference 2026-11-02 (https://ai.google.dev/gemini-api/docs/pricing):
-#: input USD 0.30/M, cached input USD 0.03/M (a SUBSET of input),
-#: output USD 2.50/M where output = candidatesTokenCount PLUS
-#: thoughtsTokenCount. Never add cached tokens on top of the input.
+#: Verified Gemini 3.8 Flash paid text pricing, owner task reference
+#: 2026-11-02 (https://ai.google.dev/gemini-api/docs/models/gemini-3.8-flash
+#: and https://ai.google.dev/gemini-api/docs/pricing): STANDARD PAID
+#: intro rates through 2026-12-31 — input USD 0.75/M, cached input
+#: USD 0.075/M (a SUBSET of input), output USD 3.75/M where output =
+#: candidatesTokenCount PLUS thoughtsTokenCount. Never add cached
+#: tokens on top of the input. From 2027-01-01 the listed standard
+#: paid rates rise to input USD 1.50/M, cached USD 0.15/M, output
+#: USD 7.50/M: reverify against the pricing page before any 2027
+#: usage — the constants below encode the intro validity window
+#: only and must not be treated as a permanent price.
 PRICING_VERSION = "2026-11-02-ai.google.dev"
-PRICE_INPUT_MICRO_PER_M = 300_000
-PRICE_CACHED_MICRO_PER_M = 30_000
-PRICE_OUTPUT_MICRO_PER_M = 2_500_000
+PRICING_VALID_THROUGH = "2026-12-31"
+PRICE_INPUT_MICRO_PER_M = 750_000
+PRICE_CACHED_MICRO_PER_M = 75_000
+PRICE_OUTPUT_MICRO_PER_M = 3_750_000
 MICRO_PER_TOKEN_UNIT = 1_000_000
 
 #: Small documented framing margin added to the exact immutable body
@@ -72,6 +79,12 @@ _SIGNATURE_RE = re.compile(r"[A-Za-z0-9+/=_-]+\Z")
 
 #: Provider FunctionCall.id bounds (required server unique ID, opaque).
 CALL_ID_MAX_LEN = 64
+
+#: Fixed cheap thinking profile: only low/medium/high are supported
+#: (minimal errors), so the product pins ``LOW`` explicitly and the
+#: immutable dispatch check enforces it. Output still bills thoughts
+#: at the output rate, so the existing output reservation covers them.
+THINKING_LEVEL = "LOW"
 
 
 def _check_signature(signature: object) -> str:
@@ -232,7 +245,10 @@ def build_dispatch_body(
         "systemInstruction": {"parts": [{"text": instructions}]},
         "contents": contents,
         "tools": [{"functionDeclarations": _to_function_declarations(tools)}],
-        "generationConfig": {"maxOutputTokens": max_output_tokens},
+        "generationConfig": {
+            "maxOutputTokens": max_output_tokens,
+            "thinkingConfig": {"thinkingLevel": THINKING_LEVEL},
+        },
     }
 
 
@@ -249,7 +265,9 @@ def validate_body(wire: bytes, *, expected_model: str) -> None:
     native shape instead: non-empty contents, exactly the
     ``functionDeclarations`` tool form with native
     ``parametersJsonSchema`` (the narrower OpenAPI ``parameters``
-    field is rejected), and no extra native/built-in tool blocks.
+    field is rejected), the fixed cheap ``thinkingConfig``
+    (``LOW`` — ``minimal`` errors), and no extra native/built-in
+    tool blocks.
     """
     if not isinstance(wire, bytes) or not wire:
         raise ProviderError("The provider dispatch is malformed.")
@@ -261,6 +279,11 @@ def validate_body(wire: bytes, *, expected_model: str) -> None:
         raise ProviderError("The provider dispatch is malformed.")
     if not isinstance(expected_model, str) or not expected_model:
         raise ProviderError("The configured model is missing.")
+    generation_config = body.get("generationConfig")
+    if not isinstance(generation_config, dict):
+        raise ProviderError("The provider dispatch thinking profile is not allowlisted.")
+    if generation_config.get("thinkingConfig") != {"thinkingLevel": THINKING_LEVEL}:
+        raise ProviderError("The provider dispatch thinking profile is not allowlisted.")
     contents = body.get("contents")
     if not isinstance(contents, list) or not contents:
         raise ProviderError("The provider dispatch is malformed.")

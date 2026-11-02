@@ -22,9 +22,9 @@ from app.ai.providers.gemini_generate import (
     validate_usage,
 )
 
-MODEL = "gemini-3.5-flash-lite"
+MODEL = "gemini-3.8-flash"
 ENDPOINT = (
-    "https://generativelanguage.googleapis.com/v1beta/models/gemini-3.5-flash-lite:generateContent"
+    "https://generativelanguage.googleapis.com/v1beta/models/gemini-3.8-flash:generateContent"
 )
 KEY = "synthetic-test-key-never-a-real-secret"
 
@@ -39,10 +39,10 @@ def test_parse_endpoint_accepts_only_model_bound_allowlisted():
         "http://generativelanguage.googleapis.com/v1beta/models/m:generateContent",
         (
             "https://generativelanguage.googleapis.com:8443/v1beta/models/"
-            "gemini-3.5-flash-lite:generateContent"
+            "gemini-3.8-flash:generateContent"
         ),
-        "https://evil.example.org/v1beta/models/gemini-3.5-flash-lite:generateContent",
-        "https://generativelanguage.googleapis.com/v1beta/models/gemini-3.5-flash-lite:generateContent?key=x",
+        "https://evil.example.org/v1beta/models/gemini-3.8-flash:generateContent",
+        "https://generativelanguage.googleapis.com/v1beta/models/gemini-3.8-flash:generateContent?key=x",
         "https://generativelanguage.googleapis.com/v1beta/models/other-model:generateContent",
     ):
         with pytest.raises(ProviderError):
@@ -56,16 +56,17 @@ def test_parse_endpoint_accepts_only_model_bound_allowlisted():
 
 
 def test_pricing_exact_integer_rates():
-    # Flash-Lite paid: input .30/M, cached .03/M (subset), output 2.50/M.
-    assert cost_micro_usd(input_tokens=1_000_000, cached_tokens=0, output_tokens=0) == 300_000
+    # 3.8 Flash paid intro (through 2026-12-31): input .75/M,
+    # cached .075/M (subset), output 3.75/M including thoughts.
+    assert cost_micro_usd(input_tokens=1_000_000, cached_tokens=0, output_tokens=0) == 750_000
     assert (
-        cost_micro_usd(input_tokens=1_000_000, cached_tokens=1_000_000, output_tokens=0) == 30_000
+        cost_micro_usd(input_tokens=1_000_000, cached_tokens=1_000_000, output_tokens=0) == 75_000
     )
-    assert cost_micro_usd(input_tokens=0, cached_tokens=0, output_tokens=1_000_000) == 2_500_000
-    # Mixed: 800k uncached + 200k cached + 100k out = 0.496 USD.
+    assert cost_micro_usd(input_tokens=0, cached_tokens=0, output_tokens=1_000_000) == 3_750_000
+    # Mixed: 800k uncached + 200k cached + 100k out = 0.990 USD.
     assert (
         cost_micro_usd(input_tokens=1_000_000, cached_tokens=200_000, output_tokens=100_000)
-        == 496_000
+        == 990_000
     )
     with pytest.raises(ProviderError):
         cost_micro_usd(input_tokens=100, cached_tokens=101, output_tokens=0)
@@ -163,7 +164,10 @@ def test_dispatch_body_native_stateless_with_signature_replay():
             ]
         }
     ]
-    assert body["generationConfig"] == {"maxOutputTokens": 2048}
+    assert body["generationConfig"] == {
+        "maxOutputTokens": 2048,
+        "thinkingConfig": {"thinkingLevel": "LOW"},
+    }
     roles = [item["role"] for item in body["contents"]]
     assert roles == ["user", "model", "user"]
     replayed = body["contents"][1]["parts"][0]
@@ -243,6 +247,30 @@ def test_validate_body_rejects_openapi_parameters_field():
     body["tools"][0]["functionDeclarations"][0]["parameters"] = {}
     with pytest.raises(ProviderError):
         validate_body(serialize_body(body), expected_model=MODEL)
+
+
+def test_validate_body_rejects_missing_or_retiered_thinking():
+    body = build_dispatch_body(
+        model=MODEL,
+        max_output_tokens=2048,
+        instructions="sys",
+        user_text="hi",
+        exchanges=[],
+        tools=_tools(),
+    )
+
+    def _encode(mutated):
+        return json.dumps(mutated, sort_keys=True, separators=(",", ":")).encode("utf-8")
+
+    omitted = json.loads(json.dumps(body))
+    del omitted["generationConfig"]["thinkingConfig"]
+    with pytest.raises(ProviderError):
+        validate_body(_encode(omitted), expected_model=MODEL)
+    for level in ("MINIMAL", "MEDIUM", "HIGH", ""):
+        retiered = json.loads(json.dumps(body))
+        retiered["generationConfig"]["thinkingConfig"] = {"thinkingLevel": level}
+        with pytest.raises(ProviderError):
+            validate_body(_encode(retiered), expected_model=MODEL)
 
 
 def test_parse_response_tool_then_answer_with_signature():

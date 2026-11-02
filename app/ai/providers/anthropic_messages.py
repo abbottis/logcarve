@@ -16,7 +16,18 @@ hands over.
 
 Stop handling: only ``end_turn`` and ``tool_use`` complete; truncated
 (``max_tokens``), refused or unsupported blocks fail closed. Thinking
-is disabled where supported; no tool runs outside the app allowlist.
+uses ``{"type": "between_tools"}`` (``disabled`` returns 400) with a
+fixed cheap ``output_config`` effort; no forced ``tool_choice``,
+no ``temperature``/``top_p``/``top_k``, and no tool runs outside the
+app allowlist. The exact original assistant blocks (public progress
+``text`` plus ``thinking``/``redacted_thinking`` plus ``tool_use``
+with verbatim original inputs, in original order) the service hands
+over replay verbatim on the next tool-result turn — never forged,
+never reconstructed, never re-input from executed scopes, and never
+shown to the UI, logs, evidence or persistent DB (public text alone
+reaches the answer normally). Replay is bound to the same
+provider/model with unchanged system/tools/prefix via the pinned
+per-investigation binding plus the immutable dispatch check.
 
 Total input is ``input_tokens`` + ``cache_creation_input_tokens`` +
 ``cache_read_input_tokens`` (these are disjoint counts): creation and
@@ -65,30 +76,60 @@ SERVICE_TIER = "standard_only"
 #: Response usage tier billed at the standard rates enforced here.
 RESPONSE_STANDARD_TIER = "standard"
 
-#: Verified Haiku 5.5 standard API pricing, task reference
-#: 2026-11-02 (https://platform.claude.com/docs/en/about-claude/pricing),
-#: tiered on total input tokens: small prompts (<=100k input) USD
-#: 0.10/M in, 0.50/M out, 0.01/M cached; larger prompts USD 0.50/M
-#: in, 2.50/M out, 0.05/M cached. Cache WRITES are billed above the
-#: input rate: 5-minute writes 1.25x (USD 0.125/M small, 0.625/M
-#: large), 1-hour writes 2x (USD 0.20/M small, 1.00/M large). Cache
+#: Verified Sonnet 5.5 standard API pricing, owner task reference
+#: 2026-11-02 (https://platform.claude.com/docs/en/models/sonnet-5-5/overview):
+#: single flat rate with NO 100k Haiku-style input tier — input USD
+#: 2.00/M, output USD 10.00/M, cached-read USD 0.10/M, 5-minute
+#: cache-write USD 2.50/M, 1-hour cache-write USD 4.00/M. Cache
 #: creation/read counts are disjoint input components; creation of
 #: unknown TTL is priced conservatively at the highest supported
 #: (1-hour) rate, reads at the cached rate, so nothing is
 #: undercharged.
 PRICING_VERSION = "2026-11-02-platform.claude.com"
-SMALL_INPUT_MAX = 100_000
-PRICE_INPUT_MICRO_PER_M = 100_000
-PRICE_OUTPUT_MICRO_PER_M = 500_000
-PRICE_CACHED_MICRO_PER_M = 10_000
-PRICE_CREATE_5M_MICRO_PER_M = 125_000
-PRICE_CREATE_1H_MICRO_PER_M = 200_000
-PRICE_INPUT_LARGE_MICRO_PER_M = 500_000
-PRICE_OUTPUT_LARGE_MICRO_PER_M = 2_500_000
-PRICE_CACHED_LARGE_MICRO_PER_M = 50_000
-PRICE_CREATE_5M_LARGE_MICRO_PER_M = 625_000
-PRICE_CREATE_1H_LARGE_MICRO_PER_M = 1_000_000
+PRICE_INPUT_MICRO_PER_M = 2_000_000
+PRICE_OUTPUT_MICRO_PER_M = 10_000_000
+PRICE_CACHED_MICRO_PER_M = 100_000
+PRICE_CREATE_5M_MICRO_PER_M = 2_500_000
+PRICE_CREATE_1H_MICRO_PER_M = 4_000_000
 MICRO_PER_TOKEN_UNIT = 1_000_000
+
+#: Fixed cheap thinking profile: ``disabled`` returns 400, so the
+#: product pins ``between_tools`` (no other thinking fields) with a
+#: fixed ``output_config`` effort of ``low`` for the whole run. The
+#: immutable dispatch check enforces both values exactly.
+THINKING_PROFILE = {"type": "between_tools"}
+EFFORT_LEVEL = "low"
+
+#: Bounds for one replayed thinking/redacted_thinking block and for
+#: the number of such blocks per response turn. Blocks replay
+#: verbatim; anything larger or more numerous fails closed instead
+#: of being truncated or forged.
+THINKING_TEXT_MAX_CHARS = 8192
+THINKING_SIGNATURE_MAX_CHARS = 8192
+REDACTED_DATA_MAX_CHARS = 8192
+THINKING_MAX_BLOCKS = 32
+
+#: Replay-metadata key carrying the exact original assistant content
+#: blocks for one turn (text/thinking/redacted_thinking/tool_use in
+#: original order, with verbatim original tool inputs), JSON encoded
+#: once on the first parsed tool_use. Unknown metadata keys fail the
+#: dispatch closed; only the parser in this module ever writes this.
+ASSISTANT_CONTENT_KEY = "anthropic_assistant_content"
+
+#: Legacy partitioned thinking keys (no longer written): retained as
+#: recognized-but-rejected markers so an old/forged partition fails
+#: closed with the dispatch-signature error instead of passing as an
+#: unknown key.
+THINKING_BEFORE_KEY = "anthropic_thinking_before"
+THINKING_AFTER_KEY = "anthropic_thinking_after"
+
+#: Bounds for one public progress text block kept for exact replay.
+TEXT_MAX_CHARS = 8192
+
+#: Bound on total assistant blocks per turn (all kinds) and on the
+#: JSON-encoded exact-content replay blob carried in metadata.
+ASSISTANT_MAX_BLOCKS = 64
+ASSISTANT_CONTENT_MAX_CHARS = 65536
 
 #: Conservative framing margin added to the exact immutable body byte
 #: length for the input-token upper bound. Deliberately larger than
@@ -146,6 +187,170 @@ def validate_workspace_id(raw: object) -> str:
     return value
 
 
+def _checked_thinking_block(block: object) -> dict:
+    """Validate one verbatim thinking/redacted_thinking block.
+
+    Only exact documented shapes pass: ``thinking`` carries exactly
+    ``type``/``thinking``/``signature``, ``redacted_thinking``
+    exactly ``type``/``data`` — no extra provider fields, no
+    reconstruction, no truncation. Anything else fails closed.
+    """
+    if not isinstance(block, dict):
+        raise ProviderError("A provider thinking block is malformed.")
+    kind = block.get("type")
+    if kind == "thinking":
+        thinking = block.get("thinking")
+        signature = block.get("signature")
+        if (
+            set(block.keys()) != {"type", "thinking", "signature"}
+            or not isinstance(thinking, str)
+            or not 1 <= len(thinking) <= THINKING_TEXT_MAX_CHARS
+            or not isinstance(signature, str)
+            or not 1 <= len(signature) <= THINKING_SIGNATURE_MAX_CHARS
+        ):
+            raise ProviderError("A provider thinking block is malformed.")
+        return {"type": "thinking", "thinking": thinking, "signature": signature}
+    if kind == "redacted_thinking":
+        data = block.get("data")
+        if (
+            set(block.keys()) != {"type", "data"}
+            or not isinstance(data, str)
+            or not 1 <= len(data) <= REDACTED_DATA_MAX_CHARS
+        ):
+            raise ProviderError("A provider thinking block is malformed.")
+        return {"type": "redacted_thinking", "data": data}
+    raise ProviderError("A provider thinking block is malformed.")
+
+
+def _checked_caller(raw: object, *, missing_ok: bool = True) -> dict | None:
+    """Validate the optional native ``caller`` field; fail closed.
+
+    Only absent/``None`` or exactly ``{"type": "direct"}`` passes for
+    the direct-tool profile. Server/code-execution callers and any
+    other shape fail closed. Returns the preserved dict or ``None``
+    when the field is absent/null (never invented).
+    """
+    if raw is None and missing_ok:
+        return None
+    if isinstance(raw, dict) and raw == {"type": "direct"}:
+        return {"type": "direct"}
+    raise ProviderError("The provider dispatch signature is malformed.")
+
+
+def _checked_toolset_name(raw: object, *, missing_ok: bool = True) -> None:
+    """Validate the optional native ``toolset_name`` field; fail closed.
+
+    Only absent/``None`` passes for the direct-tool profile: any
+    non-null toolset name is a hosted-tool marker and fails closed.
+    """
+    if raw is None and missing_ok:
+        return
+    raise ProviderError("The provider dispatch signature is malformed.")
+
+
+def _checked_citations(raw: object, *, missing_ok: bool = True) -> list | None:
+    """Validate the optional native text ``citations`` field; fail closed.
+
+    Only absent/``None``/``[]`` passes (citations feature
+    unrequested): any nonempty citation content fails closed.
+    Returns the preserved ``[]`` or ``None`` when absent/null.
+    """
+    if raw is None and missing_ok:
+        return None
+    if isinstance(raw, list) and raw == []:
+        return []
+    raise ProviderError("The provider dispatch signature is malformed.")
+
+
+def _checked_tool_use_block(block: dict) -> dict:
+    """Validate one exact ``tool_use`` block incl. neutral native fields."""
+    allowed = {"type", "id", "name", "input", "caller", "toolset_name"}
+    if not set(block.keys()) <= allowed:
+        raise ProviderError("The provider dispatch signature is malformed.")
+    tool_id = block.get("id", "")
+    name = block.get("name")
+    arguments = block.get("input", {})
+    if (
+        not isinstance(tool_id, str)
+        or not 1 <= len(tool_id) <= TOOL_USE_ID_MAX_LEN
+        or not isinstance(name, str)
+        or not name
+        or not isinstance(arguments, dict)
+    ):
+        raise ProviderError("The provider dispatch signature is malformed.")
+    checked: dict = {"type": "tool_use", "id": tool_id, "name": name, "input": arguments}
+    if "caller" in block:
+        caller = _checked_caller(block.get("caller"))
+        if caller is not None:
+            checked["caller"] = caller
+    if "toolset_name" in block:
+        _checked_toolset_name(block.get("toolset_name"))
+    return checked
+
+
+def _checked_text_block(block: object) -> dict:
+    """Validate one verbatim public progress text block; fail closed."""
+    if not isinstance(block, dict):
+        raise ProviderError("The provider answer is malformed.")
+    if not set(block.keys()) <= {"type", "text", "citations"}:
+        raise ProviderError("The provider answer is malformed.")
+    text = block.get("text")
+    if not isinstance(text, str) or not 1 <= len(text) <= TEXT_MAX_CHARS:
+        raise ProviderError("The provider answer is malformed.")
+    checked: dict = {"type": "text", "text": text}
+    if "citations" in block:
+        try:
+            citations = _checked_citations(block.get("citations"))
+        except ProviderError as exc:
+            raise ProviderError("The provider answer is malformed.") from exc
+        if citations is not None:
+            checked["citations"] = citations
+    return checked
+
+
+def _checked_assistant_block(block: object) -> dict:
+    """Validate one exact original assistant block; fail closed."""
+    if not isinstance(block, dict):
+        raise ProviderError("The provider dispatch signature is malformed.")
+    kind = block.get("type")
+    if kind == "text":
+        if not set(block.keys()) <= {"type", "text", "citations"}:
+            raise ProviderError("The provider dispatch signature is malformed.")
+        text = block.get("text")
+        if not isinstance(text, str) or not 1 <= len(text) <= TEXT_MAX_CHARS:
+            raise ProviderError("The provider dispatch signature is malformed.")
+        checked: dict = {"type": "text", "text": text}
+        if "citations" in block:
+            citations = _checked_citations(block.get("citations"))
+            if citations is not None:
+                checked["citations"] = citations
+        return checked
+    if kind in ("thinking", "redacted_thinking"):
+        return _checked_thinking_block(block)
+    if kind == "tool_use":
+        return _checked_tool_use_block(block)
+    raise ProviderError("The provider dispatch signature is malformed.")
+
+
+def _decode_assistant_content(raw: object) -> list:
+    """Decode one exact original assistant content list; fail closed."""
+    if not isinstance(raw, str):
+        raise ProviderError("The provider dispatch signature is malformed.")
+    if not 1 <= len(raw) <= ASSISTANT_CONTENT_MAX_CHARS:
+        raise ProviderError("The provider dispatch signature is malformed.")
+    try:
+        items = json.loads(raw)
+    except ValueError as exc:
+        raise ProviderError("The provider dispatch signature is malformed.") from exc
+    if not isinstance(items, list) or not 1 <= len(items) <= ASSISTANT_MAX_BLOCKS:
+        raise ProviderError("The provider dispatch signature is malformed.")
+    checked = [_checked_assistant_block(item) for item in items]
+    thinking_total = sum(1 for item in checked if item["type"] in ("thinking", "redacted_thinking"))
+    if thinking_total > THINKING_MAX_BLOCKS:
+        raise ProviderError("The provider dispatch signature is malformed.")
+    return checked
+
+
 def build_dispatch_body(
     *,
     model: str,
@@ -158,13 +363,23 @@ def build_dispatch_body(
     """Assemble the decoded wire body from already-gated values.
 
     Replay decision: the system prompt, the user message and, in
-    order, prior assistant ``tool_use`` blocks plus the paired user
-    ``tool_result`` blocks the service hands over. Thinking stays
-    disabled; no other history.
+    order, prior assistant content plus the paired user
+    ``tool_result`` blocks the service hands over. Assistant content
+    replays the EXACT original blocks per turn (text/thinking/
+    redacted_thinking/tool_use in original order, with verbatim
+    original tool inputs) carried once on the first call's replay
+    metadata. Tool execution still uses the server-overridden
+    arguments; the stored originals are replay data only.
+    Signatures are never forged or reconstructed: a malformed
+    replay fails the dispatch closed. No other history.
 
-    The body carries explicit ``service_tier: "standard_only"`` for
-    standard-capacity processing: the documented default ``"auto"``
-    would use Priority capacity when available.
+    Thinking uses ``{"type": "between_tools"}`` (``disabled``
+    returns 400) with a fixed cheap ``output_config`` effort for
+    the whole run; no forced ``tool_choice``, no
+    ``temperature``/``top_p``/``top_k``. The body carries explicit
+    ``service_tier: "standard_only"`` for standard-capacity
+    processing: the documented default ``"auto"`` would use
+    Priority capacity when available.
 
     Decoded values are egress-validated BEFORE evidence is
     JSON-encoded, so forbidden content cannot hide behind escapes.
@@ -200,15 +415,54 @@ def build_dispatch_body(
     for exchange in exchanges:
         assistant_content: list = []
         user_content: list = []
-        for call in exchange.get("calls", ()):  # type: ignore[union-attr]
-            assistant_content.append(
-                {
-                    "type": "tool_use",
-                    "id": call["call_id"],
-                    "name": call["name"],
-                    "input": call["arguments"],
-                }
-            )
+        exchange_calls = exchange.get("calls", ())
+        if not isinstance(exchange_calls, (list, tuple)):
+            raise ProviderError("The provider dispatch tools are malformed.")
+        for position, call in enumerate(exchange_calls):
+            if not isinstance(call, dict):
+                raise ProviderError("The provider dispatch tools are malformed.")
+            metadata = call.get("metadata") or {}
+            if not isinstance(metadata, dict):
+                raise ProviderError("The provider dispatch signature is malformed.")
+            for key in metadata:
+                if key == ASSISTANT_CONTENT_KEY and position != 0:
+                    raise ProviderError("The provider dispatch signature is malformed.")
+                if key in (THINKING_BEFORE_KEY, THINKING_AFTER_KEY):
+                    raise ProviderError("The provider dispatch signature is malformed.")
+                if key != ASSISTANT_CONTENT_KEY:
+                    raise ProviderError("The provider dispatch signature is malformed.")
+        first_meta = {}
+        if exchange_calls:
+            first = exchange_calls[0]
+            if not isinstance(first, dict):
+                raise ProviderError("The provider dispatch tools are malformed.")
+            first_meta = first.get("metadata") or {}
+            if not isinstance(first_meta, dict):
+                raise ProviderError("The provider dispatch signature is malformed.")
+        if ASSISTANT_CONTENT_KEY in first_meta:
+            decoded = _decode_assistant_content(first_meta[ASSISTANT_CONTENT_KEY])
+            replay_tools = [b for b in decoded if b["type"] == "tool_use"]
+            if len(replay_tools) != len(exchange_calls):
+                raise ProviderError("The provider dispatch signature is malformed.")
+            for block, call in zip(replay_tools, exchange_calls):
+                if block["id"] != call.get("call_id") or block["name"] != call.get("name"):
+                    raise ProviderError("The provider dispatch signature is malformed.")
+            check_wire_values({"assistant_content": decoded}, context="provider dispatch")
+            assistant_content = decoded
+        else:
+            for call in exchange_calls:
+                if not isinstance(call, dict):
+                    raise ProviderError("The provider dispatch tools are malformed.")
+                if (call.get("metadata") or {}) != {}:
+                    raise ProviderError("The provider dispatch signature is malformed.")
+                assistant_content.append(
+                    {
+                        "type": "tool_use",
+                        "id": call["call_id"],
+                        "name": call["name"],
+                        "input": call["arguments"],
+                    }
+                )
         for output in exchange.get("outputs", ()):  # type: ignore[union-attr]
             user_content.append(
                 {
@@ -228,7 +482,8 @@ def build_dispatch_body(
         "system": [{"type": "text", "text": instructions}],
         "messages": messages,
         "tools": native_tools,
-        "thinking": {"type": "disabled"},
+        "thinking": dict(THINKING_PROFILE),
+        "output_config": {"effort": EFFORT_LEVEL},
         "service_tier": SERVICE_TIER,
         "max_tokens": max_output_tokens,
     }
@@ -253,13 +508,46 @@ def validate_body(wire: bytes, *, expected_model: str) -> None:
         raise ProviderError("The provider dispatch model is not allowlisted.")
     if body.get("stream") is True:
         raise ProviderError("The provider dispatch must not stream.")
-    if body.get("thinking") != {"type": "disabled"}:
+    if body.get("thinking") != dict(THINKING_PROFILE):
         raise ProviderError("The provider dispatch thinking profile is not allowlisted.")
+    if body.get("output_config") != {"effort": EFFORT_LEVEL}:
+        raise ProviderError("The provider dispatch thinking profile is not allowlisted.")
+    for forbidden in ("tool_choice", "temperature", "top_p", "top_k"):
+        if forbidden in body:
+            raise ProviderError("The provider dispatch tools are malformed.")
     if body.get("service_tier") != SERVICE_TIER:
         raise ProviderError("The provider dispatch processing tier is not allowlisted.")
     messages = body.get("messages")
     if not isinstance(messages, list) or not messages:
         raise ProviderError("The provider dispatch is malformed.")
+    thinking_total = 0
+    for message in messages:
+        if not isinstance(message, dict):
+            raise ProviderError("The provider dispatch is malformed.")
+        role = message.get("role")
+        content = message.get("content")
+        if role not in ("user", "assistant") or not isinstance(content, list) or not content:
+            raise ProviderError("The provider dispatch is malformed.")
+        if role != "assistant":
+            continue
+        for block in content:
+            if not isinstance(block, dict):
+                raise ProviderError("The provider dispatch is malformed.")
+            kind = block.get("type")
+            if kind == "text":
+                _checked_text_block(block)
+            elif kind in ("thinking", "redacted_thinking"):
+                _checked_thinking_block(block)
+                thinking_total += 1
+                if thinking_total > THINKING_MAX_BLOCKS:
+                    raise ProviderError("The provider dispatch signature is malformed.")
+            elif kind == "tool_use":
+                try:
+                    _checked_tool_use_block(block)
+                except ProviderError as exc:
+                    raise ProviderError("The provider dispatch tools are malformed.") from exc
+            else:
+                raise ProviderError("The provider dispatch is malformed.")
 
 
 def cost_micro_usd(
@@ -271,14 +559,14 @@ def cost_micro_usd(
     cache_creation_5m_tokens: int = 0,
     cache_creation_1h_tokens: int = 0,
 ) -> int:
-    """Integer micro-USD charge with tiered small/large input pricing.
+    """Integer micro-USD charge at the single flat Sonnet rate.
 
     Cache creation/read counts are disjoint input components.
     ``cache_creation_tokens`` carries creation of UNKNOWN time-to-live
     and is priced conservatively at the highest supported (1-hour)
     write rate; the explicit 5-minute / 1-hour breakdown buckets use
-    their own rates. Reads bill at the cached rate. Totals above
-    ``SMALL_INPUT_MAX`` input tokens use the larger-prompt rates.
+    their own rates. Reads bill at the cached rate. There is no
+    100k input tier for this Sonnet model.
     """
     for tokens in (
         input_tokens,
@@ -290,30 +578,12 @@ def cost_micro_usd(
     ):
         if isinstance(tokens, bool) or not isinstance(tokens, int) or tokens < 0:
             raise ProviderError("The provider usage is malformed.")
-    created_total = cache_creation_tokens + cache_creation_5m_tokens + cache_creation_1h_tokens
-    total_input = input_tokens + created_total + cache_read_tokens
-    if total_input <= SMALL_INPUT_MAX:
-        price_in, price_out, price_cached, price_5m, price_1h = (
-            PRICE_INPUT_MICRO_PER_M,
-            PRICE_OUTPUT_MICRO_PER_M,
-            PRICE_CACHED_MICRO_PER_M,
-            PRICE_CREATE_5M_MICRO_PER_M,
-            PRICE_CREATE_1H_MICRO_PER_M,
-        )
-    else:
-        price_in, price_out, price_cached, price_5m, price_1h = (
-            PRICE_INPUT_LARGE_MICRO_PER_M,
-            PRICE_OUTPUT_LARGE_MICRO_PER_M,
-            PRICE_CACHED_LARGE_MICRO_PER_M,
-            PRICE_CREATE_5M_LARGE_MICRO_PER_M,
-            PRICE_CREATE_1H_LARGE_MICRO_PER_M,
-        )
     total = (
-        input_tokens * price_in
-        + (cache_creation_tokens + cache_creation_1h_tokens) * price_1h
-        + cache_creation_5m_tokens * price_5m
-        + cache_read_tokens * price_cached
-        + output_tokens * price_out
+        input_tokens * PRICE_INPUT_MICRO_PER_M
+        + (cache_creation_tokens + cache_creation_1h_tokens) * PRICE_CREATE_1H_MICRO_PER_M
+        + cache_creation_5m_tokens * PRICE_CREATE_5M_MICRO_PER_M
+        + cache_read_tokens * PRICE_CACHED_MICRO_PER_M
+        + output_tokens * PRICE_OUTPUT_MICRO_PER_M
     )
     return max(1, (total + MICRO_PER_TOKEN_UNIT - 1) // MICRO_PER_TOKEN_UNIT)
 
@@ -405,7 +675,17 @@ def validate_usage(payload: object, *, max_output_tokens: int, input_upper: int)
 def parse_response(
     payload: object, *, expected_model: str, max_output_tokens: int, input_upper: int
 ) -> ProviderResponse:
-    """Parse one Messages body into text, correlated calls and usage."""
+    """Parse one Messages body into text, correlated calls and usage.
+
+    The exact original assistant blocks (text/thinking/
+    redacted_thinking/tool_use in original order, with verbatim
+    original tool inputs) are JSON-encoded once on the first parsed
+    ``tool_use`` under the single replay key. The next dispatch
+    replays those blocks verbatim (never reconstructed, never
+    reordered, never re-input from executed scopes). Thinking text
+    never enters the answer text, logs, evidence or persistent DB —
+    only ``text`` blocks do.
+    """
     if not isinstance(payload, dict):
         raise ProviderError("The provider answer is malformed.")
     if payload.get("type") != "message":
@@ -423,30 +703,53 @@ def parse_response(
         raise ProviderError("The provider answer is malformed.")
     texts: list[str] = []
     calls: list[ToolCall] = []
+    original: list[dict] = []
+    thinking_total = 0
+    if len(content) > ASSISTANT_MAX_BLOCKS:
+        raise ProviderError("The provider answer is malformed.")
     for block in content:
         if not isinstance(block, dict):
             raise ProviderError("The provider answer is malformed.")
         kind = block.get("type")
         if kind == "text":
-            text = block.get("text", "")
-            if not isinstance(text, str):
-                raise ProviderError("The provider answer is malformed.")
-            texts.append(text)
+            checked = _checked_text_block(block)
+            texts.append(checked["text"])
+            original.append(checked)
+        elif kind in ("thinking", "redacted_thinking"):
+            checked = _checked_thinking_block(block)
+            original.append(checked)
+            thinking_total += 1
+            if thinking_total > THINKING_MAX_BLOCKS:
+                raise ProviderError("A provider thinking block is malformed.")
         elif kind == "tool_use":
-            tool_id = block.get("id", "")
-            name = block.get("name")
-            arguments = block.get("input", {})
-            if (
-                not isinstance(tool_id, str)
-                or not 1 <= len(tool_id) <= TOOL_USE_ID_MAX_LEN
-                or not isinstance(name, str)
-                or not name
-                or not isinstance(arguments, dict)
-            ):
-                raise ProviderError("A provider tool call is malformed.")
-            calls.append(ToolCall(name=name, arguments=arguments, call_id=tool_id))
+            try:
+                checked_tool = _checked_tool_use_block(block)
+            except ProviderError as exc:
+                raise ProviderError("A provider tool call is malformed.") from exc
+            original.append(checked_tool)
+            calls.append(
+                ToolCall(
+                    name=checked_tool["name"],
+                    arguments=checked_tool["input"],
+                    call_id=checked_tool["id"],
+                    metadata={},
+                )
+            )
         else:
             raise ProviderError("The provider answer carries an unknown block type.")
+    if calls:
+        encoded = json.dumps(original, sort_keys=True, separators=(",", ":"))
+        if not 1 <= len(encoded) <= ASSISTANT_CONTENT_MAX_CHARS:
+            raise ProviderError("The provider answer is malformed.")
+        first = calls[0]
+        calls[0] = ToolCall(
+            name=first.name,
+            arguments=first.arguments,
+            call_id=first.call_id,
+            metadata={ASSISTANT_CONTENT_KEY: encoded},
+        )
+    # Thinking/text with no tool_use ends the turn: nothing to replay,
+    # the blocks are dropped (never shown) rather than stored anywhere.
     usage = validate_usage(
         payload.get("usage"), max_output_tokens=max_output_tokens, input_upper=input_upper
     )

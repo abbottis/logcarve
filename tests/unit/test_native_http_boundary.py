@@ -51,10 +51,10 @@ PROVIDERS = {
         "adapter": oai.OpenAIResponsesAdapter,
         "endpoint": "https://api.openai.com/v1/responses",
         "normalized_url": "https://api.openai.com:443/v1/responses",
-        "model": "gpt-6-luna",
+        "model": "gpt-6.1-terra",
         "payload": {
             "id": "resp_ok",
-            "model": "gpt-6-luna",
+            "model": "gpt-6.1-terra",
             "status": "completed",
             "output": [{"type": "message", "content": [{"type": "output_text", "text": "ok"}]}],
             "usage": {"input_tokens": 10, "output_tokens": 2, "total_tokens": 12},
@@ -65,16 +65,16 @@ PROVIDERS = {
         "adapter": gg.GeminiGenerateContentAdapter,
         "endpoint": (
             "https://generativelanguage.googleapis.com/v1beta/models/"
-            "gemini-3.5-flash-lite:generateContent"
+            "gemini-3.8-flash:generateContent"
         ),
         "normalized_url": (
             "https://generativelanguage.googleapis.com:443/v1beta/models/"
-            "gemini-3.5-flash-lite:generateContent"
+            "gemini-3.8-flash:generateContent"
         ),
-        "model": "gemini-3.5-flash-lite",
+        "model": "gemini-3.8-flash",
         "payload": {
             "responseId": "resp_ok",
-            "modelVersion": "gemini-3.5-flash-lite",
+            "modelVersion": "gemini-3.8-flash",
             "candidates": [
                 {
                     "finishReason": "STOP",
@@ -93,11 +93,11 @@ PROVIDERS = {
         "adapter": am.AnthropicMessagesAdapter,
         "endpoint": "https://api.anthropic.com/v1/messages",
         "normalized_url": "https://api.anthropic.com:443/v1/messages",
-        "model": "claude-haiku-5-5",
+        "model": "claude-sonnet-5-5",
         "payload": {
             "id": "msg_ok",
             "type": "message",
-            "model": "claude-haiku-5-5",
+            "model": "claude-sonnet-5-5",
             "role": "assistant",
             "stop_reason": "end_turn",
             "content": [{"type": "text", "text": "ok"}],

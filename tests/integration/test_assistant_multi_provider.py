@@ -49,9 +49,9 @@ ACTOR = Actor(kind="admin", username="admin", session_id="multi")
 
 PROVIDERS = {
     "meta": ("muse-spark-1.3", "standard"),
-    "openai": ("gpt-6-luna", "standard"),
-    "gemini": ("gemini-3.5-flash-lite", "paid"),
-    "anthropic": ("claude-haiku-5-5", "api"),
+    "openai": ("gpt-6.1-terra", "standard"),
+    "gemini": ("gemini-3.8-flash", "paid"),
+    "anthropic": ("claude-sonnet-5-5", "api"),
 }
 
 
@@ -166,7 +166,8 @@ def _scripted_transport(provider, calls, first_payload=None):
             assert headers["Authorization"].startswith("Bearer ")
             assert headers["anthropic-version"] == "2026-10-21"
             payload = json.loads(body.decode("utf-8"))
-            assert payload["thinking"] == {"type": "disabled"}
+            assert payload["thinking"] == {"type": "between_tools"}
+            assert payload["output_config"] == {"effort": "low"}
         calls.append(body)
         if len(calls) == 1 and first_payload is not None:
             return first_payload(provider, model)
@@ -383,7 +384,7 @@ def test_select_provider_rejects_unknown_model_pair(menv):
     settings = Settings(
         ai_enabled=True,
         model_provider="meta",
-        model_id="gpt-6-luna",
+        model_id="gpt-6.1-terra",
         model_service_tier="standard",
         model_data_policy_verified=True,
         model_allow_real_data=True,

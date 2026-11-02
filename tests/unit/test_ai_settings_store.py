@@ -127,14 +127,14 @@ def test_key_fingerprint_is_stable_and_opaque():
 
 
 def test_provider_model_validation():
-    settings_store.validate_provider_model("openai", "gpt-6-luna")
-    settings_store.validate_provider_model("gemini", "gemini-3.5-flash-lite")
-    settings_store.validate_provider_model("anthropic", "claude-haiku-5-5")
+    settings_store.validate_provider_model("openai", "gpt-6.1-terra")
+    settings_store.validate_provider_model("gemini", "gemini-3.8-flash")
+    settings_store.validate_provider_model("anthropic", "claude-sonnet-5-5")
     settings_store.validate_provider_model("meta", "muse-spark-1.3")
     with pytest.raises(SettingsStoreError):
         settings_store.validate_provider_model("openai", "muse-spark-1.3")
     with pytest.raises(SettingsStoreError):
-        settings_store.validate_provider_model("nope", "gpt-6-luna")
+        settings_store.validate_provider_model("nope", "gpt-6.1-terra")
     assert settings_store.validate_policy("synthetic") == "synthetic"
     assert settings_store.validate_policy("real") == "real"
     with pytest.raises(SettingsStoreError):

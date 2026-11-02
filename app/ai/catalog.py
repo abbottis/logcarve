@@ -59,12 +59,12 @@ CATALOG: dict[str, ProviderEntry] = {
         tier="standard",
         models=(
             ModelEntry(
-                model_id="gpt-6-luna",
+                model_id="gpt-6.1-terra",
                 pricing_version="2026-11-02-developers.openai.com",
-                pricing_url="https://developers.openai.com/api/docs/pricing",
+                pricing_url="https://developers.openai.com/api/docs/models/gpt-6.1-terra",
             ),
         ),
-        default_model="gpt-6-luna",
+        default_model="gpt-6.1-terra",
     ),
     "gemini": ProviderEntry(
         provider="gemini",
@@ -75,12 +75,12 @@ CATALOG: dict[str, ProviderEntry] = {
         tier="paid",
         models=(
             ModelEntry(
-                model_id="gemini-3.5-flash-lite",
+                model_id="gemini-3.8-flash",
                 pricing_version="2026-11-02-ai.google.dev",
-                pricing_url="https://ai.google.dev/gemini-api/docs/pricing",
+                pricing_url="https://ai.google.dev/gemini-api/docs/models/gemini-3.8-flash",
             ),
         ),
-        default_model="gemini-3.5-flash-lite",
+        default_model="gemini-3.8-flash",
     ),
     "anthropic": ProviderEntry(
         provider="anthropic",
@@ -91,12 +91,12 @@ CATALOG: dict[str, ProviderEntry] = {
         tier="api",
         models=(
             ModelEntry(
-                model_id="claude-haiku-5-5",
+                model_id="claude-sonnet-5-5",
                 pricing_version="2026-11-02-platform.claude.com",
-                pricing_url="https://platform.claude.com/docs/en/about-claude/pricing",
+                pricing_url="https://platform.claude.com/docs/en/models/sonnet-5-5/overview",
             ),
         ),
-        default_model="claude-haiku-5-5",
+        default_model="claude-sonnet-5-5",
     ),
 }
 

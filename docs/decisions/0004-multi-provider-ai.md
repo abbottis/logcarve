@@ -47,3 +47,31 @@ New criteria `AI-05` (native multi-provider transports), `AI-06`
 (backend AI settings), `AI-07` (runtime usage authorization); extends
 AI-01–AI-04, PRIV-01–02, COST-01–02, UI-02–03, AUTH-01–02, API-04,
 OPS-02. Recorded evidence in `docs/verification.md`.
+
+## Update 2026-11-02 — Alternative model upgrade (owner-authorized)
+
+Owner request 2026-11-02 (task `artifacts/model-upgrade-2026-11-02/task.md`):
+replace the three alternative defaults with exact `gpt-6.1-terra`,
+`gemini-3.8-flash`, `claude-sonnet-5-5`; Meta `muse-spark-1.3` unchanged
+and still the selected demo provider. Authorizes directly required
+native wire/pricing compatibility updates only (no arbitrary models or
+URLs). Affected criteria: AI-05/AI-07, COST-01/02, PRIV-01/02.
+
+- OpenAI: `reasoning.effort none` retained, `strict: false`,
+  `store: false`, `service_tier: default`; input includes cached and
+  cache-write subsets (write retention unreported → conservative 12h
+  rate; worst-case write reservation). No explicit caching features.
+- Gemini: fixed cheap thinking `LOW`; paid intro rates through
+  2026-12-31, higher standard rates from 2027-01-01 (reverify); native
+  `FunctionCall.id` + sibling `thoughtSignature` replay preserved.
+- Sonnet: `thinking: {"type": "between_tools"}` with fixed
+  `output_config: {"effort": "low"}`; flat pricing (no 100k tier);
+  disjoint input/cache-write/cache-read accounting; exact original
+  assistant-block replay (text/thinking/tool_use order, verbatim
+  original inputs) bound to same provider/model with unchanged
+  system/tools/prefix; opaque thinking excluded from
+  answer/UI/DB/log/evidence. Minimal metadata extension:
+  `anthropic_assistant_content` allowlisted in service validation.
+- Live runs use owner-supplied keys with real runs pending coordinator;
+  prior "no owner key" wording is superseded. Historical model choices
+  above are preserved as history.

@@ -26,9 +26,9 @@ def _settings(provider, model, tier, verified=False, allow=False, **extra):
     "provider,model,tier",
     [
         ("meta", "muse-spark-1.3", "standard"),
-        ("openai", "gpt-6-luna", "standard"),
-        ("gemini", "gemini-3.5-flash-lite", "paid"),
-        ("anthropic", "claude-haiku-5-5", "api"),
+        ("openai", "gpt-6.1-terra", "standard"),
+        ("gemini", "gemini-3.8-flash", "paid"),
+        ("anthropic", "claude-sonnet-5-5", "api"),
     ],
 )
 def test_all_providers_pass_with_matching_tier(provider, model, tier):
@@ -42,11 +42,11 @@ def test_tiers_are_never_relabeled():
     # Gemini Paid/API and Anthropic API must not pass as Meta Standard.
     with pytest.raises(GateBlocked):
         gate.validate_for_real_data(
-            _settings("gemini", "gemini-3.5-flash-lite", "standard", verified=True, allow=True)
+            _settings("gemini", "gemini-3.8-flash", "standard", verified=True, allow=True)
         )
     with pytest.raises(GateBlocked):
         gate.validate_for_real_data(
-            _settings("anthropic", "claude-haiku-5-5", "standard", verified=True, allow=True)
+            _settings("anthropic", "claude-sonnet-5-5", "standard", verified=True, allow=True)
         )
     with pytest.raises(GateBlocked):
         gate.validate_for_real_data(
@@ -57,7 +57,7 @@ def test_tiers_are_never_relabeled():
 def test_unknown_provider_and_model_fail_closed():
     with pytest.raises(GateBlocked):
         gate.validate_for_real_data(
-            _settings("unknown", "gpt-6-luna", "standard", verified=True, allow=True)
+            _settings("unknown", "gpt-6.1-terra", "standard", verified=True, allow=True)
         )
     with pytest.raises(GateBlocked):
         gate.validate_for_real_data(
@@ -65,18 +65,18 @@ def test_unknown_provider_and_model_fail_closed():
         )
     with pytest.raises(GateBlocked):
         gate.validate_for_real_data(
-            _settings("meta", "gpt-6-luna", "standard", verified=True, allow=True)
+            _settings("meta", "gpt-6.1-terra", "standard", verified=True, allow=True)
         )
 
 
 def test_unverified_policy_and_disabled_real_data_block():
     with pytest.raises(GateBlocked):
         gate.validate_for_real_data(
-            _settings("openai", "gpt-6-luna", "standard", verified=False, allow=True)
+            _settings("openai", "gpt-6.1-terra", "standard", verified=False, allow=True)
         )
     with pytest.raises(GateBlocked):
         gate.validate_for_real_data(
-            _settings("openai", "gpt-6-luna", "standard", verified=True, allow=False)
+            _settings("openai", "gpt-6.1-terra", "standard", verified=True, allow=False)
         )
 
 
@@ -138,7 +138,7 @@ def test_unreadable_store_blocks_both_gates():
 def test_synthetic_mode_requires_explicit_selection_and_assertion():
     settings = _settings(
         "gemini",
-        "gemini-3.5-flash-lite",
+        "gemini-3.8-flash",
         "paid",
         synthetic_only=True,
         synthetic_source_asserted=True,
@@ -150,13 +150,13 @@ def test_synthetic_mode_requires_explicit_selection_and_assertion():
         gate.validate_for_real_data(settings)
     without_assertion = _settings(
         "gemini",
-        "gemini-3.5-flash-lite",
+        "gemini-3.8-flash",
         "paid",
         synthetic_only=True,
         synthetic_source_asserted=False,
     )
     with pytest.raises(GateBlocked):
         gate.validate_for_synthetic(without_assertion)
-    unset_mode = _settings("gemini", "gemini-3.5-flash-lite", "paid")
+    unset_mode = _settings("gemini", "gemini-3.8-flash", "paid")
     with pytest.raises(GateBlocked):
         gate.validate_for_synthetic(unset_mode)
