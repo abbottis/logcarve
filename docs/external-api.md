@@ -18,6 +18,7 @@ analytics as the dashboard and internal assistant.
 | `GET /api/v1/traffic/heatmap` | Weekday/hour matrix for a display timezone (`tz`) |
 | `GET /api/v1/traffic/clients` | Top pseudonymized clients, aggregates only |
 | `GET /api/v1/crawlers` | Claimed crawler families, counts, paths and statuses |
+| `GET /api/v1/countries` | Exact per-country request/error/byte totals with `Unknown` row, lookup coverage (`with_country`/`unknown`/`unavailable`, observed sources/releases) and the CC BY 4.0 `attribution` (T5a / PAR-09) |
 | `GET /api/v1/bots` | Named-bot table with allowlisted sort and paging |
 | `GET /api/v1/bots/{rule_id}` | One named bot: totals, top paths/404s, robots/sitemap, samples |
 | `GET /api/v1/requests` | Sanitized paginated request explorer (allowlisted sorts incl. legacy `newest`/`oldest` plus `time/client/method/path/status/bytes` ascending/descending with timestamp/id tie-breaks and NULL-bytes-last, bounded `search`); rows carry the 200-char agent sample with an explicit `ua_truncated` flag and a derived `conflict` boolean for the conflicting-bot-identity candidate |
@@ -30,9 +31,13 @@ analytics as the dashboard and internal assistant.
 All analytics endpoints accept the shared selectors `traffic`, `bot`,
 `category`, `provider`, `purpose`, `search` (bounded, LIKE-escaped over the
 stored path, user agent, referrer host and client pseudonym),
-`status_class`, plus the existing method/status/path/referrer matchers and
-`limit`/`offset` paging. Unknown or contradictory selectors reject with a
-safe structured error; token site/source enforcement is unchanged.
+`status_class`, `country` (one ISO 3166-1 alpha-2 code, or the explicit
+`UNKNOWN` selector for rows with no known country; anything else rejects
+with a safe structured error), plus the existing method/status/path/referrer
+matchers and `limit`/`offset` paging. Unknown or contradictory selectors
+reject with a safe structured error; token site/source enforcement is
+unchanged. A server-country estimate describes where an observed address
+is registered, never visitor identity, residence or proof of bot origin.
 | `GET /healthz` | Minimal liveness |
 | `GET /readyz` | Restricted/internal DB readiness |
 
@@ -87,9 +92,11 @@ HTTP Request node: GET `{{$json.baseUrl}}/api/v1/summary`, query parameters `sit
 
 Two download entries share one deterministic contract over the
 allowlisted export columns (sanitized explorer projection plus
-approved SAFE enrichment — stable HMAC pseudonyms; never original
-client IPs, raw log lines, query values, keys, exception text or
-stored diagnostics, even when an admin display mode is full):
+approved SAFE enrichment — stable HMAC pseudonyms and the T5a/PAR-09
+offline-country outcome `country_code`/`geo_source`/`geo_release`/
+`geo_status`; never original client IPs, raw log lines, query values,
+keys, exception text or stored diagnostics, even when an admin display
+mode is full):
 
 - `GET /api/v1/exports/requests` — Bearer `analytics:read` (token
   site/source/time bounds apply exactly as on every analytics read).

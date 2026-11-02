@@ -2797,3 +2797,41 @@ custom-window assertions still pin the minute-only form.
 | `tests/e2e/test_parity_t4c.py` (3 new: real Apply→Save→Open incl. failure-retained state, baseline Apply + true `input.value` for both modes, fake-clock refresh past 30s asserting URLs/methods/default/dirty+hidden+modal+focus pause and resume; prior refresh-toggle assertion kept, not relaxed) | BLOCKED (environmental) | Collects cleanly (6 tests); Chromium fails at launch in this shell sandbox (`TargetClosedError`, Mach-port `Permission denied`, kill EPERM — identical to the pre-existing T4a/T4b1/T4c block, browser sandbox kept ON, recorded once, no retry/weakening); coordinator runs `uv run --locked pytest tests/e2e/test_parity_t4c.py -q` outside the sandbox |
 | Prior PASS boundaries | PASS | All 11 bounded reports `<=1600`/trusted-client, host-only referrer URL groups with paths withheld, exact-IP search/private modes/chunk body cap, journey Apply/TZ/microduration/semantic SQL, privacy/model-budget scope — covered by the unchanged green suites above |
 | T5a, release, owner acceptance | NOT RUN | Not implemented or claimed; independent review of these corrections stays pending |
+
+## T5a offline GeoIP (PAR-09) + T4c inflight completion — 2026-11-02
+
+Worktree continuation on `feature/logwerk-parity-2026-11-01` (prior HEAD
+`abdf69a` preserved; no reverts). Corrected dependency fact: the earlier
+"upstream 3.2.0 ships cp312-only wheels" claim is FALSE — the current
+`uv.lock` itself carries cp312/cp313/cp314/cp315 wheels and official
+metadata reports `Requires-Python: >=3.10`, Apache-2.0. The temporary
+`python_full_version < '3.14'` marker was an offline-cache workaround
+only; it is removed and `maxminddb==3.2.0` is pinned unconditionally
+(`uv lock` + `uv export` + `uv sync --frozen` regenerated offline).
+Runtime tested is 3.12.16 only; 3.14 runtime is not claimed.
+
+Corrected warm issues before claiming done: `CountryLookup.open` now
+accepts ONLY the genuine `DBIP-Country-Lite` database type (any other
+family closes its handle and reports unavailable — never mislabelled
+MaxMind provenance or a wrong license); `is_lookup_eligible` explicitly
+excludes reserved/private/loopback/link-local/unspecified/
+documentation/multicast even when `is_global` is true (`4000::1` is
+reserved AND global; IPv4-mapped documentation covered); `refresh.js`
+adopts each swap's OWN originating-request state via `detail.xhr`
+(no FIFO, no live-form fallback); overview country drilldown links,
+requests-page credit, and the exact-credit allowlist in
+`check_no_external.mjs` added; stale cp312-only wording in
+`THIRD_PARTY_NOTICES.md` corrected. No genuine MMDB file is in Git
+(structural test) or the Contributor context; no IP/HTTP lookup, no
+invented hash-to-country map, no browser import UI, no translations.
+
+| Check | Result | Evidence |
+| --- | --- | --- |
+| `tests/unit/test_geoip.py` (new, 44) | PASS | Record-shape allowlist (`country_code` + nested `iso_code`, `ZZ`/wrong-type/length rejection), shared selector (`us`→`US`, `UNKNOWN`, `""`/`XX1` reject), eligibility matrix (reserved `4000::1`, IPv4-mapped doc/global, CGNAT, link-local, multicast, unspecified), pre-DB blocking, hit/unknown/unavailable, wrong-type close + no leak, open-gating (missing/dir/garbage), provenance/close/cache/context-manager, no-MMDB-in-tree |
+| `tests/integration/test_parity_t5a.py` (new, 10) | PASS | Hand-derived 6-row import (US 3/0/2/3300, AU 1/1/0/500, Unknown 2/0/0/150; coverage 4/2/0) with service/API/export/AI/saved-view selector equality, hostile `XX1` 400 without echo, blank-dropped saved views, unavailable graceful + required `geoip_unavailable:database_required` with zero writes, corrupt-file unavailable, reprocess 4-row enrichment with stable core IDs/HMAC then 0-row idempotent rerun, no-original-egress across API/exports/countries, CLI env/flag precedence |
+| Existing suites updated for the mandated T5a contract (not weakened) | PASS | Migration tuples `(1..7)`/`(5,6,7)` + new 0007 column/index assertions; row-key sets gain the 4 safe country fields (`test_traffic_api`, `test_owner_ux_stage_b`); matchers contract gains `country: None` (`test_t8_preparation`); overview locality now allowlists exactly the mandated `https://db-ip.com` credit anchor |
+| `tests/unit tests/integration` clean AND `AI_ENABLED=true LLM_WARN_AT_USD=999` | PASS | 1115 passed, 2 skipped (pre-existing live-loopback skips) in EACH configuration, exit codes observed separately via saved status before any tail/echo |
+| `ruff check` + `ruff format --check` repo-wide + `uv lock --check --offline` | PASS | All checks passed; 157 files already formatted; 43 packages resolved, no manifest/lock delta |
+| `npm run build` + `npm run check:external` | PASS | Vendor/js/css rebuilt (`refresh.js` XHR-keying shipped to ignored static output, tracked `app.css` rebuilt); external check passes with the single mandated credit `href` allowlisted — all `src`/`fetch`/`import`/`url()` and every other `href` still fail |
+| `tests/e2e/test_parity_t4c.py` + `tests/e2e/test_parity_t5a.py` (new: inflight reversal + error-while-other-succeeds; country breakdown/drilldown/select/saved-view/Ask) | BLOCKED (environmental) | Both collect cleanly (8 + 3 tests); Chromium fails at launch in this shell sandbox (`TargetClosedError` — same class as the pre-existing T4a/T4b1/T4c block, browser sandbox kept ON, new attempt recorded once, no retry/weakening); coordinator runs the protected suite plus the genuine-DB runtime proof after freeze |
+| Genuine MMDB runtime lookup, T5b, release, owner acceptance | NOT RUN | Not implemented or claimed; coordinator-owned mount + protected full rerun and independent review stay pending |

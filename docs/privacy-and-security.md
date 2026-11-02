@@ -37,6 +37,31 @@ Backups hold ciphertext only; key recovery stays separately documented.
 Retention cascades private rows with their parent requests and fails
 closed when foreign keys cannot be enforced.
 
+## Offline GeoIP country enrichment (parity T5a, PAR-09)
+
+Country lookup is a genuine local MMDB read (DB-IP Country Lite
+format, `dbip-country-lite-YYYY-MM.mmdb`) over an operator-mounted
+read-only path (`GEOIP_DB_PATH` or `--geoip-db`; empty means
+unconfigured): no network request, no paid service, no IP lookup over
+HTTP and no country ever inferred from an HMAC pseudonym. The client
+address is derived transiently during the import/reprocess
+enrichment hook — before the raw address is discarded or encrypted,
+even when `ORIGINAL_IP_KEY` is absent — and only a safe ISO 3166-1
+alpha-2 code plus lookup source/release/status persists per row.
+Private, reserved, loopback, link-local, multicast, documentation,
+unspecified and invalid addresses stay `Unknown` without consulting
+the database, even if it would return a value. A missing, corrupt,
+unreadable or wrong-family database yields fixed `unavailable`
+markers while ordinary analytics keep working; an explicitly required
+database (`GEOIP_REQUIRED` / `--geoip-required`) fails the run before
+any write with the fixed `geoip_unavailable:database_required` code
+(never paths, addresses or exception text). Original addresses never
+reach routine rows, the external API, exports, errors, model tools or
+public Git; the database file itself stays outside Git and outside
+the Contributor context. Every page showing country results carries
+the required CC BY 4.0 credit link `https://db-ip.com`
+("IP Geolocation by DB-IP").
+
 ## Outbound model boundary
 
 Before **every** provider call, validate allowed provider/model and independently verified effective service tier, authorize site/time scope, minimize payload fields, sanitize identifiers/secrets and enforce work/budget limits. Cover prompt/history, tool results, retries, caches and replay. Default export is metrics, time ranges, rule references and sanitized evidence.
