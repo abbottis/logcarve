@@ -134,6 +134,22 @@
 .stat-desc {
   overflow-wrap: anywhere;
 }
+
+/* Settings forms: daisyUI .label defaults to nowrap inline-flex, so
+   long checkbox/policy/key captions overflow narrow viewports. Wrap
+   the caption inside its bounded container; checkboxes keep their
+   size and align to the first text line. */
+.settings-form .label-text {
+  white-space: normal;
+  min-width: 0;
+  max-width: 100%;
+}
+.settings-form .settings-check {
+  align-items: flex-start;
+}
+.settings-form .settings-check .checkbox {
+  flex-shrink: 0;
+}
 .chart-frame canvas {
   max-width: 100%;
 }

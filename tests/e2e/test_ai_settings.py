@@ -170,7 +170,7 @@ def test_ai_settings_save_masking_and_status(page, ai_base):
 def test_ai_settings_themes_and_narrow_viewport(page, ai_base):
     base = ai_base
     _login(page, base)
-    for theme, width in (("light", 1280), ("dark", 1280), ("dark", 390)):
+    for theme, width in (("light", 1280), ("dark", 1280), ("dark", 390), ("dark", 320)):
         page.set_viewport_size({"width": width, "height": 800})
         page.goto(f"{base}/settings")
         expect(page.locator("#set-ai-h")).to_be_visible()
