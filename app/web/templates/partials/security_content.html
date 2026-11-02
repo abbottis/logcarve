@@ -54,10 +54,11 @@
         <p class="mt-1 text-sm">{{ finding.meaning }}</p>
         {% if finding.evidence.avg_requests_per_minute is defined and finding.evidence.avg_requests_per_minute is not none %}
         <dl class="mt-2 flex flex-wrap gap-x-8 gap-y-2 text-sm">
-          <div><dt class="text-base-content/70">{{ t("security.avg_rate") }}</dt><dd class="tech">{{ "%.3f"|format(finding.evidence.avg_requests_per_minute) }}/min ({{ finding.evidence.avg_numerator }})</dd></div>
-          <div><dt class="text-base-content/70">{{ t("security.peak_minute") }}</dt><dd class="tech">{{ finding.evidence.peak_minute_requests }} ({{ finding.evidence.peak_minute }})</dd></div>
+          <div><dt class="text-base-content/70">{{ t("security.avg_rate") }}</dt><dd class="tech">{{ "%.3f"|format(finding.evidence.avg_requests_per_minute) }}/min ({{ t(finding.evidence.avg_numerator_key) }})</dd></div>
+          <div><dt class="text-base-content/70">{{ t("security.peak_minute") }}</dt><dd class="tech">{{ finding.evidence.peak_minute_requests }} {{ t("security.peak_requests_at", minute=finding.evidence.peak_minute) }}</dd></div>
         </dl>
-        {% if finding.evidence.peak_minute_interval %}<p class="mt-1 text-sm text-base-content/70 tech">{{ finding.evidence.peak_minute_interval }}{% if finding.evidence.peak_minute_partial %} · {{ t("security.partial_bucket") }}{% endif %} · {{ finding.evidence.peak_minute_numerator }}</p>{% endif %}
+        <p class="mt-1 text-sm text-base-content/70">{{ t("security.measure_scope", scope=t(finding.evidence.peak_scope_key)) }} · {{ t(finding.evidence.peak_numerator_key) }}</p>
+        {% if finding.evidence.peak_interval_endpoints %}<p class="mt-1 text-sm text-base-content/70 tech">{{ t("security.peak_interval", start=finding.evidence.peak_interval_endpoints[0], end=finding.evidence.peak_interval_endpoints[1]) }}{% if finding.evidence.peak_minute_partial %} · {{ t("security.partial_bucket") }}{% endif %}</p>{% endif %}
         {% if finding.evidence.tempo_note %}<p class="mt-1 text-sm text-base-content/70">{{ finding.evidence.tempo_note }}</p>{% endif %}
         {% endif %}
         {% if finding.evidence.offenders_total is defined %}

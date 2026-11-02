@@ -6,8 +6,17 @@ read (site, source, window, matchers, paging, bucket) as a plain URL.
 Both the browser dashboard and the authenticated chat boundary use this
 module, so links never come from model text or divergent client logic.
 Unknown tool names yield no link.
+
+Comparison evidence replays the ACTUAL executed halves: the model
+``comparison`` report compares equal halves INSIDE the selected parent
+window, so its link carries the executed current half as the page
+window and the executed baseline half as explicit baseline values on
+``/comparison``. The parent window is never mapped as current with a
+previous-window default (that would widen the read and display
+different counts).
 """
 
+from datetime import UTC, datetime, timedelta
 from urllib.parse import urlencode
 
 TOOL_PAGE_MAP = {
@@ -24,8 +33,8 @@ TOOL_PAGE_MAP = {
 #: Report pages for the aggregate-only ``get_report`` tool. Every
 #: report maps to the dashboard page that reproduces its exact read,
 #: including page-local selectors (SEO view, slow-endpoint sort,
-#: referrer view/relation, journey view/sort/min-requests).
-#: Comparison inside-halves semantics arrive with T4c.
+#: referrer view/relation, journey view/sort/min-requests, explicit
+#: comparison baseline halves).
 REPORT_PAGE_MAP = {
     "performance": "/performance",
     "slow_endpoints": "/performance",
@@ -37,7 +46,7 @@ REPORT_PAGE_MAP = {
     "referrer_urls": "/referrers",
     "journeys": "/journeys",
     "journey_entries": "/journeys",
-    "comparison": "/",
+    "comparison": "/comparison",
 }
 
 #: Page-local selectors per report, applied on top of the shared global
@@ -101,6 +110,11 @@ def evidence_url(page_path: str, envelope_filters: dict, tz_name: str = "UTC") -
         "limit",
         "offset",
         "bucket",
+        # Explicit comparison baselines: only the comparison page
+        # reads these; every other page ignores unknown parameters.
+        "baseline",
+        "baseline_from",
+        "baseline_to",
     ):
         value = envelope_filters.get(key)
         if value is None:
@@ -120,6 +134,58 @@ def evidence_url(page_path: str, envelope_filters: dict, tz_name: str = "UTC") -
     return page_path + "?" + urlencode(query)
 
 
+def _comparison_halves(
+    time_from: object, time_to: object
+) -> tuple[datetime, datetime, datetime] | None:
+    """Executed inside-halves of a model comparison parent window.
+
+    Mirrors :func:`app.analytics.service.split_trusted_window_filter`
+    exactly (integer-microsecond arithmetic, even positive length):
+    returns ``(parent_from, mid, parent_to)`` where the baseline half
+    is ``[parent_from, mid)`` and the current half is ``[mid,
+    parent_to)``. Returns ``None`` when the parent cannot split, so
+    the caller links honestly without inventing a baseline.
+    """
+    try:
+        start = datetime.fromisoformat(str(time_from))
+        end = datetime.fromisoformat(str(time_to))
+    except (ValueError, TypeError):
+        return None
+    if start.tzinfo is None:
+        start = start.replace(tzinfo=UTC)
+    if end.tzinfo is None:
+        end = end.replace(tzinfo=UTC)
+    delta = end - start
+    total_us = (delta.days * 86400 + delta.seconds) * 1_000_000 + delta.microseconds
+    if total_us < 2 or total_us % 2 != 0:
+        return None
+    mid = start + timedelta(microseconds=total_us // 2)
+    return start, mid, end
+
+
+def comparison_evidence_url(envelope_filters: dict, tz_name: str = "UTC") -> str:
+    """Evidence link for a model ``comparison`` report: the executed halves.
+
+    The page window carries the executed CURRENT half (second half)
+    and ``baseline_from``/``baseline_to`` carry the executed BASELINE
+    half (first half) with the same selectors, so click/replay shows
+    the exact tool counts. When the parent cannot split evenly, the
+    link carries only the parent window with NO baseline default: the
+    page then prompts for an explicit baseline instead of displaying
+    different counts under a widened default.
+    """
+    halves = _comparison_halves(envelope_filters.get("time_from"), envelope_filters.get("time_to"))
+    if halves is None:
+        return evidence_url("/comparison", envelope_filters, tz_name)
+    parent_from, mid, parent_to = halves
+    scoped = dict(envelope_filters)
+    scoped["time_from"] = mid.isoformat()
+    scoped["time_to"] = parent_to.isoformat()
+    scoped["baseline_from"] = parent_from.isoformat()
+    scoped["baseline_to"] = mid.isoformat()
+    return evidence_url("/comparison", scoped, tz_name)
+
+
 def envelope_href(tool_name: object, envelope_filters: dict, tz_name: str = "UTC") -> str | None:
     """Server-generated evidence link for one tool envelope, if allowlisted."""
     page_path = TOOL_PAGE_MAP.get(tool_name) if isinstance(tool_name, str) else None
@@ -129,6 +195,8 @@ def envelope_href(tool_name: object, envelope_filters: dict, tz_name: str = "UTC
         return None
     if tool_name == "get_report":
         report = envelope_filters.get("report")
+        if report == "comparison":
+            return comparison_evidence_url(envelope_filters, tz_name)
         page_path = REPORT_PAGE_MAP.get(report) if isinstance(report, str) else None
         if page_path is None:
             # Tool-level default: the envelope always carries a valid

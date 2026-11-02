@@ -205,6 +205,45 @@
     renderBar("journeys-chart", "journeys-chart-data", "entry_path", null);
     renderBar("journey-entries-chart", "journey-entries-chart-data", "entry_path", null);
     renderBar("security-findings-chart", "security-findings-chart-data", "label", null);
+    // Current-vs-baseline comparison: grouped bars (current, baseline)
+    // per metric with the same theme treatment; the semantic table in
+    // the page carries the exact values and ratio honesty notes.
+    renderComparison("compare-metrics-chart", "compare-metrics-chart-data");
+  }
+
+  function renderComparison(canvasId, dataId) {
+    var canvas = document.getElementById(canvasId);
+    var data = readData(dataId);
+    if (!canvas || !data || !window.Chart) return;
+    var rows = data.rows || [];
+    var colors = palette();
+    charts.push(new window.Chart(canvas, {
+      type: "bar",
+      data: {
+        labels: rows.map(function (r) { return shortLabel(r.label || r.name, 42); }),
+        datasets: [
+          {
+            label: data.requestsLabel || "Current",
+            data: rows.map(function (r) {
+              return typeof r.current === "number" && isFinite(r.current) ? r.current : 0;
+            }),
+            backgroundColor: colors.line,
+          },
+          {
+            label: data.baselineLabel || "Baseline",
+            data: rows.map(function (r) {
+              return typeof r.previous === "number" && isFinite(r.previous) ? r.previous : 0;
+            }),
+            backgroundColor: colors.error,
+          },
+        ],
+      },
+      options: (function () {
+        var opts = barOptions();
+        opts.plugins.legend.display = true;
+        return opts;
+      })(),
+    }));
   }
 
   function shortLabel(value, maxLen) {

@@ -2,7 +2,9 @@
       {% if fragment_url %}hx-get="{{ fragment_url }}" hx-target="#page-content" hx-swap="innerHTML"{% else %}method="get" action="{{ form_action }}"{% endif %}
       class="mb-4 flex flex-wrap items-end gap-3 rounded-lg border border-base-300 bg-base-100 p-3"
       aria-label="{{ t("filter.title") }}"
-      data-msg-apply-failed="{{ t("filter.apply_failed") }}">
+      data-msg-apply-failed="{{ t("filter.apply_failed") }}"
+      data-msg-refresh-off="{{ t("refresh.off_note") }}"
+      data-msg-refresh-on="{{ t("refresh.on_note") }}">
   {# Preserve evidence-driven scope across Apply: matchers, source, page
      size and bucket resubmit with the window. Paging offset is reset
      deliberately: a new window always starts at the first page, while
@@ -24,6 +26,9 @@
   {% if paths_sort is defined and paths_sort %}<input type="hidden" name="paths_sort" value="{{ paths_sort }}">{% endif %}
   {% if seo_view is defined and seo_view %}<input type="hidden" name="view" value="{{ seo_view }}">{% endif %}
   {% if referrer_view is defined and referrer_view %}<input type="hidden" name="view" value="{{ referrer_view }}">{% endif %}
+  {% if journey_view is defined and journey_view %}<input type="hidden" name="view" value="{{ journey_view }}">{% endif %}
+  {% if journey_sort is defined and journey_sort %}<input type="hidden" name="sort" value="{{ journey_sort }}">{% endif %}
+  {% if min_requests is defined and min_requests %}<input type="hidden" name="min_requests" value="{{ min_requests }}">{% endif %}
   {% if relation is defined and relation %}<input type="hidden" name="relation" value="{{ relation }}">{% endif %}
   <div class="form-control">
     <label class="label py-1" for="f-site"><span class="label-text">{{ t("filter.site") }}</span></label>
@@ -196,3 +201,34 @@
   <button type="submit" class="btn btn-primary btn-sm">{{ t("filter.apply") }}</button>
   <p id="filter-times-notice" class="w-full text-sm text-base-content/70">{{ t("filter.times_in", tz=tz_name) }} ({{ tz_offset }}; {{ t("filter.offset_note", date=window_start_date) }})</p>
 </form>
+<div class="mt-3 flex w-full flex-wrap items-end gap-x-6 gap-y-3 border-t border-base-300 pt-3">
+  {% if csrf_token and canonical_url is defined %}
+  <form method="post" action="/saved-views" class="flex flex-wrap items-end gap-2" aria-label="{{ t("views.save_current") }}">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+    <input type="hidden" name="target" value="{{ canonical_url }}">
+    <div class="form-control">
+      <label class="label py-1" for="save-view-name"><span class="label-text">{{ t("views.name") }}</span></label>
+      <input id="save-view-name" name="name" type="text" maxlength="64" class="input input-bordered input-sm" placeholder="{{ t("views.name_placeholder") }}">
+    </div>
+    <button type="submit" class="btn btn-outline btn-sm">{{ t("views.save_button") }}</button>
+  </form>
+  {% endif %}
+  <div class="flex flex-wrap items-end gap-2" data-refresh-control data-msg-refresh-failed="{{ t("filter.apply_failed") }}">
+    <div class="form-control">
+      <label class="label cursor-pointer justify-start gap-2 py-1" for="refresh-toggle">
+        <input id="refresh-toggle" type="checkbox" class="checkbox checkbox-sm" data-refresh-toggle>
+        <span class="label-text">{{ t("refresh.enable") }}</span>
+      </label>
+    </div>
+    <div class="form-control">
+      <label class="label py-1" for="refresh-interval"><span class="label-text">{{ t("refresh.interval") }}</span></label>
+      <select id="refresh-interval" class="select select-bordered select-sm" data-refresh-interval>
+        <option value="30">{{ t("refresh.every_30s") }}</option>
+        <option value="60" selected>{{ t("refresh.every_60s") }}</option>
+        <option value="300">{{ t("refresh.every_5m") }}</option>
+      </select>
+    </div>
+    <p class="w-full text-sm text-base-content/70" data-refresh-status role="status">{{ t("refresh.off_note") }}</p>
+    <p class="w-full text-sm text-base-content/70">{{ t("refresh.note") }}</p>
+  </div>
+</div>

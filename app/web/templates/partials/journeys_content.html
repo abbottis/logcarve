@@ -46,7 +46,7 @@
     <div class="table-scroll overflow-x-auto">
       <table class="table table-sm">
         <caption class="sr-only">{{ t("journeys.chart_table") }}</caption>
-        <thead><tr><th scope="col">{{ t("journeys.entry") }}</th><th scope="col">{{ t("journeys.client") }}</th><th scope="col" class="text-right">{{ t("journeys.shown") }}</th><th scope="col" class="text-right">{{ t("journeys.total") }}</th><th scope="col">{{ t("journeys.start") }}</th><th scope="col">{{ t("journeys.end") }}</th><th scope="col" class="text-right">{{ t("journeys.duration") }}</th><th scope="col">{{ t("journeys.completeness") }}</th><th scope="col"><span class="sr-only">{{ t("table.detail") }}</span></th></tr></thead>
+        <thead><tr><th scope="col">{{ t("journeys.entry") }}</th><th scope="col">{{ t("journeys.client") }}</th><th scope="col" class="text-right">{{ t("journeys.shown") }}</th><th scope="col" class="text-right">{{ t("journeys.total") }}</th><th scope="col">{{ t("journeys.start_in", tz=tz_name) }}</th><th scope="col">{{ t("journeys.end_in", tz=tz_name) }}</th><th scope="col" class="text-right">{{ t("journeys.duration") }}</th><th scope="col">{{ t("journeys.completeness") }}</th><th scope="col"><span class="sr-only">{{ t("table.detail") }}</span></th></tr></thead>
         <tbody>
           {% for item in journey_items %}
           <tr>
@@ -54,9 +54,9 @@
             <td class="tech break-all"><a class="link" href="{{ page_url("/requests", client=item.client_pseudonym, offset=0) }}" title="{{ t("security.view_client") }}">{{ item.client_pseudonym }}</a></td>
             <td class="text-right tech">{{ item.requests_shown }}</td>
             <td class="text-right tech">{{ item.requests_total }}</td>
-            <td class="tech whitespace-nowrap">{{ item.started_at }}</td>
-            <td class="tech whitespace-nowrap">{{ item.ended_at }}</td>
-            <td class="text-right tech">{{ "%.3f"|format(item.duration_s) }}s</td>
+            <td class="tech whitespace-nowrap" title="{{ item.started_at }}">{{ item.started_display }} ({{ item.instant_offset }})</td>
+            <td class="tech whitespace-nowrap" title="{{ item.ended_at }}">{{ item.ended_display }} ({{ item.instant_offset }})</td>
+            <td class="text-right tech">{{ item.duration_label }}</td>
             <td>{% if item.completeness == "complete" %}<span class="badge badge-success badge-sm">{{ t("journeys.complete") }}</span>{% else %}<span class="badge badge-warning badge-sm">{{ t("journeys.partial") }}</span>{% endif %}</td>
             <td class="text-right whitespace-nowrap"><a class="link text-sm" href="{{ page_url("/journeys", view="journeys", sort=journey_sort, min_requests=min_requests, offset=offset, journey_id=item.journey_id, journey_client=item.client_pseudonym, journey_start=item.started_at) }}#journey-detail">{{ t("journeys.open_detail") }}</a></td>
           </tr>
@@ -119,8 +119,8 @@
       <div class="min-w-0"><dt class="text-sm text-base-content/70">{{ t("journeys.journey_id") }}</dt><dd class="tech break-all text-sm">{{ detail.journey_id }}</dd></div>
       <div class="min-w-0"><dt class="text-sm text-base-content/70">{{ t("journeys.client") }}</dt><dd class="tech break-all text-sm">{{ detail.client_pseudonym }}</dd></div>
       <div><dt class="text-sm text-base-content/70">{{ t("journeys.entry") }}</dt><dd class="tech break-all text-sm">{{ detail.entry_path }}</dd></div>
-      <div><dt class="text-sm text-base-content/70">{{ t("journeys.start") }}</dt><dd class="tech text-sm">{{ detail.started_at }}</dd></div>
-      <div><dt class="text-sm text-base-content/70">{{ t("journeys.end") }}</dt><dd class="tech text-sm">{{ detail.ended_at }}</dd></div>
+      <div><dt class="text-sm text-base-content/70">{{ t("journeys.start_in", tz=tz_name) }}</dt><dd class="tech text-sm" title="{{ detail.started_at }}">{{ detail.started_display }} ({{ detail.instant_offset }})</dd></div>
+      <div><dt class="text-sm text-base-content/70">{{ t("journeys.end_in", tz=tz_name) }}</dt><dd class="tech text-sm" title="{{ detail.ended_at }}">{{ detail.ended_display }} ({{ detail.instant_offset }})</dd></div>
       <div><dt class="text-sm text-base-content/70">{{ t("journeys.shown") }}</dt><dd class="tech text-sm">{{ detail.requests_shown }}</dd></div>
       <div><dt class="text-sm text-base-content/70">{{ t("journeys.total") }}</dt><dd class="tech text-sm">{{ detail.requests_total }}</dd></div>
       <div><dt class="text-sm text-base-content/70">{{ t("journeys.completeness") }}</dt><dd class="text-sm">{% if not detail.left_truncated and not detail.right_truncated %}{{ t("journeys.complete") }}{% else %}{{ t("journeys.partial") }}{% endif %}</dd></div>
@@ -129,11 +129,11 @@
     <div class="table-scroll overflow-x-auto">
       <table class="table table-sm">
         <caption class="sr-only">{{ t("journeys.timeline_table") }}</caption>
-        <thead><tr><th scope="col">{{ t("journeys.start") }}</th><th scope="col">{{ t("table.method") }}</th><th scope="col">{{ t("table.path") }}</th><th scope="col">{{ t("table.status") }}</th><th scope="col" class="text-right">{{ t("table.bytes") }}</th><th scope="col">{{ t("table.referrer") }}</th></tr></thead>
+        <thead><tr><th scope="col">{{ t("journeys.time_in", tz=tz_name) }}</th><th scope="col">{{ t("table.method") }}</th><th scope="col">{{ t("table.path") }}</th><th scope="col">{{ t("table.status") }}</th><th scope="col" class="text-right">{{ t("table.bytes") }}</th><th scope="col">{{ t("table.referrer") }}</th></tr></thead>
         <tbody>
           {% for row in detail["items"] %}
           <tr>
-            <td class="tech whitespace-nowrap">{{ row.ts_utc }}</td>
+            <td class="tech whitespace-nowrap" title="{{ row.ts_utc }}">{{ row.ts_display }} ({{ row.ts_offset }})</td>
             <td class="tech">{{ row.method }}</td>
             <td class="tech break-all"><a class="link" href="{{ page_url("/requests", path_exact=row.path, offset=0) }}" title="{{ t("security.view_path") }}">{{ row.path }}</a></td>
             <td class="tech">{{ row.status }}</td>

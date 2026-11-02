@@ -29,29 +29,29 @@ STATE = (
 
 EXT_LINES = (
     '198.51.100.21 - - [27/Oct/2026:10:00:00 +0000] "GET /in HTTP/1.1" 200 128 '
-    '"-" "Browser/1.0" example.org - - - - "-"\\n'
+    '"-" "Browser/1.0" example.org - - - - "-"\n'
     '198.51.100.21 - - [27/Oct/2026:10:05:00 +0000] "GET /mid HTTP/1.1" 200 128 '
-    '"-" "Browser/1.0" example.org - - - - "-"\\n'
+    '"-" "Browser/1.0" example.org - - - - "-"\n'
     '198.51.100.21 - - [27/Oct/2026:10:40:00 +0000] "GET /late HTTP/1.1" 200 128 '
-    '"-" "Browser/1.0" example.org - - - - "-"\\n'
+    '"-" "Browser/1.0" example.org - - - - "-"\n'
     '198.51.100.22 - - [27/Oct/2026:11:00:00 +0000] "GET /other HTTP/1.1" 200 128 '
-    '"-" "Browser/1.0" example.org - - - - "-"\\n'
+    '"-" "Browser/1.0" example.org - - - - "-"\n'
     '198.51.100.23 - - [27/Oct/2026:12:00:00 +0000] "GET /gone-1 HTTP/1.1" 404 128 '
-    '"-" "Browser/1.0" example.org - - - - "-"\\n'
+    '"-" "Browser/1.0" example.org - - - - "-"\n'
     '198.51.100.23 - - [27/Oct/2026:12:01:00 +0000] "GET /gone-2 HTTP/1.1" 404 128 '
-    '"-" "Browser/1.0" example.org - - - - "-"\\n'
+    '"-" "Browser/1.0" example.org - - - - "-"\n'
     '198.51.100.23 - - [27/Oct/2026:12:02:00 +0000] "GET /gone-3 HTTP/1.1" 404 128 '
-    '"-" "Browser/1.0" example.org - - - - "-"\\n'
+    '"-" "Browser/1.0" example.org - - - - "-"\n'
     '198.51.100.23 - - [27/Oct/2026:12:03:00 +0000] "GET /gone-4 HTTP/1.1" 404 128 '
-    '"-" "Browser/1.0" example.org - - - - "-"\\n'
+    '"-" "Browser/1.0" example.org - - - - "-"\n'
     '198.51.100.23 - - [27/Oct/2026:12:04:00 +0000] "GET /gone-5 HTTP/1.1" 404 128 '
-    '"-" "Browser/1.0" example.org - - - - "-"\\n'
+    '"-" "Browser/1.0" example.org - - - - "-"\n'
     '198.51.100.25 - - [27/Oct/2026:12:20:00 +0000] "GET /login HTTP/1.1" 401 128 '
-    '"-" "Browser/1.0" example.org - - - - "-"\\n'
+    '"-" "Browser/1.0" example.org - - - - "-"\n'
     '198.51.100.25 - - [27/Oct/2026:12:21:00 +0000] "GET /login HTTP/1.1" 401 128 '
-    '"-" "Browser/1.0" example.org - - - - "-"\\n'
+    '"-" "Browser/1.0" example.org - - - - "-"\n'
     '198.51.100.25 - - [27/Oct/2026:12:22:00 +0000] "GET /admin HTTP/1.1" 403 128 '
-    '"-" "Browser/1.0" example.org - - - - "-"\\n'
+    '"-" "Browser/1.0" example.org - - - - "-"\n'
 )
 
 
@@ -87,7 +87,7 @@ def b2_base(tmp_path, monkeypatch):
     migrate(db)
     with writer_transaction(db) as conn:
         create_admin_user(conn, username="admin", password_hash=hash_password("s3cret-pw"))
-    run_import(
+    report = run_import(
         db,
         source=SourceConfig(
             source_id="b2-ext",
@@ -102,6 +102,11 @@ def b2_base(tmp_path, monkeypatch):
         path_alias="ext.log",
         hmac_key=b"synthetic-test-hmac-key",
     )
+    # The synthetic seed holds exactly 12 physical log lines; every one
+    # must import (a literal-backslash seed would silently yield zero
+    # journeys and mask a broken chart as a passing empty state).
+    assert report.lines_accepted == 12, report
+    assert report.lines_rejected == 0, report
     port = _free_port()
     server = uvicorn.Server(
         uvicorn.Config(

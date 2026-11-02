@@ -544,11 +544,11 @@ def security_findings(
                                 "peak counts the busiest whole UTC minute "
                                 "(fractional rows fall into their truncated "
                                 "minute) over the SAME rule-matching numerator "
-                                "(peak_minute_scope/numerator); the historic "
+                                "on both the average and the peak; the historic "
                                 "all-status path/sequence context is separate "
                                 "and never compared as identical traffic; a "
                                 "partial edge bucket is a lower-bound count "
-                                "over peak_minute_interval"
+                                "over the exact interval shown with the peak"
                             ),
                             # Bounded chronological evidence: the first
                             # ordered (ts, path, status) rows with

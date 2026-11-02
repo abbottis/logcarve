@@ -566,6 +566,47 @@ def _format_bucket(iso_value: str, tz: ZoneInfo, bucket: str) -> str:
     return moment.strftime("%Y-%m-%d")
 
 
+def _display_instant(iso_value: object, tz: ZoneInfo, tz_name: str) -> tuple[str, str]:
+    """Display-timezone rendering of one canonical stored UTC instant.
+
+    Returns ``(display, offset)`` where display follows the Requests
+    explorer convention (``YYYY-MM-DD HH:MM ZONE``) and offset is the
+    signed UTC offset at that instant. Unparsable values fall back to
+    the verbatim stored string with the zone name so a bad value is
+    visible but never rendered as a converted time.
+    """
+    raw = str(iso_value)
+    try:
+        moment = datetime.fromisoformat(raw)
+        if moment.tzinfo is None:
+            moment = moment.replace(tzinfo=UTC)
+        shown = moment.astimezone(tz)
+        return shown.strftime("%Y-%m-%d %H:%M %Z"), format_offset_suffix(tz_name, moment)
+    except (ValueError, TypeError, OverflowError, OSError):
+        return raw, tz_name
+
+
+def _duration_label(duration_us: object) -> str:
+    """Human duration label that never rounds a microsecond span to zero.
+
+    Backend durations are exact integer microseconds; the label picks
+    a unit that keeps small spans readable (a 1us journey reads
+    ``1 µs``, never ``0.000 s``) while whole-second spans keep the
+    established three-decimal seconds form.
+    """
+    try:
+        total_us = int(duration_us)  # type: ignore[arg-type]
+    except (TypeError, ValueError):
+        return t("journeys.duration_unknown")
+    total_us = max(total_us, 0)
+    if total_us < 1000:
+        return t("journeys.duration_microseconds", count=total_us)
+    if total_us < 1_000_000:
+        text = f"{total_us / 1000:.3f}".rstrip("0").rstrip(".")
+        return t("journeys.duration_milliseconds", count=text)
+    return t("journeys.duration_seconds", count=f"{total_us / 1_000_000:.3f}")
+
+
 def _site_or_error(conn, params) -> tuple[str | None, list | None, str | None]:
     """Resolve the requested site against the configured sites."""
     sites = conn.execute("SELECT id, name FROM sites ORDER BY id").fetchall()
@@ -1059,8 +1100,13 @@ def _base_context(request: Request, params, site: str, sites, path: str, rules=N
     filt = _checked_base_filter(params, site)
     _checked_selectors(filt, rules)
     window_start = filt.window.time_from
+    session = _session_or_none(request)
     return {
         "t": t,
+        # Per-session CSRF for the Save-View form embedded after the
+        # filter bar: the same session token the Requests and Settings
+        # forms use. Bearer API tokens never authorize browser forms.
+        "csrf_token": session.csrf_token if session is not None else "",
         "display_bot": display_bot_title,
         "category_label": category_label,
         "provider_label": provider_label,
@@ -1136,10 +1182,45 @@ def _finding_support_link(site: str, filt: AnalyticsFilter, finding: Finding) ->
     return _evidence_url("/requests", envelope)
 
 
+#: Central-key mapping for the fixed service numerator labels used in
+#: tempo cards. Templates must never print the raw service strings or
+#: the ``rule_matching`` scope enum: only these locale keys reach the
+#: visible cards. Unknown values fall back to the generic key so a
+#: future service label is still human-readable, never verbatim enum.
+_NUMERATOR_KEYS = {
+    "stored 4xx errors": "security.numerator_stored_4xx",
+    "rule-matching requests": "security.numerator_rule_matching",
+}
+_SCOPE_KEYS = {
+    "rule_matching": "security.scope_rule_matching",
+}
+
+
 def _finding_view(site: str, filt: AnalyticsFilter, finding: Finding) -> dict:
     """Plain view dict for one immutable finding plus its support link."""
     view = asdict(finding)
     view["link"] = _finding_support_link(site, filt, finding)
+    evidence = view.get("evidence")
+    if isinstance(evidence, dict):
+        evidence["avg_numerator_key"] = _NUMERATOR_KEYS.get(
+            evidence.get("avg_numerator"), "security.numerator_matching"
+        )
+        evidence["peak_numerator_key"] = _NUMERATOR_KEYS.get(
+            evidence.get("peak_numerator"), "security.numerator_matching"
+        )
+        evidence["peak_scope_key"] = _SCOPE_KEYS.get(
+            evidence.get("peak_minute_scope"), "security.numerator_matching"
+        )
+        # Split the exact whole-UTC-minute interval into labelled
+        # endpoints for the card; the raw ``start/end`` pair never
+        # reaches visible text unlabeled.
+        interval = evidence.get("peak_minute_interval")
+        endpoints: list[str] | None = None
+        if isinstance(interval, str) and "/" in interval:
+            parts = interval.split("/", 1)
+            if len(parts) == 2 and all(part.strip() for part in parts):
+                endpoints = [parts[0].strip(), parts[1].strip()]
+        evidence["peak_interval_endpoints"] = endpoints
     return view
 
 
@@ -1240,11 +1321,7 @@ def _crawlers_context(request: Request, conn, params):
         return None, "error.bad_params"
     filt = context["filt"]
     summary = service.summarize(conn, filt, request.app.state.rules)
-    sort, error = _parse_sort(
-        request.query_params,
-        ("requests_desc", "name_asc", "category_asc", "errors_desc", "bytes_desc"),
-        "requests_desc",
-    )
+    sort, error = _parse_sort(request.query_params, CRAWLER_SORTS, "requests_desc")
     if error is not None:
         return None, error
     page_filt = filt.model_copy(update={"limit": params["limit"], "offset": params["offset"]})
@@ -1307,6 +1384,10 @@ def _errors_context(request: Request, conn, params):
     )
     return context, None
 
+
+#: Allowlisted crawler table rankings for the Crawlers page.
+#: Shared with saved-view validation so both use one contract.
+CRAWLER_SORTS = ("requests_desc", "name_asc", "category_asc", "errors_desc", "bytes_desc")
 
 #: Allowlisted slow-endpoint rankings for the Performance page. Every
 #: option maps to one fixed server ORDER BY over the whole filtered
@@ -1617,6 +1698,37 @@ def _journeys_context(request: Request, conn, params):
             detail_error = "journeys.detail_not_found"
     summary = service.summarize(conn, filt, request.app.state.rules)
     _attach_observed_options(conn, context, filt, request.app.state.rules)
+    # Display-timezone instant rendering: canonical UTC instants stay in
+    # URLs/API/storage, while visible journey times convert to the
+    # selected display zone with an explicit offset (DST-correct per
+    # instant). Durations use exact integer microseconds so a 1us
+    # journey never reads as a misleading 0.000 s.
+    zone = params["tz"]
+    zone_name = params["tz_name"]
+    journey_items = journeys_report["items"]
+    assert isinstance(journey_items, list)
+    for item in journey_items:
+        assert isinstance(item, dict)
+        start_display, start_offset = _display_instant(item.get("started_at"), zone, zone_name)
+        end_display, _ = _display_instant(item.get("ended_at"), zone, zone_name)
+        item["started_display"] = start_display
+        item["instant_offset"] = start_offset
+        item["ended_display"] = end_display
+        item["duration_label"] = _duration_label(item.get("duration_us"))
+    if detail is not None:
+        assert isinstance(detail, dict)
+        detail_start, detail_offset = _display_instant(detail.get("started_at"), zone, zone_name)
+        detail_end, _ = _display_instant(detail.get("ended_at"), zone, zone_name)
+        detail["started_display"] = detail_start
+        detail["instant_offset"] = detail_offset
+        detail["ended_display"] = detail_end
+        detail_rows = detail.get("items")
+        if isinstance(detail_rows, list):
+            for row in detail_rows:
+                if isinstance(row, dict):
+                    ts_display, ts_offset = _display_instant(row.get("ts_utc"), zone, zone_name)
+                    row["ts_display"] = ts_display
+                    row["ts_offset"] = ts_offset
     view_total = (
         int(journeys_report["total_groups"])
         if raw_view == "journeys"
@@ -2750,3 +2862,596 @@ def help_page(request: Request):
     if _session_or_none(request) is None:
         return _redirect_to_login(request)
     return templates.TemplateResponse(request, "pages/help.html", _help_context(request))
+
+
+# ---------------------------------------------------------------------------
+# T4c: session-protected saved filter views (bookmarks).
+# ---------------------------------------------------------------------------
+
+#: Dashboard paths a saved view may target. Fixed allowlist, never
+#: from input: data pages only (no settings, help, sources, ask or
+#: auth flows), each re-validated by its own handler on every open.
+SAVED_VIEW_PATHS = (
+    "/",
+    "/performance",
+    "/seo",
+    "/referrers",
+    "/journeys",
+    "/security",
+    "/crawlers",
+    "/errors",
+    "/requests",
+    "/comparison",
+)
+
+#: Bounded saved-view policy: short names, a per-user count cap and a
+#: stored-query byte cap. Oversize rejects; nothing truncates.
+SAVED_VIEW_MAX_NAME = 64
+SAVED_VIEW_MAX_COUNT = 50
+SAVED_VIEW_MAX_QUERY = 2000
+
+#: Baseline selector values for the Comparison page: ``previous`` is
+#: the immediately preceding equal-length window (explicit opt-in,
+#: never a silent default); anything else must arrive as an explicit
+#: UTC window pair.
+COMPARISON_BASELINES = ("previous",)
+
+
+def _synthetic_view_request(query_string: str) -> Request:
+    """GET request shell carrying one stored/pasted query for validation.
+
+    Saved targets re-enter through the exact shared parsers, so a
+    stored view can never replay a read the pages would reject.
+    """
+    return Request(
+        {
+            "type": "http",
+            "http_version": "1.1",
+            "method": "GET",
+            "scheme": "http",
+            "path": "/",
+            "query_string": query_string.encode("utf-8", errors="strict"),
+            "headers": [],
+        }
+    )
+
+
+def _validate_saved_extras(path: str, q) -> tuple[dict[str, object], str | None]:
+    """Page-local state for one saved path; unknown values reject.
+
+    Only the extras the target page itself parses survive; anything
+    else (including CSRF fields, credentials, raw addresses and
+    redirect hints) can never be stored because only these keys are
+    re-encoded. The journey detail trio travels together (opaque ID
+    plus pseudonym plus canonical start, all-or-none) exactly like
+    the page requires.
+    """
+    extras: dict[str, object] = {}
+    if path == "/performance":
+        sort, error = _parse_sort(q, SLOW_SORTS, "avg_desc")
+        if error is not None:
+            return {}, error
+        if "sort" in q:
+            extras["sort"] = sort
+    elif path == "/crawlers":
+        sort, error = _parse_sort(q, CRAWLER_SORTS, "requests_desc")
+        if error is not None:
+            return {}, error
+        if "sort" in q:
+            extras["sort"] = sort
+    elif path == "/requests":
+        sort, error = _parse_sort(q, EXPLORER_SORTS, "newest")
+        if error is not None:
+            return {}, error
+        if "sort" in q:
+            extras["sort"] = sort
+    elif path == "/seo":
+        raw_view = (q.get("view") or "").strip() or "redirects"
+        if raw_view not in SEO_VIEWS:
+            return {}, "error.bad_params"
+        if "view" in q:
+            extras["view"] = raw_view
+    elif path == "/referrers":
+        raw_view = (q.get("view") or "").strip() or "all"
+        raw_relation = (q.get("relation") or "").strip() or "all"
+        if raw_view not in REFERRER_VIEWS or raw_relation not in REFERRER_RELATIONS:
+            return {}, "error.bad_params"
+        if "view" in q:
+            extras["view"] = raw_view
+        if "relation" in q:
+            extras["relation"] = raw_relation
+    elif path == "/journeys":
+        raw_view = (q.get("view") or "").strip() or "journeys"
+        if raw_view not in JOURNEY_VIEWS:
+            return {}, "error.bad_params"
+        journey_sort, error = _parse_sort(q, JOURNEY_SORTS, "requests_desc")
+        if error is not None:
+            return {}, error
+        min_requests, error = _parse_min_requests(q)
+        if error is not None:
+            return {}, error
+        if "view" in q:
+            extras["view"] = raw_view
+        if "sort" in q:
+            extras["sort"] = journey_sort
+        if "min_requests" in q:
+            extras["min_requests"] = min_requests
+        detail_keys = ("journey_id", "journey_client", "journey_start")
+        present = [key for key in detail_keys if (q.get(key) or "").strip()]
+        if present:
+            if len(present) != len(detail_keys):
+                return {}, "error.bad_params"
+            try:
+                start = datetime.fromisoformat((q.get("journey_start") or "").strip())
+            except ValueError:
+                return {}, "error.bad_params"
+            if start.tzinfo is None:
+                return {}, "error.bad_params"
+            for key in detail_keys:
+                extras[key] = (q.get(key) or "").strip()
+    elif path == "/comparison":
+        baseline = (q.get("baseline") or "").strip() or None
+        raw_bfrom = (q.get("baseline_from") or "").strip() or None
+        raw_bto = (q.get("baseline_to") or "").strip() or None
+        if baseline is not None and baseline not in COMPARISON_BASELINES:
+            return {}, "error.bad_params"
+        if (raw_bfrom is None) != (raw_bto is None):
+            return {}, "error.bad_params"
+        if raw_bfrom is not None and raw_bto is not None:
+            assert raw_bto is not None
+            try:
+                bfrom = datetime.fromisoformat(raw_bfrom)
+                bto = datetime.fromisoformat(raw_bto)
+            except ValueError:
+                return {}, "error.bad_params"
+            if bfrom.tzinfo is None:
+                bfrom = bfrom.replace(tzinfo=UTC)
+            if bto.tzinfo is None:
+                bto = bto.replace(tzinfo=UTC)
+            try:
+                TimeWindow(time_from=bfrom, time_to=bto)
+            except ValidationError:
+                return {}, "error.bad_params"
+            extras["baseline_from"] = bfrom.isoformat()
+            extras["baseline_to"] = bto.isoformat()
+        elif baseline is not None:
+            extras["baseline"] = baseline
+    elif path in ("/", "/security", "/errors"):
+        pass
+    else:  # pragma: no cover - guarded by SAVED_VIEW_PATHS above
+        return {}, "error.bad_params"
+    return extras, None
+
+
+def _validate_saved_target(path: str, query_string: str) -> tuple[str, str | None]:
+    """Validate one saved-view target; returns (normalized_query, error).
+
+    The stored query is rebuilt ONLY from validated pieces (shared
+    canonical state, allowlisted matchers, page-local extras and the
+    page size): no raw value survives, so stored URLs can carry no
+    CSRF token, credential, key, raw address, source path or redirect
+    hint. The paging offset always resets to the first page.
+    """
+    if path not in SAVED_VIEW_PATHS:
+        return "", "views.error_path"
+    if len(query_string) > SAVED_VIEW_MAX_QUERY:
+        return "", "views.error_query"
+    try:
+        probe = _synthetic_view_request(query_string)
+    except (ValueError, UnicodeError):
+        return "", "error.bad_params"
+    params, error = _parse_view_params(probe, datetime.now(UTC))
+    if error is not None:
+        return "", error
+    q = probe.query_params
+    extras, error = _validate_saved_extras(path, q)
+    if error is not None:
+        return "", error
+    # Reject anything the shared/state parsers above did not consume:
+    # only known keys can be stored, so unknown parameters (tokens,
+    # redirect hints, raw-IP leftovers) fail closed here.
+    known = {
+        "site",
+        "range",
+        "from",
+        "to",
+        "tz",
+        "source",
+        "limit",
+        "offset",
+        "bucket",
+        *MATCHER_KEYS,
+        *extras.keys(),
+        "baseline",
+        "baseline_from",
+        "baseline_to",
+        "view",
+        "sort",
+        "min_requests",
+        "relation",
+        "journey_id",
+        "journey_client",
+        "journey_start",
+    }
+    for key in q:
+        if key not in known:
+            return "", "views.error_params"
+    normalized: dict[str, object] = {
+        "range": params["range"],
+        "from": params["window"].time_from.isoformat(),
+        "to": params["window"].time_to.isoformat(),
+        "tz": params["tz_name"],
+    }
+    if params["site"] is not None:
+        normalized["site"] = params["site"]
+    if params["source"] is not None:
+        normalized["source"] = params["source"]
+    normalized.update(_matcher_query(params))
+    normalized["limit"] = params["limit"]
+    if params["bucket"] is not None:
+        normalized["bucket"] = params["bucket"]
+    normalized.update(extras)
+    return urlencode(normalized), None
+
+
+def _validate_view_name(raw: object) -> tuple[str, None] | tuple[None, str]:
+    """Bounded display name: Unicode allowed, control chars reject."""
+    if not isinstance(raw, str):
+        return None, "views.error_name"
+    name = raw.strip()
+    if not name or len(name) > SAVED_VIEW_MAX_NAME:
+        return None, "views.error_name"
+    if any(ord(char) < 0x20 or ord(char) == 0x7F for char in name):
+        return None, "views.error_name"
+    return name, None
+
+
+def _saved_views_context(request: Request, conn, form_error: str | None = None) -> dict:
+    """Saved Views page context: owned rows plus the shared nav state."""
+    from app.db import saved_views as view_store
+
+    session = _session_or_none(request)
+    rows = view_store.list_for_user(conn, session.user_id) if session is not None else []
+    return {
+        "t": t,
+        "request": request,
+        "nav_query": _optional_nav_query(request),
+        "views": rows,
+        "view_count": len(rows),
+        "view_max": SAVED_VIEW_MAX_COUNT,
+        "form_error": form_error,
+        "csrf_token": session.csrf_token if session is not None else "",
+    }
+
+
+async def _saved_view_mutation(
+    request: Request, field_token: object, session
+) -> HTMLResponse | None:
+    """Shared auth + CSRF gate for every saved-view mutation.
+
+    Returns an error response when the session is missing or the
+    token is wrong; Bearer [REDACTED] never reach this path because only
+    admin sessions exist here. Malformed/Unicode tokens fail closed
+    with a safe 403, never a ``compare_digest`` TypeError 500.
+    """
+    if session is None:
+        return _error_page(request, "error.auth_required", 401)
+    from app.api.deps import require_csrf
+
+    request_id = request.state.request_id
+    header_ok = require_csrf(request, session, request_id) is None
+    if not header_ok and not _valid_csrf_field(field_token, session.csrf_token):
+        return _error_page(request, "error.csrf_required", 403)
+    return None
+
+
+def _saved_views_page(request: Request, form_error: str | None, status: int = 200):
+    with read_store(request) as conn:
+        context = _saved_views_context(request, conn, form_error)
+    return templates.TemplateResponse(
+        request, "pages/saved_views.html", context, status_code=status
+    )
+
+
+@router.get("/saved-views", response_class=HTMLResponse)
+def saved_views_page(request: Request):
+    if _session_or_none(request) is None:
+        return _redirect_to_login(request)
+    return _saved_views_page(request, None)
+
+
+@router.post("/saved-views", response_class=HTMLResponse)
+async def saved_views_create(request: Request):
+    """Save the current validated view for this admin user (T4c, PAR-10).
+
+    Session + CSRF POST only. The posted ``target`` (a local
+    path+query, usually the current canonical URL) is split, validated
+    and re-encoded through the same parsers the pages use; only the
+    allowlisted path plus validated state is stored. The response is
+    always a 303 to the fixed Saved Views page — never to input —
+    so no arbitrary redirect can arise.
+    """
+    from app.db import saved_views as view_store
+    from app.db.database import writer_transaction
+
+    session = _session_or_none(request)
+    body, form_status = await _read_bounded_form(request)
+    if form_status == "too_large":
+        return _saved_views_page(request, "error.form_too_large", status=413)
+    denied = await _saved_view_mutation(request, body.get("csrf_token"), session)
+    if denied is not None:
+        return denied
+    assert session is not None
+    name, name_error = _validate_view_name(body.get("name"))
+    if name_error is not None or name is None:
+        return _saved_views_page(request, name_error or "views.error_name", status=400)
+    target = body.get("target") if isinstance(body.get("target"), str) else ""
+    assert isinstance(target, str)
+    if not target.startswith("/") or target.startswith("//") or "\\" in target:
+        return _saved_views_page(request, "views.error_path", status=400)
+    path, _, query_string = target.partition("?")
+    normalized, error = _validate_saved_target(path, query_string)
+    if error is not None:
+        return _saved_views_page(request, error, status=400)
+    with writer_transaction(request.app.state.db_path) as conn:
+        if view_store.count_for_user(conn, session.user_id) >= SAVED_VIEW_MAX_COUNT:
+            return _saved_views_page(request, "views.error_full", status=400)
+        view_store.create(conn, session.user_id, name, path, normalized)
+    return RedirectResponse(url="/saved-views", status_code=303)
+
+
+@router.post("/saved-views/{view_id}/rename", response_class=HTMLResponse)
+async def saved_views_rename(request: Request, view_id: int):
+    """Rename one owned saved view; foreign ids stay invisible (404)."""
+    from app.db import saved_views as view_store
+    from app.db.database import writer_transaction
+
+    session = _session_or_none(request)
+    body, form_status = await _read_bounded_form(request)
+    if form_status == "too_large":
+        return _saved_views_page(request, "error.form_too_large", status=413)
+    denied = await _saved_view_mutation(request, body.get("csrf_token"), session)
+    if denied is not None:
+        return denied
+    assert session is not None
+    name, name_error = _validate_view_name(body.get("name"))
+    if name_error is not None or name is None:
+        return _saved_views_page(request, name_error or "views.error_name", status=400)
+    with writer_transaction(request.app.state.db_path) as conn:
+        if not view_store.rename(conn, view_id, session.user_id, name):
+            return _error_page(request, "views.error_missing", 404)
+    return RedirectResponse(url="/saved-views", status_code=303)
+
+
+@router.post("/saved-views/{view_id}/update", response_class=HTMLResponse)
+async def saved_views_update(request: Request, view_id: int):
+    """Re-point one owned saved view at a newly validated target."""
+    from app.db import saved_views as view_store
+    from app.db.database import writer_transaction
+
+    session = _session_or_none(request)
+    body, form_status = await _read_bounded_form(request)
+    if form_status == "too_large":
+        return _saved_views_page(request, "error.form_too_large", status=413)
+    denied = await _saved_view_mutation(request, body.get("csrf_token"), session)
+    if denied is not None:
+        return denied
+    assert session is not None
+    target = body.get("target") if isinstance(body.get("target"), str) else ""
+    assert isinstance(target, str)
+    if not target.startswith("/") or target.startswith("//") or "\\" in target:
+        return _saved_views_page(request, "views.error_path", status=400)
+    path, _, query_string = target.partition("?")
+    normalized, error = _validate_saved_target(path, query_string)
+    if error is not None:
+        return _saved_views_page(request, error, status=400)
+    with writer_transaction(request.app.state.db_path) as conn:
+        if not view_store.retarget(conn, view_id, session.user_id, path, normalized):
+            return _error_page(request, "views.error_missing", 404)
+    return RedirectResponse(url="/saved-views", status_code=303)
+
+
+@router.post("/saved-views/{view_id}/delete", response_class=HTMLResponse)
+async def saved_views_delete(request: Request, view_id: int):
+    """Delete one owned saved view; foreign ids stay invisible (404)."""
+    from app.db import saved_views as view_store
+    from app.db.database import writer_transaction
+
+    session = _session_or_none(request)
+    body, form_status = await _read_bounded_form(request)
+    if form_status == "too_large":
+        return _saved_views_page(request, "error.form_too_large", status=413)
+    denied = await _saved_view_mutation(request, body.get("csrf_token"), session)
+    if denied is not None:
+        return denied
+    assert session is not None
+    with writer_transaction(request.app.state.db_path) as conn:
+        if not view_store.delete(conn, view_id, session.user_id):
+            return _error_page(request, "views.error_missing", 404)
+    return RedirectResponse(url="/saved-views", status_code=303)
+
+
+# ---------------------------------------------------------------------------
+# T4c: explicit current-vs-baseline comparison.
+# ---------------------------------------------------------------------------
+
+
+def _parse_comparison_baseline(
+    q, current: AnalyticsFilter
+) -> tuple[AnalyticsFilter | None, str | None, str | None]:
+    """Explicit baseline for the Comparison page.
+
+    Returns ``(previous_filter, mode, error)`` where mode is
+    ``"previous"`` (the immediately preceding equal-length window, an
+    explicit opt-in) or ``"custom"`` (an explicit UTC window pair).
+    A missing baseline is NOT an error: the page then renders its
+    explicit selection controls with no results instead of silently
+    defaulting to any window, so the model can never choose an
+    outside window through link defaults. Length equality is enforced
+    by :func:`service.compare_windows` at render (unequal pairs fail
+    closed with an honest localized message, never a widened read).
+    """
+    baseline = (q.get("baseline") or "").strip() or None
+    raw_bfrom = (q.get("baseline_from") or "").strip() or None
+    raw_bto = (q.get("baseline_to") or "").strip() or None
+    if baseline is not None and baseline not in COMPARISON_BASELINES:
+        return None, None, "error.bad_params"
+    if raw_bfrom is not None or raw_bto is not None:
+        if raw_bfrom is None or raw_bto is None:
+            return None, None, "error.bad_params"
+        try:
+            bfrom = datetime.fromisoformat(raw_bfrom)
+            bto = datetime.fromisoformat(raw_bto)
+        except ValueError:
+            return None, None, "error.bad_params"
+        if bfrom.tzinfo is None:
+            bfrom = bfrom.replace(tzinfo=UTC)
+        if bto.tzinfo is None:
+            bto = bto.replace(tzinfo=UTC)
+        try:
+            window = TimeWindow(time_from=bfrom, time_to=bto)
+        except ValidationError:
+            return None, None, "error.bad_params"
+        return current.model_copy(update={"window": window}), "custom", None
+    if baseline == "previous":
+        return service.previous_window_filter(current), "previous", None
+    return None, None, None
+
+
+def _comparison_metric_label(name: object) -> str:
+    """Central-key label for one comparison metric (never the raw key)."""
+    key = f"compare.metric_{name}" if isinstance(name, str) else ""
+    label = t(key)
+    return label if label != key else str(name)
+
+
+def _comparison_context(request: Request, conn, params):
+    site, sites, error = _site_or_error(conn, params)
+    if error is not None:
+        return None, error
+    error = _source_or_error(conn, site, params["source"])
+    if error is not None:
+        return None, error
+    try:
+        context = _base_context(
+            request, params, site, sites, "/comparison", request.app.state.rules
+        )
+    except _InvalidFilter:
+        return None, "error.bad_params"
+    filt = context["filt"]
+    q = request.query_params
+    previous, mode, error = _parse_comparison_baseline(q, filt)
+    if error is not None:
+        return None, error
+    summary = service.summarize(conn, filt, request.app.state.rules)
+    _attach_observed_options(conn, context, filt, request.app.state.rules)
+    compared = None
+    compare_error = None
+    baseline_from = (q.get("baseline_from") or "").strip() or None
+    baseline_to = (q.get("baseline_to") or "").strip() or None
+    baseline_mode = (q.get("baseline") or "").strip() or None
+    if previous is not None:
+        try:
+            compared = service.compare_windows(conn, filt, previous, request.app.state.rules)
+        except ValueError:
+            compare_error = "compare.error_mismatch"
+    if compared is not None:
+        assert isinstance(compared, dict)
+        metrics = compared.get("metrics")
+        assert isinstance(metrics, list)
+        for metric in metrics:
+            if isinstance(metric, dict):
+                metric["label"] = _comparison_metric_label(metric.get("name"))
+        current_window = compared.get("current_window")
+        assert isinstance(current_window, dict)
+        previous_window = compared.get("previous_window")
+        assert isinstance(previous_window, dict)
+        compared["current_display"] = _comparison_window_display(
+            current_window, params["tz"], params["tz_name"]
+        )
+        compared["previous_display"] = _comparison_window_display(
+            previous_window, params["tz"], params["tz_name"]
+        )
+    extra: dict[str, object] = {}
+    if baseline_mode is not None:
+        extra["baseline"] = baseline_mode
+    if baseline_from is not None:
+        extra["baseline_from"] = baseline_from
+    if baseline_to is not None:
+        extra["baseline_to"] = baseline_to
+    context.update(
+        {
+            "summary": summary,
+            "totals": summary["totals"],
+            "compared": compared,
+            "compare_error": compare_error,
+            "baseline_mode": baseline_mode or mode,
+            "baseline_from": baseline_from,
+            "baseline_to": baseline_to,
+            "fragment_url": "/partials/comparison",
+        }
+    )
+    context["canonical_url"] = _page_url("/comparison", params, site, **extra)
+    return context, None
+
+
+def _comparison_window_display(window: dict, tz: ZoneInfo, tz_name: str) -> dict[str, str]:
+    """Display-timezone labels for one comparison window edge pair."""
+    display_from, offset_from = _display_instant(window.get("time_from"), tz, tz_name)
+    display_to, _ = _display_instant(window.get("time_to"), tz, tz_name)
+    raw_from = str(window.get("time_from"))
+    raw_to = str(window.get("time_to"))
+    return {
+        "raw_from": raw_from,
+        "raw_to": raw_to,
+        "display_from": display_from,
+        "display_to": display_to,
+        "offset": offset_from,
+    }
+
+
+@router.get("/comparison", response_class=HTMLResponse)
+def comparison_page(request: Request):
+    if _session_or_none(request) is None:
+        return _redirect_to_login(request)
+    params, gate = _data_page(request)
+    if gate == "redirect":
+        return _redirect_to_login(request)
+    if gate is not None:
+        return _error_page(request, gate, 400)
+    with read_store(request) as conn:
+        context, error = _comparison_context(request, conn, params)
+    if error is not None:
+        return _error_page(request, error, 400 if error != "error.unknown_site" else 404)
+    if context.get("compare_error") is not None:
+        return templates.TemplateResponse(
+            request, "pages/comparison.html", context, status_code=400
+        )
+    return templates.TemplateResponse(request, "pages/comparison.html", context)
+
+
+@router.get("/partials/comparison", response_class=HTMLResponse)
+def comparison_partial(request: Request):
+    if _session_or_none(request) is None:
+        return HTMLResponse(
+            f'<p class="alert alert-warning" role="alert">{t("auth.login.title")}</p>',
+            status_code=401,
+        )
+    params, gate = _data_page(request)
+    if gate is not None:
+        return HTMLResponse(
+            f'<p class="alert alert-error" role="alert">{t(gate)}</p>', status_code=400
+        )
+    with read_store(request) as conn:
+        context, error = _comparison_context(request, conn, params)
+    if error is not None:
+        return HTMLResponse(
+            f'<p class="alert alert-error" role="alert">{t(error)}</p>', status_code=400
+        )
+    context["oob_notice"] = True
+    response = templates.TemplateResponse(request, "partials/comparison_content.html", context)
+    if context.get("compare_error") is not None:
+        response.status_code = 400
+    else:
+        response.headers["HX-Push-Url"] = context["canonical_url"]
+    return response

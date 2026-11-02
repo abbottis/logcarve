@@ -18,6 +18,18 @@
       <p class="text-sm">{{ t("help.offsets_body") }}</p>
     </div>
   </section>
+  <section class="card bg-base-100 shadow" aria-labelledby="help-formats-h">
+    <div class="card-body">
+      <h2 id="help-formats-h" class="card-title text-base">{{ t("help.formats") }}</h2>
+      <p class="text-sm">{{ t("help.formats_body") }}</p>
+    </div>
+  </section>
+  <section class="card bg-base-100 shadow" aria-labelledby="help-timing-h">
+    <div class="card-body">
+      <h2 id="help-timing-h" class="card-title text-base">{{ t("help.timing") }}</h2>
+      <p class="text-sm">{{ t("help.timing_body") }}</p>
+    </div>
+  </section>
   <section class="card bg-base-100 shadow" aria-labelledby="help-labels-h">
     <div class="card-body">
       <h2 id="help-labels-h" class="card-title text-base">{{ t("help.labels") }}</h2>
@@ -39,10 +51,46 @@
       <p class="text-sm">{{ t("help.privacy_body") }}</p>
     </div>
   </section>
+  <section class="card bg-base-100 shadow" aria-labelledby="help-bots-seo-h">
+    <div class="card-body">
+      <h2 id="help-bots-seo-h" class="card-title text-base">{{ t("help.bots_seo") }}</h2>
+      <p class="text-sm">{{ t("help.bots_seo_body") }}</p>
+    </div>
+  </section>
   <section class="card bg-base-100 shadow" aria-labelledby="help-explorer-h">
     <div class="card-body">
       <h2 id="help-explorer-h" class="card-title text-base">{{ t("help.explorer") }}</h2>
       <p class="text-sm">{{ t("help.explorer_body") }}</p>
+    </div>
+  </section>
+  <section class="card bg-base-100 shadow" aria-labelledby="help-journeys-h">
+    <div class="card-body">
+      <h2 id="help-journeys-h" class="card-title text-base">{{ t("help.journeys_help") }}</h2>
+      <p class="text-sm">{{ t("help.journeys_help_body") }}</p>
+    </div>
+  </section>
+  <section class="card bg-base-100 shadow" aria-labelledby="help-security-h">
+    <div class="card-body">
+      <h2 id="help-security-h" class="card-title text-base">{{ t("help.security_cards") }}</h2>
+      <p class="text-sm">{{ t("help.security_cards_body") }}</p>
+    </div>
+  </section>
+  <section class="card bg-base-100 shadow" aria-labelledby="help-ip-modes-h">
+    <div class="card-body">
+      <h2 id="help-ip-modes-h" class="card-title text-base">{{ t("help.ip_modes") }}</h2>
+      <p class="text-sm">{{ t("help.ip_modes_body") }}</p>
+    </div>
+  </section>
+  <section class="card bg-base-100 shadow" aria-labelledby="help-exports-h">
+    <div class="card-body">
+      <h2 id="help-exports-h" class="card-title text-base">{{ t("help.exports") }}</h2>
+      <p class="text-sm">{{ t("help.exports_body") }}</p>
+    </div>
+  </section>
+  <section class="card bg-base-100 shadow" aria-labelledby="help-views-compare-h">
+    <div class="card-body">
+      <h2 id="help-views-compare-h" class="card-title text-base">{{ t("help.views_compare") }}</h2>
+      <p class="text-sm">{{ t("help.views_compare_body") }}</p>
     </div>
   </section>
   <section class="card bg-base-100 shadow" aria-labelledby="help-trouble-h">
@@ -68,6 +116,20 @@ req = urllib.request.Request(
 )
 with urllib.request.urlopen(req, timeout=30) as resp:
     print(json.load(resp)["totals"])</pre>
+    <h3 class="mt-4 font-medium">{{ t("help.api_n8n") }}</h3>
+    <p class="text-sm">{{ t("help.api_n8n_body") }}</p>
+    </div>
+  </section>
+  <section class="card bg-base-100 shadow" aria-labelledby="help-geoip-h">
+    <div class="card-body">
+      <h2 id="help-geoip-h" class="card-title text-base">{{ t("help.geoip") }}</h2>
+      <p class="text-sm">{{ t("help.geoip_body") }}</p>
+    </div>
+  </section>
+  <section class="card bg-base-100 shadow" aria-labelledby="help-follow-h">
+    <div class="card-body">
+      <h2 id="help-follow-h" class="card-title text-base">{{ t("help.follow") }}</h2>
+      <p class="text-sm">{{ t("help.follow_body") }}</p>
     </div>
   </section>
   <p><a class="link" href="/{{ nav_query }}">{{ t("help.back") }}</a></p>

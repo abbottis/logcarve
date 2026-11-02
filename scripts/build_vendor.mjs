@@ -61,6 +61,8 @@ const icons = [
   "sun",
   "moon",
   "check",
+  "scale",
+  "bookmark",
 ];
 for (const icon of icons) {
   copyFileSync(nm(`lucide-static/icons/${icon}.svg`), out(`icons/${icon}.svg`));

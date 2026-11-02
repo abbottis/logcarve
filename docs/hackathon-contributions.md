@@ -88,3 +88,26 @@ imported (70-pattern MIT rule adaptation of 2026-11-01 unchanged).
 Synthetic fixtures only; no real logs, keys, provider calls,
 push/main/deploy or release/acceptance claims. Independent review
 stays required before T4b2.
+
+## Parity T4c saved views/comparison/refresh/Help, 2 November 2026
+
+Owner-authorized LogWerk parity closeout of T4 UI after reviewed
+T4b2 (no new approval loop), implemented solely by Muse Spark 1.3
+Contributor (medium, Contributor ON) with sandbox + approval ON:
+frozen T4b2 display defects corrected first (literal-newline E2E
+fixture fixed with accepted/rejected asserts, journey filter-state
+serialization, display-timezone instants with DST-correct offsets,
+microsecond duration labels, central security labels); session-owned
+saved filter views with CSRF/per-user ownership/allowlisted
+paths/validated filters and bounds; explicit current-vs-baseline
+comparison page and evidence replay to the actual executed halves;
+opt-in OFF-default read-only refresh; comprehensive Help; central-
+English locale readiness with no shipped translations. No file
+import UI, no locale selector, no template/JS metric
+reimplementation. Original LogCarve code remains Apache-2.0; no
+LogWerk application code was imported (70-pattern MIT rule
+adaptation of 2026-11-01 unchanged). Synthetic fixtures only; no
+real logs, keys, provider calls, push/main/deploy or
+release/acceptance claims. Independent review stays required;
+E2E recorded BLOCKED in this shell sandbox for coordinator
+execution, follow/real-GeoIP not claimed.

@@ -2654,3 +2654,84 @@ logs).
 | Updated `tests/integration/test_assistant_stage_c.py`, `tests/integration/test_web_partb.py` | PASS | 2 contract evolutions required by T4b2: journey evidence hrefs now land on `/journeys` with executed scope + fixed defaults (selector-override purpose unchanged); 200 sensitive-path card now links to the Requests explorer that lists its rows (error-group exclusion kept, overview fallback removed) |
 | New `tests/e2e/test_parity_t4b2.py` | BLOCKED (environmental) | Collects cleanly; Chromium fails at launch in this shell sandbox (`TargetClosedError` — identical for the pre-existing T4b1 e2e, so not caused by this change); coordinator executes `uv run --locked pytest tests/e2e/test_parity_t4b2.py -q` with the browser sandbox ON (journeys nav/chart/sort/entries/detail, security chart/rates/sequence/401, 390-dark/desktop-light widths, keyboard focus, no external requests/console errors) |
 | T4c (saved views/comparison/refresh/Help), follow/GeoIP (T5), release | NOT RUN | Not implemented or claimed; stopping for independent review |
+
+## 2026-11-02 — Parity T4c saved views/comparison/refresh/Help + frozen T4b2 corrections (implementer run)
+
+Owner-authorized T4c after reviewed T4b2 on
+`feature/logwerk-parity-2026-11-01` (frozen anchor `4aa3fd0` clean,
+prior commits preserved, no amend), exact model
+`muse-spark-1.3-contributor` / medium / Contributor ON; sandbox +
+approval ON, sole writer, no agents/new approval loop, no parent
+private files/keys/history/real logs, no actual product/provider
+calls, no Docker/live activation/push/main/deploy/allowance reset.
+Public/synthetic fixtures only; prior work, 120-row fixtures, 77
+bot rules, core HMAC, auth/usage preserved. No browser import, no
+translations; all new visible text/aria/chart/help/errors through
+central `en` keys; metrics/filter engine stays shared (no
+template/JS reimplementation).
+
+Frozen defects closed FIRST (independent probes at `4aa3fd0`):
+`tests/e2e/test_parity_t4b2.py` EXT_LINES used literal backslash-n
+bytes (0 accepted, empty journeys chart) — fixed to physical
+newlines with `accepted == 12 and rejected == 0` asserted, no
+weakened assertions or fake totals; `#filter-bar` now serializes
+journey `view`/`sort`/`min_requests` through Apply/native-GET/htmx/
+canonical/paging (form-serialization + click-Apply regressions, no
+sort leaks to other reports); journey instants render in the
+selected display zone with per-instant offset/DST correctness
+(URL/API/storage stay canonical UTC) and durations use exact
+microsecond labels (`1 µs`, never `0.000 s`); security cards map
+`avg_numerator`/`peak_minute_numerator`/`peak_minute_scope` to
+central labels with explicit UTC-minute endpoints (tempo prose
+kept, internal key names removed from it). Backend exact
+microseconds, raw canonical API/URL values, all 11 bounded model
+reports and trusted-client/`<=1600`-char/strict-body/exact-IP/
+privacy invariants preserved.
+
+Scope actually built: session-owned saved views (per-user CRUD with
+CSRF, allowlisted local report paths, validated safe filters, no
+arbitrary redirects/source paths/keys/raw IP in stored URLs,
+bounded names/counts, TZ/filter-reset/path_exact preserved);
+explicit current-vs-baseline `/comparison` page (shared comparison
+service + validated API, same filters/both scope+coverage, zero/
+empty honesty, meaningful chart + table, reproducible canonical
+links) with no silent baseline default; opt-in OFF-default
+visibility/focus-aware read-only refresh of IMPORTED data (finite
+interval set, never import/AI/network, pause while editing/modal,
+no full-IP caching); comprehensive Help (formats + CLI-only
+ingestion, timing/cache/304, bot claims/SEO absence/referrer
+privacy, journeys/partial coverage, IP modes/key separation/lost-
+key/exact-spell search, exports/limits/metadata, saved views/
+comparisons/refresh, independent API + curl/n8n, GeoIP
+Unknown/licensing readiness, explicit follow-CLI-off-until-T5);
+central-English locale readiness (date/number consistency, no
+language chooser). Model comparison evidence now links to the
+ACTUAL executed current half + baseline half with same
+selectors/client (validated explicit UTC values, both coverage;
+unsplittable parents link with no silent baseline; model cannot
+choose an outside window via link defaults). All new report maps
+resolve to real pages (comparison → `/comparison`).
+
+`uv run --frozen pytest tests/unit tests/integration -q
+-p no:cacheprovider`: 1053 passed, 2 skipped (pre-existing
+live-loopback skips). 9 version-tuple assertions legitimately
+extended `(1..5)` → `(1..6)` / `(5,)` → `(5, 6)` for the new
+`0006_saved_views.sql` migration (data-preservation intent
+unchanged; saved-views table is new and empty). `ruff check` +
+`ruff format --check` clean over `app`/`tests`/`clients`.
+`npm run build` + `node scripts/check_no_external.mjs` clean
+(new `scale`/`bookmark` icons vendored with provenance; served
+`app/web/static/js/*` is gitignored build output, synced by
+`build:js`; `node --check` clean). `uv lock --check --offline`
+clean (no manifest/lock delta, no new dependencies). Gitleaks NOT
+RUN (`gitleaks` not installed; no network installs in scope; diff
+adds only synthetic `synthetic-test-*` values, no secrets/keys/
+tokens/real logs).
+
+| Check | Result | Evidence |
+| --- | --- | --- |
+| New `tests/integration/test_parity_t4c_web.py` | PASS | 25 passed: journey form-serialization + partial/canonical retention, Berlin 13:00 +01:00 vs UTC 12:00 +00:00 with canonical UTC in titles/selectors, `1 µs` duration (no `0.000 s` cell), central security labels with no raw enum/repr, saved-view create/open/rename/update/delete roundtrip, CSRF 403 incl. Unicode (no 500), per-user ownership (foreign ids 404), hostile targets rejected (no stored csrf/next/raw-IP/redirect), Unicode names + 50-view bound, previous/explicit comparison matching service counts with canonical links, zero-baseline exactness (no Infinity), empty-current honesty (no confident ratio), unequal/hostile baseline 400, no-baseline explicit prompt, model-halves evidence replay with equal counts (tampered halves 400, odd parent honest), refresh OFF-default + read-only + 405 on POST, locale key/placeholder audit incl. dynamic families, no language chooser, chat-independent comparison API, Help sections + no import controls |
+| New display-helper unit tests | PASS | Berlin CET/CEST per-instant offsets incl. spring-forward gap pair, UTC rendering, unparsable fallback verbatim, duration ladder 0/1/999µs–ms–s with 1µs exact |
+| New `tests/e2e/test_parity_t4c.py` + fixed `tests/e2e/test_parity_t4b2.py` | BLOCKED (environmental) | Both collect cleanly; Chromium fails at launch in this shell sandbox (`TargetClosedError`, EPERM/kill — identical for pre-existing T4a/T4b1 e2e, browsers installed at `artifacts/playwright-browsers`, browser sandbox kept ON, no weakening); coordinator executes `uv run --locked pytest tests/e2e/test_parity_t4c.py tests/e2e/test_parity_t4b2.py -q` (T4c: actual Apply-kept journey state, Berlin instants, security labels, bookmark roundtrip, previous comparison chart/table, refresh opt-in toggle, Help, 1440/390 both themes, keyboard focus, no external requests/console errors; T4b2: same flow with 12-accepted fixture assert) |
+| Full maintained E2E | BLOCKED (environmental) | Same sandbox launch block; same coordinator command covers `tests/e2e` |
+| Follow/real-GeoIP/native-Linux/model-checks/owner-acceptance | NOT RUN | Not implemented or claimed; stopping for independent review |
