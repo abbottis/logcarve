@@ -373,7 +373,19 @@ def parse_custom_line(
         return reject("invalid_status")
     if not 100 <= status <= 599:
         return reject("invalid_status")
-    size_text = captured.get("size", captured.get("bytes", "-")) or "-"
+    # Only the explicit "-" marker represents an absent supplied value.
+    # An explicitly captured empty string (e.g. a trailing "|" under a
+    # ``[^|]*`` size group) must reject via invalid_bytes, while a
+    # mapping with no size/bytes group at all -- or an optional group
+    # that did not participate -- keeps the None contract.
+    if "size" in spec.pattern.groupindex:
+        raw_size = get("size")
+        size_text = "-" if raw_size is None else raw_size
+    elif "bytes" in spec.pattern.groupindex:
+        raw_size = get("bytes")
+        size_text = "-" if raw_size is None else raw_size
+    else:
+        size_text = "-"
     try:
         bytes_sent = normalize_bytes_value(size_text)
     except ValueError:

@@ -674,7 +674,15 @@ def _normalize_time(value: str) -> tuple[datetime, int]:
         raise ValueError("invalid_time") from exc
     offset = moment.utcoffset()
     assert offset is not None  # %z always yields an aware datetime
-    return moment.astimezone(UTC), int(offset.total_seconds() // 60)
+    try:
+        normalized = moment.astimezone(UTC)
+    except (OverflowError, ValueError) as exc:
+        # A legacy instant whose UTC normalization leaves years 1..9999
+        # (e.g. year-1 with a positive offset) cannot be represented:
+        # one fixed rejection, never an escaping exception. Valid
+        # legacy semantics unchanged.
+        raise ValueError("invalid_time") from exc
+    return normalized, int(offset.total_seconds() // 60)
 
 
 def _normalize_iso8601_time(value: str) -> tuple[datetime, int]:
@@ -699,14 +707,32 @@ def _normalize_iso8601_time(value: str) -> tuple[datetime, int]:
         else:
             sign = 1 if zone[0] == "+" else -1
             digits = zone[1:].replace(":", "")
-            offset_minutes = sign * (int(digits[:2]) * 60 + int(digits[2:]))
+            # Validate each offset component, not only the combined
+            # minute count: a minute field of 60..99 (e.g. +00:60)
+            # must reject instead of silently rolling into the next
+            # hour, and hours stay within the supported 00..23 range.
+            offset_hour = int(digits[:2])
+            offset_minute = int(digits[2:])
+            if not 0 <= offset_hour <= 23:
+                raise ValueError("invalid_time")
+            if not 0 <= offset_minute <= 59:
+                raise ValueError("invalid_time")
+            offset_minutes = sign * (offset_hour * 60 + offset_minute)
             if not -1439 <= offset_minutes <= 1439:
                 raise ValueError("invalid_time")
             tzinfo = timezone(timedelta(minutes=offset_minutes))
         moment = datetime(year, month, day, hour, minute, second, microsecond, tzinfo=tzinfo)
     except ValueError as exc:
         raise ValueError("invalid_time") from exc
-    return moment.astimezone(UTC), offset_minutes
+    try:
+        normalized = moment.astimezone(UTC)
+    except (OverflowError, ValueError) as exc:
+        # A representable local instant whose UTC normalization leaves
+        # years 1..9999 (e.g. 0001-01-01 with a positive offset or
+        # 9999-12-31 with a negative offset) cannot be represented:
+        # one fixed safe rejection at the normalization boundary.
+        raise ValueError("invalid_time") from exc
+    return normalized, offset_minutes
 
 
 def _normalize_epoch_time(value: str, unit: str) -> tuple[datetime, int]:
