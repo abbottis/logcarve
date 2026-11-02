@@ -88,6 +88,25 @@ backup plus image/commit references and perform the reversible local
 demo update; the published snapshot and original live demo stay unchanged
 until a tested candidate exists.
 
+## Optional original-IP + GeoIP adjunct (local only, coordinator-owned)
+
+Ordinary demos need nothing: without the adjunct, GeoIP stays honestly
+`unavailable` and originals stay uncaptured. To activate locally:
+
+- `artifacts/local-demo-secrets/original-ip.env` (0600, never committed,
+  coordinator creates privately): exactly `ORIGINAL_IP_KEY=<newly
+  generated distinct key>` and `GEOIP_DB_PATH=/geodata/<verified-public-db-file>`.
+  No example values are shipped; `demo.env` stays untouched.
+- `artifacts/local-demo-geodata/<verified-public-db-file>` (coordinator-placed
+  public MMDB only, ignored by Git/build/Contributor). `init.sh` creates the
+  empty directory only and never writes keys or databases.
+- `docker-compose.demo.yml` already wires both as optional (`env_file ...
+  required: false`, `./artifacts/local-demo-geodata:/geodata:ro`) with
+  explicit `AI_ENABLED=false` + empty `MODEL_API_KEY` overrides, loopback
+  8080, named volume and image USER 10001. The owner base `.env` and the
+  product key are never read. For the upgrade path see
+  [deployment](deployment.md).
+
 ## Safety invariants
 
 Standalone `docker-compose.demo.yml`: no owner `.env` inheritance, forced

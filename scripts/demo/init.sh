@@ -43,6 +43,18 @@ EOF
   echo "created: $DEMO_ENV_FILE (0600, exclusive)"
 fi
 
+refuse_symlink "$DEMO_ORIGINAL_IP_ENV_FILE"
+if [ -e "$DEMO_ORIGINAL_IP_ENV_FILE" ]; then
+  echo "optional adjunct present, existing bytes preserved: $DEMO_ORIGINAL_IP_ENV_FILE"
+else
+  echo "optional adjunct absent (ordinary demos stay honestly unavailable): $DEMO_ORIGINAL_IP_ENV_FILE"
+fi
+
+# Local geodata directory for the coordinator-owned public MMDB only.
+# Created empty when absent; existing files are never overwritten, and no
+# example key values or database files are ever written here by this helper.
+ensure_dir "$DEMO_GEODATA_DIR"
+
 if [ ! -f "$FIXTURE" ]; then
   echo "missing synthetic fixture: $FIXTURE" >&2
   exit 1

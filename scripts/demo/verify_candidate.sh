@@ -26,9 +26,11 @@ PORT="8091"
 BASE_URL="http://127.0.0.1:$PORT"
 # Optional explicit platform (coordinator-owned emulation proof only):
 # empty means the native build host; the two allowlisted values build
-# distinctly tagged images. amd64 on an ARM host is EMULATED execution,
-# never native x86-64 proof; the persistent demo always uses its tested
-# native image explicitly, never an architecture-overwritten shared tag.
+# distinctly tagged images via the service-level `platform:` property
+# (installed Compose `build` has no --platform flag). amd64 on an ARM
+# host is EMULATED execution, never native x86-64 proof; the persistent
+# demo always uses its tested native image explicitly, never an
+# architecture-overwritten shared tag.
 PLATFORM="${PLATFORM:-}"
 case "$PLATFORM" in
   "") SUFFIX="";;
@@ -113,12 +115,13 @@ try:
 finally:
     os.close(fd)
 EOF
-BUILD_PLATFORM=""
-if [ -n "$PLATFORM" ]; then BUILD_PLATFORM="--platform $PLATFORM"; fi
+CANDIDATE_PLATFORM_LINE=""
+if [ -n "$PLATFORM" ]; then CANDIDATE_PLATFORM_LINE="    platform: $PLATFORM"; fi
 cat >"$WORK/compose.candidate.yml" <<EOF
 name: $PROJECT
 services:
   app:
+$CANDIDATE_PLATFORM_LINE
     build: $WORK/export
     image: $IMAGE
     ports:
@@ -142,12 +145,17 @@ services:
 volumes:
   candidate-data:
 EOF
-# shellcheck disable=SC2086 -- intentionally unquoted: empty means no flag
-compose build $BUILD_PLATFORM
+compose build
 compose up -d
 if [ -n "$PLATFORM" ]; then
-  actual_arch=$(compose run --rm --no-deps -T app uname -m)
-  echo "container arch: $actual_arch (requested $PLATFORM)"
+  case "$PLATFORM" in
+    linux/arm64) want_arch="aarch64";;
+    linux/amd64) want_arch="x86_64";;
+  esac
+  actual_arch=$(compose run --rm --no-deps -T app uname -m | tr -d '\r\n\t ')
+  echo "container arch: $actual_arch (requested $PLATFORM, image $IMAGE)"
+  [ "$actual_arch" = "$want_arch" ] || { echo "arch mismatch: got $actual_arch, want $want_arch for $PLATFORM" >&2; exit 1; }
+  good "container arch matches requested platform ($PLATFORM -> $actual_arch, distinct arch tag)"
 fi
 deadline=$(( $(date +%s) + 90 ))
 until curl -sf "$BASE_URL/healthz" >/dev/null 2>&1; do

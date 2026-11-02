@@ -28,6 +28,14 @@ services:
     env_file:
       - path: ./artifacts/local-demo-secrets/demo.env
         required: true
+      # Optional local-only adjunct (coordinator-owned, never committed):
+      # ./artifacts/local-demo-secrets/original-ip.env holds ONLY
+      # ORIGINAL_IP_KEY=<generated> and
+      # GEOIP_DB_PATH=/geodata/<verified-public-db-file>.
+      # Missing file means GeoIP/originals stay honestly unavailable.
+      # Explicit `environment` below still forces AI off / empty model key.
+      - path: ./artifacts/local-demo-secrets/original-ip.env
+        required: false
     environment:
       AI_ENABLED: "false"
       MODEL_API_KEY: ""
@@ -41,6 +49,10 @@ services:
       - demo-data:/data
       - ./tests/fixtures/combined/t8_smoke.txt:/logs/demo-access.log:ro
       - ./tests/fixtures/combined/demo_rich_29_31oct.txt:/logs/demo-rich-access.log:ro
+      # Optional local geodata (coordinator-owned public MMDB only, ignored
+      # by Git/build/Contributor). Missing directory means GeoIP stays
+      # honestly unavailable; never mount real logs or secrets here.
+      - ./artifacts/local-demo-geodata:/geodata:ro
     # Least privilege from the image (USER 10001); no privileged mode,
     # no Docker socket, no extra capabilities, read-only source mount.
 
