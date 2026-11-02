@@ -6,22 +6,22 @@ Self-hosted web access-log analytics: reproducible traffic, crawler, SEO and sec
 [![Python 3.12 or later](https://img.shields.io/badge/Python-3.12%2B-blue?style=flat-square)](https://www.python.org/)
 [![Built with FastAPI](https://img.shields.io/badge/Backend-FastAPI-green?style=flat-square)](https://fastapi.tiangolo.com/)
 [![Runs with Docker Compose](https://img.shields.io/badge/Run-Docker_Compose-blue?style=flat-square)](https://docs.docker.com/compose/)
-[![Built with Muse Code](https://img.shields.io/badge/Built_with-Muse_Code-purple?style=flat-square)](https://developers.meta.com/)
+[![Built with Muse Code](https://img.shields.io/badge/Built_with-Muse_Code-purple?style=flat-square)](https://dev.meta.ai/docs/muse-code/interactive)
 [![Preview status](https://img.shields.io/badge/Status-Preview-orange?style=flat-square)](docs/verification.md)
 
 ## What it is
 
-LogCarve imports NCSA Combined access logs (Nginx and Apache), including measured-timing presets, gzip archives and bounded administrator custom formats, normalizes them locally into SQLite, and serves one deterministic analytics layer to three consumers: a browser dashboard, an authenticated read-only REST API and a small stdlib client. The dashboard, the API and the internal assistant all read the same numbers — with chat disabled, no model key and no Internet.
+LogCarve imports NCSA Combined access logs (Nginx and Apache), including measured-timing presets, gzip archives and bounded administrator custom formats, normalizes them locally into SQLite, and serves one deterministic analytics layer to a browser dashboard, an authenticated read-only REST API and a small stdlib client. The dashboard, the API and the client share the same numbers and work with chat disabled, no model key and no Internet; the optional server-side Meta assistant uses that same layer when enabled.
 
 LogCarve covers one site and one configured source at a time. Hostname and alias filtering selects within that site; it is not a multi-site platform.
 
 Who benefits:
 
-- **SEO and marketing** — crawler activity, bot versus browser-like traffic shares, referrers, broken inbound links and AI-observed paths.
+- **SEO and marketing** — crawler activity, bot versus browser-like traffic shares, referrers, broken inbound links and AI-crawler request paths.
 - **Developers** — slow endpoints, measured latency where the format supplies it, error groups, status classes and a sortable request explorer.
 - **Security reviewers** — deterministic investigation candidates (for example conflicting bot identity or 401/403 sequences) with rule and evidence references. User-Agent matches are claimed identities, never verified bots, and candidates are starting points, never confirmed attacks.
 
-What LogCarve does not claim: visits, visitors, sessions, conversions, search rankings or training use cannot be derived from access logs alone. Missing timing stays `unavailable`, never zero. Country estimates describe where an observed address is registered, never who visited.
+What LogCarve does not claim: visits, visitors, sessions, conversions, search rankings or training use cannot be derived from access logs alone. Missing timing stays `unavailable`, never zero. Country values are approximate country estimates from observed client addresses, not guaranteed registration countries and never who visited.
 
 ## Features
 
@@ -29,8 +29,8 @@ What LogCarve does not claim: visits, visitors, sessions, conversions, search ra
 - Opt-in incremental follow with durable checkpoints, generation identity and rotation handling (`follow`, `replay-archive`); schema-gated `/readyz`. The browser starts no watcher.
 - Overview graphs, timelines and weekday/hour heatmaps over an explicit display timezone.
 - 77-rule bot catalog with traffic, category, provider and purpose filters, plus named-bot drilldowns.
-- Sortable Requests explorer with per-row details, exact and full-text search, and country filtering.
-- Performance (latency percentiles, slow endpoints), SEO (bot statuses, AI-observed paths), Referrers (sanitized URLs, broken inbound 404s), Journeys and Security pages.
+- Sortable Requests explorer with per-row details, text/substring search plus exact original-address lookup, and country filtering.
+- Performance (latency percentiles, slow endpoints), SEO (bot statuses, AI-crawler request paths), Referrers (sanitized URLs, broken inbound 404s), Journeys and Security pages.
 - Saved filter views, current-versus-baseline comparison windows and full-result CSV/JSON export with reproducibility metadata.
 - Authenticated read-only API (`/api/v1`) with scoped `analytics:read` tokens, plus a stdlib-only Python client.
 - Local-first browser UI: bundled assets with no CDN or tracking, light and dark themes, English UI, server pagination.
@@ -43,8 +43,8 @@ This quickstart runs a persistent 120-row synthetic demo on loopback. It imports
 Prerequisites:
 
 - Git and curl on the host.
-- Docker with the Compose plugin (recent enough for optional `env_file` `required: false`).
-- Host Python 3 for the API client examples.
+- Docker with the Compose plugin 2.24.0 or newer (optional `env_file` `required: false` needs 2.24.0+).
+- Host Python 3 for demo initialization/helpers and the API client examples.
 
 ```bash
 git clone --branch feature/logwerk-parity-ready-2026-11-02 https://github.com/abbottis/logcarve.git
@@ -91,7 +91,7 @@ The [stdlib client](clients/logcarve_api_client.py) performs the same calls with
 
 ## Your own logs
 
-Production use is operator-configured, not a one-command setup: approved source roots and source IDs mounted read-only, secrets provided through the environment (see [.env.example](.env.example)), and CLI ingestion. The base Compose file requires operator secrets; do not copy demo credentials elsewhere. No real-log sample is shipped in this repository.
+Production use is operator-configured. Configure approved source roots and source IDs, read-only mounts, and secrets through the environment (see [.env.example](.env.example)) before starting, then use CLI ingestion. The base Compose file requires operator secrets; do not copy demo credentials elsewhere. No real-log sample is shipped in this repository.
 
 Start here:
 
@@ -138,9 +138,9 @@ Preview ready for local evaluation. Linux ARM64 container, offline and browser p
 
 ## Hackathon
 
-LogCarve is a project developed for the [Meta Global AI Developer Hackathon (2026)](https://dev.meta.ai/events/global-hackathon), Indie developer track, an event built around Muse Code and Meta models. This states participation only; it implies no award, eligibility certification, official endorsement or submitted status.
+LogCarve is a project developed for the [Meta Global AI Developer Hackathon (2026)](https://dev.meta.ai/events/global-hackathon), Indie developer track. Built with Muse Code and Muse Spark 1.3.
 
-Thank you to Meta AI for the models, the developer tools and the hackathon opportunity. LogCarve was developed with Muse Code and Muse Spark 1.3 assistance, alongside independent planning, review and testing — no exclusive authorship is claimed.
+Thank you to Meta AI for the models, the developer tools and the hackathon opportunity.
 
 ## License and provenance
 
