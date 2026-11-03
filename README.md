@@ -150,7 +150,7 @@ See the [AI providers guide](docs/ai-providers.md) for endpoints, pricing proven
 
 ## Status
 
-Preview ready for local evaluation. The maintained anchors (source HEAD, schema, implemented slices, last test evidence) are in [current status](docs/current-status.md); full proofs are in the [verification history](docs/verification.md) and CI runs the locked gates on every push and pull request. Native Linux x86-64 is not yet verified and owner manual acceptance is pending. See the [acceptance criteria](docs/acceptance-criteria.md) for precise scope.
+Preview ready for local evaluation. The maintained anchors (source HEAD, schema, implemented slices, last test evidence) are in [current status](docs/current-status.md); full proofs are in the [verification history](docs/verification.md) and CI runs the locked gates on pushes to the published branches and on pull requests. Native Linux x86-64 is not yet verified and owner manual acceptance is pending. See the [acceptance criteria](docs/acceptance-criteria.md) for precise scope.
 
 ## Hackathon
 

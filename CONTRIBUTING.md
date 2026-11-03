@@ -55,10 +55,12 @@ npm run check:external
 For UI asset changes, use the recorded npm scripts (for example
 `npm run build` and `npm run check:external`); see `package.json` for
 the current script list. Browser changes need repeatable Playwright
-tests where they exist; the optional E2E browser setup is
-`uv run --locked playwright install chromium` followed by
+tests where they exist; from the repo root, the optional E2E browser setup is
+`export PLAYWRIGHT_BROWSERS_PATH="$PWD/artifacts/playwright-browsers"` before
+`uv run --locked playwright install chromium` and before the optional
 `uv run --locked pytest tests/e2e` (the E2E conftest points browsers
-at ignored project-local storage).
+at the same ignored project-local storage). No browser install is performed by
+these docs.
 
 Documentation-only changes do not need the application test suite or
 asset build; they need working relative links and correctly formatted
