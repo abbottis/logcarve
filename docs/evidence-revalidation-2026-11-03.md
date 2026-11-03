@@ -178,3 +178,24 @@ Tests: new parametrized regression over signed receipts with
 missing/null/string/numeric `complete` markers (all
 `unverified`/`provenance_incomplete`); existing valid-`current`,
 cap-`unverified` and storage-503 cases keep passing.
+
+## Operational readiness (2026-11-03, coordinator-observed, docs-only)
+
+Local readiness confirmed per
+`artifacts/task-inputs/evidence-revalidation-operational-receipt.json`
+(tracked-source image on Linux ARM64, loopback-only
+`127.0.0.1:8080`, schema 9, no migration, no public exposure;
+`main` unchanged; product model calls zero).
+
+Brief usage: on the Ask AI page each new evidence item carries a
+"Recheck evidence" button. A recheck replays the signed receipt
+scope (same deterministic tool/query path, exact original scope:
+site, source, window, matchers, paging, bucket) with a fresh
+observation time and reports one of `current`, `current` with
+`generation_changed`, `changed`, `unavailable`, or `unverified`,
+alongside the exact scope and the observed/rechecked times.
+
+Notes: the generation flag records source/import-history movement,
+not proof of new bytes. A recheck is a fresh read of current data
+under the old scope — not an archive — and it never verifies
+arbitrary answer prose, only signed evidence receipts.

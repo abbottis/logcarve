@@ -3346,3 +3346,13 @@ Same approved evidence feature, same branch `feature/evidence-revalidation-2026-
 - Actual checks: full `tests/unit` + `tests/integration` — 1486 PASS, zero skips (100.93s). Maintained protected-Chromium browser — 3 PASS (3.43s): real fake-provider chat → receipt → actual Recheck current → retained-window deletion → unavailable, plus the two existing Ask success/failure neighbors. `ruff check` PASS; `ruff format --check` PASS (197 files already formatted). `uv lock --check` PASS, manifests unchanged. `npm run build` PASS; `npm run check:external` PASS; `git diff --check` PASS.
 - Secret scan: Gitleaks 8.30.1 full public-history raw exit 1 with exactly the same 3 known reviewed false positives, no new credentials. Actual product model calls: zero.
 - Independent-review corrections and the explicit legacy completeness guard reviewed; no blanket release claim. Linux x86-64 and runtime activation NOT RUN — no claim made.
+
+## 2026-11-03 — Evidence-revalidation operational closeout (coordinator-observed, docs-only)
+
+Docs-only operational closeout on branch `feature/evidence-revalidation-2026-11-03`; no application/config/test/asset/instruction/lock edits, no Docker commands, no model tests. Coordinator-observed actual result per `artifacts/task-inputs/evidence-revalidation-operational-receipt.json`; all historical entries above stand unchanged.
+
+- Activation: tracked-source image on Linux ARM64 (source `250ff35effbf5b4aab216c7e438b8b82b3956d18`, image `sha256:df4a9919155ef69f577d8a5e19048375cca54c1c24e2cc4b2d9db20f17bffec7`), UID 10001, loopback-only `127.0.0.1:8080`, schema 9 with no new migration. No public app exposure; `main` unchanged.
+- HTTP login 200, readiness 200 (`ready true`, database `ok`, schema 9). Deterministic locally generated signed evidence (NO model answer/call) → real authenticated `POST /api/v1/chat/evidence/recheck` 200: `current`, result match true, 120 surviving events, provenance complete true. Malformed receipt 400 `invalid_receipt` with request-id parity.
+- Ask page 200 with new recheck locale strings; served JS matches source; served CSS includes `.ml-2`. Authenticated Bearer summary 200: 120 requests / 28 x 4xx / 3 x 5xx (bytes_total 127744, measured 120).
+- Preservation verified by before/after comparison: existing data, encrypted provider settings, usage grant and all counters intact. Product model calls zero; no new live-provider correctness claim.
+- Existing tested source stands: 1486 unit/integration PASS + 3 protected browser PASS; no repeat tests for this docs closeout. x86-64 NOT RUN unchanged.
