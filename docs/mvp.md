@@ -1,6 +1,9 @@
 # MVP scope
 
-Status: derived from technical spec v0.4 on 2026-10-28; no product behavior implemented.
+Status: derived from technical spec v0.4 on 2026-10-28. The "no product
+behavior implemented" line below is the preserved 2026-10-28 scaffold
+snapshot; behavior since then is implemented per
+[current status](current-status.md) and [verification](verification.md).
 
 ## Scope contract
 
@@ -36,7 +39,14 @@ Auth/privacy work belongs in each affected slice. S1 may be verified through a l
 
 ## Later scope
 
-P1: gzip/custom timing formats, incremental import/rotation, LiteSpeed fixtures, optional verified bots, exports, local chat history/streaming, product MCP server and signed event webhooks. Saved orchestration scripts/hooks also wait for a stable manual development procedure.
+Original 2026-10-28 deferrals below; the accepted LogWerk-parity
+exception (ADR 0003, 2026-11-01) has since implemented gzip,
+measured-timing presets, bounded admin custom format mappings,
+hostname/alias filtering, opt-in incremental follow/rotation, saved
+views, comparison windows, full-result export, request journeys and
+genuine offline GeoIP (see [current status](current-status.md)).
+
+P1: LiteSpeed fixtures, optional verified bots, local chat history/streaming, product MCP server and signed event webhooks. Saved orchestration scripts/hooks also wait for a stable manual development procedure.
 
 P2: multi-site/roles, continuous multi-source ingestion, error/CDN/WAF formats, correlation and larger storage systems when measured need justifies them. No automatic firewall/server mutation in the MVP.
 

@@ -1,15 +1,15 @@
-# Acceptance checklist — owner review (2 Nov 2026, parity activated)
+# Acceptance checklist — owner review (2 Nov 2026 checkpoint, historical)
 
-Short practical checklist for the owner review of the
-parity-activated demo at clean code anchor
-`84f440f2c593c9c32f4608e608c3530ad1cfed61` (canonical equivalent
-`d62cb5a0929b5d2114924106dff30abfbc305fb4`; live 8080 at schema 8,
-120 rows, see `docs/verification.md` final receipts). Earlier
-acceptance-readiness anchor `bb272a9` (reviewed public source branch
+Short practical checklist for the owner review. The 2 Nov 2026
+parity-activated demo checkpoint below (code anchor `84f440f`, live
+8080 at schema 8, 120 rows) is historical; the current documented
+state lives in [current status](current-status.md) and the evidence
+in [verification](verification.md). Earlier acceptance-readiness
+anchor `bb272a9` (reviewed public source branch
 `feature/acceptance-polish-2026-11-01`) remains the historical record.
 Inspect `git status` rather than assuming a branch name. Record
-expected, actual and issues per row; planned recording by Tue 3 Nov;
-nothing here auto-accepts on the owner's behalf.
+expected, actual and issues per row; nothing here auto-accepts on the
+owner's behalf.
 
 ## Demo access
 

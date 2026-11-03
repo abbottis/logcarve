@@ -1,9 +1,14 @@
-# Local demo profile (T10, synthetic data, AI off)
+# Local demo profile (synthetic data, AI off by default)
 
-Loopback-only persistent demo for the 3 November recording. No real logs,
-no model key, no provider contact, no public exposure.
+Loopback-only persistent demo. No real logs, no model key, no provider
+contact, no public exposure. A fresh demo starts with AI off by
+default (empty model key); a separately authorized configured runtime
+may differ — see [current status](current-status.md) for the documented
+state. Do not claim all demos run AI-off, assume stored keys, or grant
+permission.
 
-Parity status 2 Nov 2026: the running demo at `127.0.0.1:8080`
+Dated checkpoint 2 Nov 2026 (historical; current state in
+[current status](current-status.md)): the running demo at `127.0.0.1:8080`
 serves the exact tested parity image `84f440f` (image ID
 `sha256:8fcdaa34312c6379817dad359fd93318b85257c2164f57d903470083c9b22abd`),
 non-root user 10001, loopback-only, AI off with empty model key.

@@ -2,6 +2,12 @@
 
 Prepared on 2026-10-28 against official documentation and the locally installed **Muse Code 1.4.14 (1.4.14-R7309.1)** CLI help. Account/model access and billing were not checked.
 
+> 2026-11-03 maintenance note: version numbers, the "no Git history"
+> setup snapshot, and the 2026-10-28 MCP inventory below are preserved
+> history. For the live project state start at
+> [current status](current-status.md), then the
+> [development tool workflow](development-tools.md).
+
 ## Start and project rules
 
 Launch from the project root:

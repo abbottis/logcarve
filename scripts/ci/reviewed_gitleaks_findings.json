@@ -1,0 +1,26 @@
+[
+  {
+    "fingerprint": "986f46e8a8daea2aee86e9484224be47e3fdb022:tests/unit/test_native_http_boundary.py:generic-api-key:32",
+    "file": "tests/unit/test_native_http_boundary.py",
+    "rule": "generic-api-key",
+    "line": 32,
+    "commit": "986f46e8a8daea2aee86e9484224be47e3fdb022",
+    "note": "Synthetic fake-key sentinel used only through injected fake opener/transport offline tests."
+  },
+  {
+    "fingerprint": "016b458744e33713980b081e7c31c6c56bbe5a58:tests/integration/test_parity_t5a.py:generic-api-key:574",
+    "file": "tests/integration/test_parity_t5a.py",
+    "rule": "generic-api-key",
+    "line": 574,
+    "commit": "016b458744e33713980b081e7c31c6c56bbe5a58",
+    "note": "Synthetic pytest SESSION_SECRET fixture value, test-only dataflow."
+  },
+  {
+    "fingerprint": "b52a9fb77db80a793d774f895cefc2b9e585341a:docs/technical-spec.md:generic-api-key:787",
+    "file": "docs/technical-spec.md",
+    "rule": "generic-api-key",
+    "line": 787,
+    "commit": "b52a9fb77db80a793d774f895cefc2b9e585341a",
+    "note": "Cost-heading line in the supplied German requirements snapshot; read-only source, never executed."
+  }
+]

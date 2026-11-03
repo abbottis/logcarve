@@ -2,6 +2,12 @@
 
 ## Unreleased
 
+### 2026-11-03 — Repository maintenance (docs/CI only, no application change)
+
+- Reconciled living instructions and guides with the documented state: volatile anchors moved to `docs/current-status.md`; parity T1–T5, four provider adapters/settings/allowance and evidence revalidation recorded as implemented; scaffold-era snapshots marked historical. No `docs/verification.md` history or `docs/technical-spec.md` rewritten.
+- `scripts/demo/verify_candidate.sh` derives the expected schema version from the tracked exported migration contract instead of a hardcoded value.
+- New minimal CI (`.github/workflows/ci.yml`): locked `uv`/pytest/Ruff, `npm ci`/build/`check:external`, and a redacted full-history Gitleaks scan with fail-closed adjudication of exactly the three reviewed false positives (`scripts/ci/`). No browser matrix, Docker builds, provider calls or secrets.
+
 ### 2026-11-01 — Slice A traffic analysis backend (analytics completion)
 
 - Bot catalog v3 (77 rules): 70 LogWerk `botRules` patterns/names/provider-purpose labels adapted (pinned commit `d7ab01c`, MIT retained verbatim), 5 pre-existing LogCarve IDs kept, 2 original rules added (UptimeRobot monitoring, generic suspected-automation fallback); CLI/headless/scanner → `automation_tool` remap documented.

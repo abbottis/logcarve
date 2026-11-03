@@ -56,15 +56,16 @@ are EMULATED proof only, with distinct architecture-tagged images.
 ## Product AI providers (ADR 0004, owner-accepted 2026-11-02)
 
 The backend Settings page (local-admin session + CSRF) selects one of
-Meta (`muse-spark-1.3`), OpenAI (`gpt-6-luna`), Google Gemini
-(`gemini-3.5-flash-lite`) or Anthropic Claude (`claude-haiku-5-5`)
+Meta (`muse-spark-1.3`), OpenAI (`gpt-6.1-terra`), Google Gemini
+(`gemini-3.8-flash`) or Anthropic Claude (`claude-sonnet-5-5`)
 with its bounded model, data policy and keys. Each provider uses its
 genuine native HTTPS endpoint (fixed allowlist, no configurable URL
 surface; keys travel in auth headers, never in URLs). Tiers are
 labeled honestly: Meta/OpenAI Standard, Gemini Paid API, Anthropic
-API. Verified per-model pricing provenance is recorded in
-`app/ai/catalog.py` (Meta 2026-10-31, OpenAI/Gemini/Anthropic
-2026-11-02 task references).
+API. The [AI providers guide](ai-providers.md) is the canonical
+model/endpoint/tier reference; verified per-model pricing provenance
+is recorded in `app/ai/catalog.py` (Meta 2026-10-31,
+OpenAI/Gemini/Anthropic 2026-11-02 task references).
 
 Safe credential onboarding:
 

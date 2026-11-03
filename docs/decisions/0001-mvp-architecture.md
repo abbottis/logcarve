@@ -21,4 +21,7 @@ This minimizes moving parts but requires deliberate SQLite writer coordination, 
 
 ## Acceptance record
 
-No acceptance has been recorded. Use `/plan` and `/grill` to present the concrete first slice; append the owner's decision/reference here before implementing architecture choices that require approval.
+No acceptance has been recorded; this ADR stays a clearly dated
+2026-10-28 historical proposal. The implemented direction is
+documented in `../architecture.md` and `../verification.md`, which
+do not invent acceptance for this record.

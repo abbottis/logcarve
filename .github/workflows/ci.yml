@@ -1,0 +1,91 @@
+name: ci
+
+on:
+  push:
+    branches: [main, feature/logwerk-parity-ready-2026-11-02]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  checks:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - name: Check out full history without credentials
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Set up uv and Python
+        uses: astral-sh/setup-uv@68559e99cc807c1eb7e9238fd43a15bba460eec2 # v10.3.3
+        with:
+          uv-version: "0.13.6"
+          python-version: "3.12.16"
+          enable-cache: false
+
+      - name: Set up Node
+        uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: "22.23.4"
+
+      - name: Sync Python environment (locked)
+        run: uv sync --locked
+
+      - name: Install Node dependencies (locked)
+        run: npm ci
+
+      - name: Ruff lint
+        run: uv run --locked ruff check .
+
+      - name: Ruff format check
+        run: uv run --locked ruff format --check .
+
+      - name: Lockfile check
+        run: uv lock --check
+
+      - name: Unit and integration tests
+        run: uv run --locked pytest tests/unit tests/integration
+
+      - name: Asset build
+        run: npm run build
+
+      - name: External asset check
+        run: npm run check:external
+
+      - name: Download and verify Gitleaks
+        run: |
+          set -eu
+          GITLEAKS_VERSION="8.30.1"
+          curl -sSL --max-time 120 -o /tmp/gitleaks.tar.gz \
+            "https://github.com/gitleaks/gitleaks/releases/download/v${GITLEAKS_VERSION}/gitleaks_${GITLEAKS_VERSION}_linux_x64.tar.gz"
+          echo "551f6fc83ea457d62a0d98237cbad105af8d557003051f3e7ca7b3f2470eb  /tmp/gitleaks.tar.gz" | sha256sum -c -
+          mkdir -p /tmp/gitleaks-bin
+          tar -xzf /tmp/gitleaks.tar.gz -C /tmp/gitleaks-bin gitleaks
+
+      - name: Full-history secret scan (redacted, fail-closed adjudication)
+        run: |
+          set -eu
+          set +e
+          /tmp/gitleaks-bin/gitleaks detect \
+            --source "$GITHUB_WORKSPACE" \
+            --redact=100 \
+            --report-format json \
+            --report-path /tmp/gitleaks-report.json \
+            --exit-code 1 > /tmp/gitleaks-stdout.log 2>&1
+          SCAN_EXIT=$?
+          set -e
+          # The raw report stays under /tmp: never committed, never uploaded.
+          # Exit 1 with exactly the reviewed findings is the expected PASS;
+          # anything else rejects via the helper below.
+          uv run --locked python scripts/ci/check_gitleaks_report.py \
+            --report /tmp/gitleaks-report.json \
+            --expected scripts/ci/reviewed_gitleaks_findings.json \
+            --gitleaks-exit "$SCAN_EXIT"

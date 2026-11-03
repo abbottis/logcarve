@@ -8,6 +8,7 @@ Self-hosted web access-log analytics: reproducible traffic, crawler, SEO and sec
 [![Runs with Docker Compose](https://img.shields.io/badge/Run-Docker_Compose-blue?style=flat-square)](https://docs.docker.com/compose/)
 [![Built with Muse Code](https://img.shields.io/badge/Built_with-Muse_Code-purple?style=flat-square)](https://dev.meta.ai/docs/muse-code/interactive)
 [![Preview status](https://img.shields.io/badge/Status-Preview-orange?style=flat-square)](docs/verification.md)
+[![CI](https://github.com/abbottis/logcarve/actions/workflows/ci.yml/badge.svg)](https://github.com/abbottis/logcarve/actions/workflows/ci.yml)
 
 ![LogCarve social preview: self-hosted log analytics dashboard showing traffic, SEO and security API insights](.github/assets/logcarve-social-preview.png)
 
@@ -149,7 +150,7 @@ See the [AI providers guide](docs/ai-providers.md) for endpoints, pricing proven
 
 ## Status
 
-Preview ready for local evaluation. Linux ARM64 container, offline and browser proofs are recorded in the [verification history](docs/verification.md); native Linux x86-64 is not yet verified and owner manual acceptance is pending. See the [acceptance criteria](docs/acceptance-criteria.md) for precise scope.
+Preview ready for local evaluation. The maintained anchors (source HEAD, schema, implemented slices, last test evidence) are in [current status](docs/current-status.md); full proofs are in the [verification history](docs/verification.md) and CI runs the locked gates on every push and pull request. Native Linux x86-64 is not yet verified and owner manual acceptance is pending. See the [acceptance criteria](docs/acceptance-criteria.md) for precise scope.
 
 ## Hackathon
 

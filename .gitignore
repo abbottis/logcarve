@@ -7,6 +7,9 @@
 *.pem
 *.key
 credentials*.json
+secrets*.json
+*-keys.env
+/.uv-python/
 /CONTEXT7_API_KEY
 /CONTEXT7_API_KEY.*
 /config/*settings.local.json

@@ -97,6 +97,18 @@ sha_of() { python3 -c 'import hashlib,sys; print(hashlib.sha256(open(sys.argv[1]
 [ "$(sha_of "$WORK/export/tests/fixtures/combined/t8_smoke.txt")" = "$T8_SHA" ] || { echo "exported T8 digest drift" >&2; exit 1; }
 [ "$(sha_of "$WORK/export/tests/fixtures/combined/demo_rich_29_31oct.txt")" = "$RICH_SHA" ] || { echo "exported rich digest drift" >&2; exit 1; }
 good "tracked export carries both authoritative fixtures"
+# Expected schema version is derived from the tracked exported migration
+# contract (highest NNNN in app/db/migrations), never a magic number here.
+EXPECTED_SCHEMA=0
+for _m in "$WORK/export/app/db/migrations"/[0-9][0-9][0-9][0-9]_*.sql; do
+  [ -f "$_m" ] || { echo "tracked migrations missing from export" >&2; exit 1; }
+  _v=${_m##*/}
+  _v=${_v%%_*}
+  while [ "${#_v}" -gt 1 ] && [ "${_v#0}" != "$_v" ]; do _v=${_v#0}; done
+  if [ "$_v" -gt "$EXPECTED_SCHEMA" ]; then EXPECTED_SCHEMA=$_v; fi
+done
+[ "$EXPECTED_SCHEMA" -gt 0 ] || { echo "no tracked migrations in export" >&2; exit 1; }
+echo "expected schema from tracked migrations: $EXPECTED_SCHEMA"
 
 echo "== build and isolated stack =="
 python3 - "$WORK/candidate.env" <<'EOF'
@@ -188,8 +200,8 @@ echo "$import_json" | python3 -c 'import json,sys; d = json.load(sys.stdin); ass
 good "rich import 90 rows, completed (T8 import completed before it)"
 seeded=$(probe)
 echo "seeded: $seeded"
-echo "$seeded" | python3 -c 'import json,sys; d = json.load(sys.stdin); assert (d["verdict"], d["rows"], d["t8_rows"], d["rich_rows"], d["schema_version"]) == ("SEEDED", 120, 30, 90, 8), d'
-good "probe SEEDED with 120 combined rows (30 T8 + 90 rich) at schema v8"
+echo "$seeded" | python3 -c 'import json,sys; d = json.load(sys.stdin); assert (d["verdict"], d["rows"], d["t8_rows"], d["rich_rows"], d["schema_version"]) == ("SEEDED", 120, 30, 90, '"$EXPECTED_SCHEMA"'), d'
+good "probe SEEDED with 120 combined rows (30 T8 + 90 rich) at schema v$EXPECTED_SCHEMA"
 
 echo "== replay-zero and restart =="
 for spec in "demo-access.log 0 30" "demo-rich-access.log 0 90"; do
@@ -211,8 +223,8 @@ until curl -sf "$BASE_URL/healthz" >/dev/null 2>&1; do
   sleep 2
 done
 after=$(probe)
-echo "$after" | python3 -c 'import json,sys; d = json.load(sys.stdin); assert (d["verdict"], d["rows"], d["schema_version"]) == ("SEEDED", 120, 8), d'
-good "120 rows survive restart at schema v8 (probe re-verified)"
+echo "$after" | python3 -c 'import json,sys; d = json.load(sys.stdin); assert (d["verdict"], d["rows"], d["schema_version"]) == ("SEEDED", 120, '"$EXPECTED_SCHEMA"'), d'
+good "120 rows survive restart at schema v$EXPECTED_SCHEMA (probe re-verified)"
 
 echo "== candidate teardown (owned resources only) =="
 compose down -v >/dev/null 2>&1

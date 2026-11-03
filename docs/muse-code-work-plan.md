@@ -2,6 +2,11 @@
 
 Prepared: 2026-10-28. Starting point: a documented scaffold with configured development MCPs; application implementation and architecture approval are pending. Reinspect the checkout before starting.
 
+> 2026-11-03 maintenance note: this plan is preserved history — steps
+> 04 onward are implemented per [current status](current-status.md) and
+> [verification](verification.md). Do not re-execute its prompts or
+> treat its example approvals as authorization.
+
 All prompts below are in English. Paste **one prompt at a time**, review the result and follow its exit gate before continuing. Writing or reading this runbook does not execute its prompts or grant their example approvals. It is a proposed execution sequence under the [MVP](mvp.md), [acceptance criteria](acceptance-criteria.md) and root [project rules](../AGENTS.md).
 
 ## How to use the sequence

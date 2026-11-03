@@ -2,6 +2,13 @@
 
 Recorded on 2026-10-28 following the owner's request to make the development-tool recommendations available to Muse Code. This guide supplies workflow defaults under the root rules. Application architecture, exact dependency versions and implementation approval remain separate decisions.
 
+> 2026-11-03 maintenance note: the 2026-10-28 scaffold snapshot below
+> (no Git/manifests/lockfiles, unconfigured tools) is preserved history;
+> the live project state is in [current status](current-status.md).
+> Locked commands now run through `uv run --locked` with the committed
+> `pyproject.toml`/`uv.lock`, and CI runs the full gates in
+> [.github/workflows/ci.yml](../.github/workflows/ci.yml).
+
 ## Tool responsibilities
 
 | Tool | Project use | When to configure/use |
