@@ -107,6 +107,10 @@
     heading.className = "font-semibold";
     heading.textContent = msg("evidence");
     evidenceEl.appendChild(heading);
+    const note = document.createElement("p");
+    note.className = "text-sm text-base-content/70";
+    note.textContent = msg("evidence-rerun-note");
+    evidenceEl.appendChild(note);
     const list = document.createElement("ul");
     list.className = "list-disc space-y-1 pl-5";
     items.forEach((envelope) => {
@@ -119,11 +123,60 @@
         link.textContent = label;
         row.appendChild(link);
       } else {
-        row.textContent = label;
+        const span = document.createElement("span");
+        span.textContent = label;
+        row.appendChild(span);
+      }
+      const status = document.createElement("span");
+      status.className = "ml-2 text-sm";
+      status.setAttribute("data-recheck-status", "");
+      row.appendChild(status);
+      if (typeof envelope.receipt === "string" && envelope.receipt) {
+        const button = document.createElement("button");
+        button.type = "button";
+        button.className = "btn btn-ghost btn-xs ml-2";
+        button.textContent = msg("recheck");
+        button.addEventListener("click", () => recheckEvidence(envelope.receipt, button, status));
+        row.appendChild(button);
+      } else {
+        status.textContent = msg("recheck-unverified");
       }
       list.appendChild(row);
     });
     evidenceEl.appendChild(list);
+  };
+
+  const recheckEvidence = async (receipt, button, status) => {
+    const csrf = window.LogcarveCSRF;
+    if (!csrf || typeof csrf.postJson !== "function") {
+      status.textContent = msg("error");
+      return;
+    }
+    button.disabled = true;
+    status.textContent = msg("recheck-checking");
+    try {
+      const response = await csrf.postJson("/api/v1/chat/evidence/recheck", { receipt });
+      const data = await response.json().catch(() => ({}));
+      if (!response.ok) {
+        status.textContent = msg("error");
+        return;
+      }
+      if (data.status === "current" && data.generation_changed) {
+        status.textContent = msg("recheck-current-new-generation");
+      } else if (data.status === "current") {
+        status.textContent = msg("recheck-current");
+      } else if (data.status === "changed") {
+        status.textContent = msg("recheck-changed");
+      } else if (data.status === "unavailable") {
+        status.textContent = msg("recheck-unavailable");
+      } else {
+        status.textContent = msg("recheck-unverified");
+      }
+    } catch {
+      status.textContent = msg("error");
+    } finally {
+      button.disabled = false;
+    }
   };
 
   send.addEventListener("click", async () => {

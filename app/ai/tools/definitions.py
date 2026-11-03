@@ -17,6 +17,7 @@ from datetime import UTC, datetime
 
 from pydantic import BaseModel, Field, ValidationError
 
+from app.ai import receipts
 from app.analytics import service
 from app.analytics.contracts import (
     AnalyticsFilter,
@@ -380,14 +381,39 @@ def _execute_validated(conn, rules, *, name, filt, args, tool_call_id, observed)
         result = _execute_report(conn, rules, report=args.report, filt=filt, observed=observed)  # type: ignore[attr-defined]
     else:
         result = service.error_groups(conn, filt, rules)
+    coverage = service.coverage_summary(conn, filt, rules)
+    digest = receipts.result_digest(result)
     return {
         "tool_call_id": tool_call_id,
         "tool": name,
         "filters": _evidence_filters(args, filt),
         "observation_time": observed.isoformat(),
-        "coverage": service.coverage_summary(conn, filt, rules),
+        "coverage": coverage,
+        "provenance": _provenance(conn, filt, coverage, digest),
+        "result_digest": digest,
         "result": result,
     }
+
+
+def _provenance(conn, filt, coverage: dict, digest: str) -> dict:
+    """Compact generation heads for this envelope, read in its snapshot.
+
+    Per scoped source: latest follow/rotation generation plus latest
+    import head (both None when absent). No fingerprints, paths, rows,
+    addresses or secrets: opaque references only. A scope wider than
+    the report is disclosed via the scoped source list, never as proof
+    of source completeness.
+    """
+    return receipts.build_provenance(
+        conn,
+        site_id=filt.site_id,
+        source_id=filt.source_id,
+        unique_events=coverage.get("unique_events"),
+        observed_min=coverage.get("observed_min"),
+        observed_max=coverage.get("observed_max"),
+        imports_truncated=bool(coverage.get("imports_truncated", False)),
+        digest=digest,
+    )
 
 
 def _execute_report(conn, rules, *, report: str, filt, observed) -> dict:

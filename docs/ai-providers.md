@@ -147,6 +147,22 @@ admin session + CSRF).
   visits, visitors, sessions, conversions, rankings, or training-use
   claims are derived from access logs.
 
+## Rechecking saved evidence
+
+Each answer's evidence links rerun the same scope against current data;
+they are not archived snapshots. Every evidence row also carries a
+**Recheck evidence** button that replays the exact saved scope through
+the same deterministic read and reports one honest state: **current**
+(still matches; a newer source generation is called out separately),
+**changed** (current data no longer matches), **unavailable** (the saved
+selection no longer resolves to any events, e.g. after retention), or
+**unverified** (evidence without a signed receipt). Rechecking needs a
+local admin session, performs zero model calls and zero usage charges,
+and works with the assistant disabled. It never proves verified bot
+identity, compromise, anonymous addresses, or a complete historical
+snapshot: a partial or capped history is stated, never upgraded.
+Details: [evidence revalidation](evidence-revalidation-2026-11-03.md).
+
 ## Troubleshooting
 
 The chat surface shows a plain English unavailable message; the codes

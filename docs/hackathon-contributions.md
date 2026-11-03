@@ -179,3 +179,16 @@ dated operational closeout in `verification.md`. A later owner-funded
 synthetic retest on 2026-11-02 also PASS. Implementation provenance
 remains Muse only. Original LogCarve
 code remains Apache-2.0.
+
+## Evidence provenance and revalidation, 3 November 2026
+
+Owner-authorized small slice (Muse Spark 1.3 Contributor, medium,
+Contributor ON, sole writer, no subagents; public source and synthetic
+fixtures only; safeguards ON). Local evidence/findings now carry compact
+source/generation provenance and a result digest through the shared
+analytics/tool layer; a stateless signed receipt replays the exact
+original scope through the same deterministic read with a fresh
+observation time and reports current / changed / unavailable /
+unverified. Local admin session + CSRF; zero model calls; no migration,
+no new dependencies, no provider-wire change. Original LogCarve code
+remains Apache-2.0.

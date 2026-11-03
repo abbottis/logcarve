@@ -59,6 +59,56 @@ _ERROR_STATUS = {
 }
 
 
+def attach_evidence_receipts(evidence: list, *, secret_value: str) -> list:
+    """Attach stateless signed replay scopes to local evidence envelopes.
+
+    Bounded safe metadata plus digests only, never raw results. Receipts
+    stay local (browser only) and never enter the provider wire. Envelopes
+    that lack the expected fields keep no receipt and are later reported
+    as unverifiable, never current.
+    """
+    from app.ai import receipts
+
+    for item in evidence:
+        if not isinstance(item, dict):
+            continue
+        try:
+            if (
+                secret_value
+                and isinstance(item.get("tool"), str)
+                and isinstance(item.get("filters"), dict)
+                and isinstance(item.get("result_digest"), str)
+                and isinstance(item.get("provenance"), dict)
+                and isinstance(item.get("observation_time"), str)
+            ):
+                item["receipt"] = receipts.sign_receipt(
+                    receipts.receipt_payload(
+                        tool=item["tool"],
+                        filters=item["filters"],
+                        digest=item["result_digest"],
+                        provenance=item["provenance"],
+                        observation_time=item["observation_time"],
+                    ),
+                    secret=secret_value,
+                )
+        except (TypeError, ValueError):
+            continue
+    return evidence
+
+
+class RecheckBody(BaseModel):
+    """Evidence recheck request: a signed receipt, or legacy scope.
+
+    The receipt's embedded tool plus filters are the ONLY trusted scope:
+    client-supplied filters are never executed. Legacy evidence without
+    a receipt returns ``unverified`` and never a current claim.
+    """
+
+    receipt: str | None = Field(default=None, min_length=1, max_length=65536)
+    tool: str | None = Field(default=None, min_length=1, max_length=64)
+    filters: dict | None = None
+
+
 class ChatBody(BaseModel):
     question: str = Field(min_length=1, max_length=2000)
     site_id: str = Field(min_length=1, max_length=128)
@@ -225,8 +275,15 @@ def post_chat(request: Request, body: ChatBody):
                 ),
                 request_id,
             )
+        from app.config import load_settings as _load_secret_settings
         from app.web.evidence import envelope_href
 
+        # The receipt key is the raw server session secret, which the
+        # effective AI settings intentionally do not carry.
+        secret = _load_secret_settings().session_secret
+        secret_value = secret.get_secret_value() if hasattr(secret, "get_secret_value") else secret
+        if not isinstance(secret_value, str):
+            secret_value = ""
         evidence = []
         for envelope in result.evidence:
             item = dict(envelope) if isinstance(envelope, dict) else {}
@@ -235,6 +292,8 @@ def post_chat(request: Request, body: ChatBody):
             # reconstructs URLs from tool names or model text.
             item["href"] = envelope_href(item.get("tool"), item.get("filters", {}), "UTC")
             evidence.append(item)
+        # Stateless signed replay scopes for the recheck endpoint.
+        attach_evidence_receipts(evidence, secret_value=secret_value)
         return {
             "investigation_id": result.investigation_id,
             "answer": result.answer_text,
@@ -250,3 +309,129 @@ def post_chat(request: Request, body: ChatBody):
         }
     finally:
         _chat_slots.release()
+
+
+@router.post("/evidence/recheck")
+def post_evidence_recheck(request: Request, body: RecheckBody):
+    """Re-run one signed evidence scope locally and classify its freshness.
+
+    Admin session plus CSRF, exactly like chat. No AI gate, no provider,
+    no key, no network and no usage reservation: the receipt's embedded
+    tool plus filters are re-executed through the SAME deterministic
+    tool path with a fresh observation time, then digests and generation
+    heads decide ``current`` / ``changed`` / ``unavailable``. A missing
+    receipt (legacy evidence) is ``unverified``, never current; a
+    mis-signed receipt or an unknown tool/scope fails closed with no
+    execution. Analytics Bearer tokens carry no session and are rejected.
+    """
+    from datetime import UTC, datetime
+
+    from app.ai import receipts
+    from app.ai.tools.definitions import TOOL_NAMES, ToolError, execute_tool
+    from app.config import load_settings
+    from app.db.database import connect
+    from app.web.evidence import envelope_href
+
+    request_id = request.state.request_id
+    session = require_admin_session(request)
+    if isinstance(session, JSONResponse):
+        return session
+    denied = require_csrf(request, session, request_id)
+    if denied is not None:
+        return denied
+    settings = load_settings()
+    secret = settings.session_secret
+    secret_value = secret.get_secret_value() if hasattr(secret, "get_secret_value") else secret
+    if not isinstance(secret_value, str):
+        secret_value = ""
+    if not body.receipt:
+        # Legacy evidence without a receipt cannot prove its scope:
+        # report it honestly instead of replaying client filters.
+        if body.tool is None or not isinstance(body.filters, dict):
+            return error_response(
+                400, "invalid_request", "An evidence receipt is required.", request_id
+            )
+        return {
+            "status": "unverified",
+            "reason": "legacy_no_receipt",
+            "tool": body.tool,
+            "filters": body.filters,
+            "observation_time": None,
+            "original_observation_time": None,
+        }
+    payload = receipts.verify_receipt(body.receipt, secret=secret_value) if secret_value else None
+    if payload is None:
+        return error_response(
+            400, "invalid_receipt", "The evidence receipt is invalid.", request_id
+        )
+    tool = payload["tool"]
+    filters = payload["filters"]
+    if tool not in TOOL_NAMES:
+        return error_response(
+            400, "invalid_tool", "The evidence tool is not available.", request_id
+        )
+    if not isinstance(filters, dict):
+        return error_response(
+            400, "invalid_receipt", "The evidence receipt is invalid.", request_id
+        )
+    conn = connect(_db_path(request), read_only=True)
+    try:
+        fresh = execute_tool(
+            conn,
+            request.app.state.rules,
+            name=tool,
+            arguments=filters,
+            tool_call_id="recheck",
+            observation_time=datetime.now(UTC),
+        )
+    except ToolError as exc:
+        status = {
+            "forbidden_site": 403,
+            "forbidden_source": 403,
+            "store_unavailable": 503,
+        }.get(exc.code, 400)
+        return error_response(status, exc.code, str(exc), request_id)
+    except (ValueError, TypeError):
+        return error_response(
+            400, "invalid_arguments", "Tool arguments failed validation.", request_id
+        )
+    finally:
+        try:
+            conn.close()
+        except (ValueError, TypeError, OSError, AttributeError):
+            pass
+    fresh_digest = fresh.get("result_digest")
+    result_match = fresh_digest == payload.get("result_digest")
+    fresh_coverage = fresh.get("coverage") if isinstance(fresh.get("coverage"), dict) else {}
+    unique_events = fresh_coverage.get("unique_events")
+    try:
+        surviving = int(unique_events) if unique_events is not None else -1
+    except (TypeError, ValueError):
+        surviving = -1
+    old_sources = (
+        payload["provenance"].get("sources")
+        if isinstance(payload.get("provenance"), dict)
+        else None
+    )
+    new_sources = (
+        fresh["provenance"].get("sources") if isinstance(fresh.get("provenance"), dict) else None
+    )
+    generation_changed = old_sources != new_sources
+    if surviving == 0:
+        status = "unavailable"
+    elif result_match:
+        status = "current"
+    else:
+        status = "changed"
+    return {
+        "status": status,
+        "tool": tool,
+        "filters": filters,
+        "original_observation_time": payload.get("observation_time"),
+        "observation_time": fresh.get("observation_time"),
+        "result_match": bool(result_match),
+        "generation_changed": bool(generation_changed),
+        "coverage": fresh_coverage,
+        "provenance": fresh.get("provenance"),
+        "href": envelope_href(tool, filters, "UTC"),
+    }
