@@ -1,10 +1,10 @@
 # LogCarve durable context index
 
-- Product scope and implementation order: `docs/mvp.md`.
-- Proposed architecture and module ownership: `docs/architecture.md`.
-- Decisions, including unresolved account/license issues: `docs/decisions/README.md`.
-- Acceptance criteria and actual evidence: `docs/acceptance-criteria.md`, `docs/verification.md`.
-- Muse Code setup and coordination: `docs/muse-code.md`.
-- Provenance: `docs/hackathon-contributions.md`, `docs/spec-provenance.md`.
+- Current status pointer: see docs/current-status.md for maintained anchors.
+- Implemented architecture and module ownership: see docs/architecture.md.
+- Recorded decisions: see docs/decisions/README.md; LogCarve is Apache-2.0 with upstream MIT notices retained (see LICENSE and THIRD_PARTY_NOTICES.md); remaining operational prerequisites stay owner decisions.
+- Criteria and evidence: see docs/acceptance-criteria.md and docs/verification.md.
+- Muse guide: see docs/muse-code.md.
+- Provenance: see docs/hackathon-contributions.md.
 
 Keep this index small. Store durable topic notes only when they add facts not already maintained in project docs. Never store credentials, real logs, session transcripts or unverified conclusions as memory.
