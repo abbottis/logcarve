@@ -35,6 +35,7 @@ What LogCarve does not claim: visits, visitors, sessions, conversions, search ra
 - Performance (latency percentiles, slow endpoints), SEO (bot statuses, AI-crawler request paths), Referrers (sanitized URLs, broken inbound 404s), Journeys and Security pages.
 - Saved filter views, current-versus-baseline comparison windows and full-result CSV/JSON export with reproducibility metadata.
 - Authenticated read-only API (`/api/v1`) with scoped `analytics:read` tokens, plus a stdlib-only Python client.
+- Local no-model evidence rechecks ([evidence revalidation](docs/evidence-revalidation-2026-11-03.md)): replay the exact signed scope against current data and report current, changed, unavailable or unverified. Links rerun the same scope against current data; they are not archived snapshots and do not validate arbitrary AI prose.
 - Local-first browser UI: bundled assets with no CDN or tracking, light and dark themes, English UI, server pagination.
 - Privacy by default: query values discarded, Referer minimized, secrets masked, client addresses pseudonymized with a secret HMAC key.
 

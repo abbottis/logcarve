@@ -422,9 +422,12 @@ def post_evidence_recheck(request: Request, body: RecheckBody):
     )
     # A capped or otherwise incomplete provenance cannot support a
     # completeness claim: report honestly instead of risking ``current``.
-    # Pre-cap receipts carry no ``complete`` marker and keep the legacy
-    # assumption; an explicit ``False`` (old or fresh) withholds it.
-    if not fresh_provenance.get("complete", True) or not old_provenance.get("complete", True):
+    # Unknown completeness must never become a positive claim, so BOTH
+    # old and fresh provenance must carry ``complete`` explicitly True;
+    # a missing, null, wrong-type or false marker (on either side)
+    # withholds it. Earlier draft receipts were never deployed, so no
+    # backward-compatible legacy assumption is invented here.
+    if fresh_provenance.get("complete") is not True or old_provenance.get("complete") is not True:
         return {
             "status": "unverified",
             "reason": "provenance_incomplete",

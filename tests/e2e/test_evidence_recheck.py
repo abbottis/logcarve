@@ -191,7 +191,7 @@ def test_ask_recheck_button_flow_current_then_unavailable(page, ask_live, observ
         assert apply_retention(conn, days=1, now=datetime(2027, 1, 1, tzinfo=UTC)) > 0
     recheck.click()
     page.wait_for_function(
-        "() => document.querySelector('[data-recheck-status]').textContent.includes('no longer resolves')",
+        "() => document.querySelector('[data-recheck-status]').textContent.includes('No selected log events are available')",
         timeout=15000,
     )
     assert observed["errors"] == [], observed["errors"]

@@ -147,3 +147,34 @@ push/main modification.
    coverage and original scope/source beside the state, with a live
    `role="status"` announcement; central `en` keys, textContent-only
    rendering, rerun-note kept.
+
+## Final bounded correction (2026-11-03, clean `a812dc5`)
+
+Reviewer-reproduced: the recheck handler treated a missing
+`provenance.complete` marker as complete
+(`old_provenance.get("complete", True)` /
+`fresh_provenance.get("complete", True)`), so a genuine signed legacy
+receipt with the marker removed returned HTTP 200 `current`. Unknown
+completeness is never a positive claim: both old and fresh provenance
+must now carry `complete` explicitly `True`, otherwise the replay
+reports `unverified`/`provenance_incomplete` (missing, null,
+wrong-type or false all withhold `current`). Earlier draft receipts
+were never deployed, so no backward-compatible completeness
+assumption is kept.
+
+Copy (central `en`, `generation_changed` field preserved for
+compatibility): `ask.recheck_current_new_generation` now reads "The
+evidence still matches; source history has changed." The flag compares
+import heads as well as follow generations, so a replay-only new
+import attempt proves source/import-head provenance movement, not
+necessarily new source events or a newer file generation.
+`ask.recheck_unavailable` now reads "No selected log events are
+available in the current data." Zero surviving selected events may
+have been zero originally; emptiness alone never claims retention
+removed anything. Status logic is unchanged: zero surviving selected
+events stay `unavailable`.
+
+Tests: new parametrized regression over signed receipts with
+missing/null/string/numeric `complete` markers (all
+`unverified`/`provenance_incomplete`); existing valid-`current`,
+cap-`unverified` and storage-503 cases keep passing.

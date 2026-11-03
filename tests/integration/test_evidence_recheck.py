@@ -561,6 +561,41 @@ def test_recheck_withholds_current_when_source_listing_capped(env):
     assert body["reason"] == "provenance_incomplete"
 
 
+@pytest.mark.parametrize("marker", ["__missing__", None, "true", "false", 1, 0, 0.0, False])
+def test_recheck_withholds_current_when_legacy_receipt_lacks_explicit_complete(env, marker):
+    """A signed legacy receipt without ``complete is True`` never reads current.
+
+    Unknown completeness must not become a positive claim: a missing,
+    null, string, numeric or false marker on the signed (old) provenance
+    reports ``unverified``/``provenance_incomplete`` even though the
+    signature itself is valid and the fresh replay is complete.
+    """
+    envelope = _envelope(env)
+    assert envelope["provenance"]["complete"] is True
+    provenance = dict(envelope["provenance"])
+    if marker == "__missing__":
+        provenance.pop("complete", None)
+    else:
+        provenance["complete"] = marker
+    receipt = receipts.sign_receipt(
+        receipts.receipt_payload(
+            tool=envelope["tool"],
+            filters=envelope["filters"],
+            digest=envelope["result_digest"],
+            provenance=provenance,
+            observation_time=envelope["observation_time"],
+        ),
+        secret=SECRET,
+    )
+    client = _client(env)
+    csrf = _login(client)
+    response = _recheck(client, csrf, {"receipt": receipt})
+    assert response.status_code == 200
+    body = response.json()
+    assert body["status"] == "unverified"
+    assert body["reason"] == "provenance_incomplete"
+
+
 def test_recheck_store_open_failure_returns_structured_503(env, monkeypatch):
     from app.api import deps
 
