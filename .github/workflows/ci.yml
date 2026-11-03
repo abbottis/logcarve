@@ -51,14 +51,14 @@ jobs:
       - name: Lockfile check
         run: uv lock --check
 
-      - name: Unit and integration tests
-        run: uv run --locked pytest tests/unit tests/integration
-
       - name: Asset build
         run: npm run build
 
       - name: External asset check
         run: npm run check:external
+
+      - name: Unit and integration tests
+        run: uv run --locked pytest tests/unit tests/integration
 
       - name: Download and verify Gitleaks
         run: |

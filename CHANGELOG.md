@@ -2,6 +2,12 @@
 
 ## Unreleased
 
+### 2026-11-03 — First-Linux-CI portability correction (from clean `2ce8787`)
+
+- `.github/workflows/ci.yml`: `npm run build` and `npm run check:external` now run BEFORE unit/integration tests (after `npm ci`), so the git-ignored/regenerated static JS exists when integration tests request it. Pinned actions, checksum, permissions, secret policy and triggers unchanged; no generated files committed.
+- `app/web/timezones.py`: the cached display-timezone catalogue now explicitly excludes the non-portable `localtime`, `posixrules`, `posix/*` and `right/*` entries that pinned Python 3.12 still reports from some system tz databases. Every other installed key/alias is retained; fallback/default/order/cache/offset semantics unchanged.
+- `tests/integration/test_web_timezones.py`: catalogue and alias tests assert the server-installed-database contract (absent aliases unoffered and safely rejected, `tz=localtime` still HTTP 400), plus a deterministic controlled-catalogue regression proving filtering and alias retention on every host.
+
 ### 2026-11-03 — Repository maintenance (docs/CI only, no application change)
 
 - Reconciled living instructions and guides with the documented state: volatile anchors moved to `docs/current-status.md`; parity T1–T5, four provider adapters/settings/allowance and evidence revalidation recorded as implemented; scaffold-era snapshots marked historical. No `docs/verification.md` history or `docs/technical-spec.md` rewritten.

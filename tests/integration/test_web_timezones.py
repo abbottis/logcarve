@@ -58,6 +58,21 @@ def _titles(page_html):
     return re.findall(r'<td class="tech" title="([^"]+)">', page_html)
 
 
+def _expected_catalogue(installed) -> set:
+    """Installed keys minus non-portable filesystem specials.
+
+    Mirrors the application filter: ``localtime``, ``posixrules`` and
+    the ``posix/``/``right/`` implementation subtrees are never offered.
+    """
+    return {
+        k
+        for k in installed
+        if k not in ("localtime", "posixrules")
+        and not k.startswith("posix/")
+        and not k.startswith("right/")
+    }
+
+
 def test_catalogue_is_complete_and_cached(web):
     client, _ = web
     _login(client)
@@ -66,8 +81,59 @@ def test_catalogue_is_complete_and_cached(web):
     assert tzmod._catalog() is tzmod._catalog(), "catalogue must be cached"
     page = client.get(f"/?site=default&{WINDOW_QS}&tz=UTC").text
     values = _option_values(_tz_select(page))
-    assert set(values) == installed, "every supported key must be offered"
+    expected = _expected_catalogue(installed)
+    assert set(values) == expected, "every valid installed key must be offered"
     assert len(values) == len(set(values)), "no duplicate option values"
+    for special in ("localtime", "posixrules"):
+        assert special not in values, f"{special} must never be offered"
+    assert not any(v.startswith(("posix/", "right/")) for v in values)
+
+
+def test_catalogue_filtering_is_hermetic(monkeypatch):
+    """Controlled catalogue proves special-entry filtering on every host.
+
+    Uses a tiny deterministic dataset with the filesystem specials plus
+    a real-looking alias, so filtering and alias retention hold even on
+    hosts whose system database already hides ``localtime``.
+    """
+    controlled = {
+        "UTC",
+        "Europe/Berlin",
+        "CET",
+        "localtime",
+        "posixrules",
+        "posix/America/New_York",
+        "right/Europe/Berlin",
+    }
+    from zoneinfo import ZoneInfoNotFoundError
+
+    real_zone = tzmod.ZoneInfo
+
+    def _fake_zone(name):
+        if name in ("UTC", "Europe/Berlin", "CET"):
+            return real_zone("UTC")
+        raise ZoneInfoNotFoundError(name)
+
+    monkeypatch.setattr(tzmod, "available_timezones", lambda: set(controlled))
+    monkeypatch.setattr(tzmod, "ZoneInfo", _fake_zone)
+    tzmod._catalog.cache_clear()
+    tzmod._sorted_rest.cache_clear()
+    try:
+        keys = tzmod.catalog_keys()
+        assert "CET" in keys, "genuine installed aliases are retained"
+        assert "Europe/Berlin" in keys
+        for special in (
+            "localtime",
+            "posixrules",
+            "posix/America/New_York",
+            "right/Europe/Berlin",
+        ):
+            assert special not in keys, f"{special} must be filtered"
+        assert tzmod.resolve_request_timezone("localtime", None) is None
+        assert tzmod.resolve_request_timezone(" CET ", None) == "CET"
+    finally:
+        tzmod._catalog.cache_clear()
+        tzmod._sorted_rest.cache_clear()
 
 
 def test_option_order_and_labels(web):
@@ -113,11 +179,18 @@ def test_default_timezone_env_exact_key_wins_over_abbreviation(monkeypatch):
     assert tzmod.resolve_default_timezone(None) == "UTC"
     # Installed abbreviations and fixed-offset Etc entries stay
     # explicitly selectable, but automatic TZ detection must never
-    # guess them as a region.
+    # guess them as a region. Alias availability legitimately differs
+    # by OS/database, so each name is asserted against the installed
+    # catalogue: present aliases stay offered, absent ones stay unoffered,
+    # and TZ detection falls back to UTC in both cases.
     for abbrev in ("CET", "EST", "Etc/GMT+2"):
-        assert abbrev in tzmod.catalog_keys(), f"{abbrev} stays explicitly offered"
-        monkeypatch.setenv("TZ", abbrev)
-        assert tzmod.resolve_default_timezone(None) == "UTC", abbrev
+        if abbrev in tzmod.catalog_keys():
+            monkeypatch.setenv("TZ", abbrev)
+            assert tzmod.resolve_default_timezone(None) == "UTC", abbrev
+        else:
+            assert abbrev not in tzmod.catalog_keys(), f"{abbrev} absent stays unoffered"
+            monkeypatch.setenv("TZ", abbrev)
+            assert tzmod.resolve_default_timezone(None) == "UTC", abbrev
     # Path syntax is never accepted as a server region name.
     monkeypatch.setenv("TZ", "/usr/share/zoneinfo/Asia/Tokyo")
     assert tzmod.resolve_default_timezone(None) == "UTC"
@@ -274,14 +347,24 @@ def test_absent_config_uses_trusted_tz_through_routing(web, monkeypatch):
     assert "Time (Europe/Berlin)" in page
 
 
-def test_explicit_abbreviation_zone_stays_selectable(web):
-    """Installed aliases such as CET remain explicit tz options."""
+def test_explicit_abbreviation_zone_follows_installed_db(web):
+    """Alias selectability follows the server-installed database.
+
+    When CET ships with the installed tz database it stays an explicit
+    tz option (HTTP 200); when the database omits it, CET is unoffered
+    and safely rejected (HTTP 400). Either way the contract holds
+    without assuming any platform ships the alias.
+    """
     client, _ = web
     _login(client)
-    assert "CET" in tzmod.catalog_keys()
-    response = client.get(f"/requests?site=default&{WINDOW_QS}&tz=CET")
-    assert response.status_code == 200
-    assert "Time (CET)" in response.text
+    if "CET" in tzmod.catalog_keys():
+        response = client.get(f"/requests?site=default&{WINDOW_QS}&tz=CET")
+        assert response.status_code == 200
+        assert "Time (CET)" in response.text
+    else:
+        assert "CET" not in tzmod.catalog_keys()
+        response = client.get(f"/requests?site=default&{WINDOW_QS}&tz=CET")
+        assert response.status_code == 400
 
 
 def test_partial_swap_carries_updated_timezone_notice(web):

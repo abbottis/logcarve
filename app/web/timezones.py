@@ -2,10 +2,14 @@
 
 The dashboard renders stored UTC instants in one explicit display
 timezone. The catalogue is the server-installed IANA set from stdlib
-``zoneinfo.available_timezones`` (already filtered by the stdlib: the
-``posix/``, ``right/`` and ``localtime`` special entries are excluded),
+``zoneinfo.available_timezones``, minus the special filesystem entries
+(``localtime``, ``posixrules``, ``posix/*`` and ``right/*``) that the
+pinned Python 3.12 stdlib still reports from some system tz databases
+(see ``zoneinfo._tzpath`` in v3.12.16: only the ``posix/`` and
+``right/`` directories and ``posixrules`` are excluded there, not
+``localtime``),
 cached once per process so request handling never re-enumerates the
-zoneinfo files. Every supported key is retained, including aliases; the
+zoneinfo files. Every other installed key is retained, including aliases; the
 server validates any requested name against this catalogue plus a
 ``ZoneInfo`` construction check, so unknown or filesystem-style values
 fail safely without ever touching a filesystem path from input.
@@ -40,14 +44,32 @@ FALLBACK_TIMEZONE = "UTC"
 
 @lru_cache(maxsize=1)
 def _catalog() -> tuple[str, ...]:
-    """Installed IANA keys, cached; safe fallback when the DB is absent."""
+    """Installed IANA keys minus filesystem specials, cached.
+
+    Safe fallback when the DB is absent. The pinned Python 3.12 stdlib
+    still reports ``localtime`` (a server-local symlink, not a portable
+    zone) from some system databases, so this layer excludes
+    ``localtime``, ``posixrules`` and the ``posix/``/``right/``
+    implementation subtrees explicitly. Every other installed key and
+    alias is retained unchanged; ordering, defaults, offsets and cache
+    semantics are untouched.
+    """
     try:
         keys = available_timezones()
     except OSError:
         return (FALLBACK_TIMEZONE,)
     if not keys:
         return (FALLBACK_TIMEZONE,)
-    return tuple(keys)
+    kept = tuple(
+        k
+        for k in keys
+        if k not in ("localtime", "posixrules")
+        and not k.startswith("posix/")
+        and not k.startswith("right/")
+    )
+    if not kept:
+        return (FALLBACK_TIMEZONE,)
+    return kept
 
 
 def catalog_keys() -> frozenset[str]:

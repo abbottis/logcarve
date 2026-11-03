@@ -1,5 +1,24 @@
 # Verification record
 
+## 2026-11-03 — First-Linux-CI portability correction (build order + timezone catalogue)
+
+Owner-authorized bounded correction on `feature/evidence-revalidation-2026-11-03` from clean HEAD `2ce8787` (confirmed via `git status`/`git log` before editing); exact model `muse-spark-1.3-contributor` / medium, Contributor ON, safeguards ON, sandbox ON, one writer, no subagents, public source + synthetic fixtures only. Prior commits preserved, no amend/main/push/deployment. No auth/parser/analytics/provider/budget/key/dependency/lock/migration changes.
+
+Actual first Linux GitHub run at `2ce8787` (workflow_dispatch, run 41614496759): pinned setup/dependency install/Ruff/format/lock all PASS; full pytest 1497 PASS, 5 FAIL, 4 warnings, 270.30s, 1502 collected:
+
+- `tests/integration/test_parity_t4a_web.py::test_history_and_cache_privacy_markers`: bundled static JS 404 — served static JS is git-ignored/regenerated, but `ci.yml` built assets AFTER integration tests.
+- `tests/integration/test_t8_preparation.py::test_plain_answer_guard_is_static_and_safe`: `app/web/static/js/ask.js` missing — same ordering cause.
+- `tests/integration/test_web_timezones.py::test_default_timezone_env_exact_key_wins_over_abbreviation` and `::test_explicit_abbreviation_zone_stays_selectable`: CET/EST absent from the fresh-Linux installed tz database.
+- `...::test_unknown_and_filesystem_zones_rejected`: `tz=localtime` returned success on Linux — pinned Python 3.12 `zoneinfo.available_timezones` still reports the server-local `localtime` symlink (v3.12.16 `_tzpath` excludes only `posix/`/`right/` dirs and `posixrules`).
+
+Corrections (no test weakening; no generated vendor/browser files committed; no extra dependencies):
+
+- `.github/workflows/ci.yml`: `Asset build` + `External asset check` moved BEFORE `Unit and integration tests` (after `npm ci`). Pinned actions, checksum, permissions, secret policy and trigger semantics unchanged.
+- `app/web/timezones.py`: `_catalog()` now explicitly excludes `localtime`, `posixrules`, `posix/*` and `right/*`; every other installed key/alias retained, fallback/default/order/cache/offset semantics unchanged; misleading stdlib-filter docstring corrected.
+- `tests/integration/test_web_timezones.py`: catalogue-completeness asserts installed keys minus the filtered specials (specials asserted unoffered); abbreviation tests assert the installed-database contract (present aliases stay offered with TZ-detection still UTC, absent aliases unoffered and safely rejected, TZ-detection UTC either way); new deterministic `test_catalogue_filtering_is_hermetic` monkeypatches a controlled catalogue (`localtime`/`posixrules`/`posix/*`/`right/*` + real-looking `CET`) with cleared/restored caches to prove filtering and alias retention on every host. `tz=localtime` still expects HTTP 400.
+- Actual checks (this shell, project `.venv` since `uv run` cache is unwritable in this sandbox): `tests/integration/test_web_timezones.py` — 19 PASS; `ruff check` + `ruff format --check` clean on both touched Python files; `ci.yml` step order reviewed (Asset build/External asset check before Unit and integration tests); `git diff --check` PASS; catalogue sanity probe (598 keys locally, CET offered, `localtime` unoffered, `TZ=localtime`→UTC, explicit `localtime`→None).
+- NOT RUN / coordinator-owned: full unit/integration suite, `npm run build`, existing timezone E2E plus the failed-static tests (coordinator has project-built assets), Docker, browser, provider and native Linux x86-64 Docker INSTALL proof — GitHub runs the full corrected CI once after push. Changed application surface is exactly the narrow catalogue filter above.
+
 ## 2026-11-01 — Parity pre-T4a export-client strictness follow-up
 
 Owner-authorized bounded follow-up BEFORE T4a on
