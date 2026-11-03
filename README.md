@@ -157,6 +157,8 @@ LogCarve is a project developed for the [Meta Global AI Developer Hackathon (202
 
 Thank you to Meta AI for the models, the developer tools and the hackathon opportunity.
 
+Thank you also to Richard Ng ([Native](https://github.com/withnative/native)) for the helpful suggestion to preserve evidence provenance and recheck findings after log rotation or retention changes.
+
 ## License and provenance
 
 Original LogCarve code and documentation are [Apache-2.0](LICENSE). Seventy bot-catalog patterns and labels were adapted from the public LogWerk rule catalog and retain their upstream MIT notice; see [third-party notices](THIRD_PARTY_NOTICES.md). No LogWerk application code or assets were copied. The GeoIP database is operator-mounted data (DB-IP Country Lite, CC BY 4.0) and is never bundled or committed.
