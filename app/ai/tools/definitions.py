@@ -18,7 +18,7 @@ from datetime import UTC, datetime
 from pydantic import BaseModel, Field, ValidationError
 
 from app.ai import receipts
-from app.analytics import service
+from app.analytics import provenance, service
 from app.analytics.contracts import (
     AnalyticsFilter,
     JourneyQuery,
@@ -398,13 +398,17 @@ def _execute_validated(conn, rules, *, name, filt, args, tool_call_id, observed)
 def _provenance(conn, filt, coverage: dict, digest: str) -> dict:
     """Compact generation heads for this envelope, read in its snapshot.
 
-    Per scoped source: latest follow/rotation generation plus latest
-    import head (both None when absent). No fingerprints, paths, rows,
+    The read itself belongs to the shared analytics layer
+    (``app.analytics.provenance``): per scoped source, the latest
+    follow/rotation generation plus latest import head (both None for a
+    known source that never followed). No fingerprints, paths, rows,
     addresses or secrets: opaque references only. A scope wider than
     the report is disclosed via the scoped source list, never as proof
-    of source completeness.
+    of source completeness. Store failures propagate as
+    ``ToolError("store_unavailable")`` — they never collapse into
+    ``None`` heads that would read as a clean non-follow source.
     """
-    return receipts.build_provenance(
+    return provenance.build_provenance(
         conn,
         site_id=filt.site_id,
         source_id=filt.source_id,

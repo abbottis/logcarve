@@ -85,3 +85,65 @@ is sufficient; no migration, no new dependency, no architecture expansion.
 No schema migration, no chat-history persistence, no import/retention
 policy edits, no provider wire changes, no budget changes, no live model
 tests, no public deployment, no push/main modification.
+
+## Independent-review corrections (2026-11-03, candidate d676b88)
+
+Reviewer-reproduced defects, fixed in this same small change with
+focused tests; no migration, no new dependency, no model calls, no
+push/main modification.
+
+1. Unicode/malformed signature robustness (`app/ai/receipts.py`
+   `verify_receipt`): non-ASCII signatures (`'abc.é'`) raised
+   `TypeError` from `hmac.compare_digest` instead of returning
+   invalid. Every encode/compare/decode step is now guarded, plus
+   strict shape checks (exact field set, non-empty tool, 64-hex
+   digest, bounded length/payload ceilings). The endpoint still
+   returns a safe 400 `invalid_receipt` and never executes a tool
+   for such a receipt (HTTP path tested, with `request_id` parity).
+2. False current on missing provenance (`build_provenance`): store
+   read errors were swallowed into all-`None` heads, so a replay
+   after `DROP TABLE follow_generations` returned HTTP 200
+   `current` + `generation_changed` with null ids. The helper moved
+   to shared analytics ownership (`app/analytics/provenance.py`,
+   typed/parameterized bounded reads, `MAX_PROVENANCE_SOURCES = 64`
+   with an explicit `complete` flag); failures now propagate through
+   the safe `StoreUnavailable`/`ToolError` path instead of
+   collapsing into null metadata. A capped listing (or any explicit
+   incomplete provenance) returns `unverified`
+   (`provenance_incomplete`), never `current`. A real known
+   non-follow source (no row, store healthy) keeps `None` heads
+   with `complete: true`.
+3. Unsafe store handling (`POST /api/v1/chat/evidence/recheck`):
+   `connect(..., read_only=True)` sat outside the `try` and any
+   synthetic `connect` failure returned a bare 500 with no
+   `X-Request-ID`. The whole replay now runs inside the existing
+   `read_store` snapshot; handle-open, query-time and
+   provenance-query failures yield structured 503
+   `store_unavailable` with body/header `request_id` parity and no
+   path/SQL/exception leakage (no file or directory creation). A
+   plain `ValueError` unrelated to storage keeps its own 400.
+4. `RecheckBody` hardening: `extra = "forbid"` (unknown fields fail
+   closed 400 instead of silently changing behavior); legacy
+   evidence returns `filters: None` (the untrusted client object is
+   never echoed back as metadata); client `filters` riding
+   alongside a receipt are ignored, never merged into the signed
+   scope.
+5. Tests: rotation coverage is now a genuine `run_follow`
+   rotation/replay scenario (rename live file, follow the new
+   generation from out-of-window records with `fresh_start=True`:
+   `current` + `generation_changed`, original coverage intact) using
+   `get_security_findings`, the existing report whose result is
+   strictly window-scoped (summary/timeseries envelopes embed
+   source-wide import stats that legitimately move with new import
+   activity; metric definitions unchanged). Partial retention
+   (`changed`) and full retention (`unavailable`) use
+   `apply_retention`, with source-byte hashes proving
+   retention/recheck never modify source bytes.
+6. Browser: one real repeatable flow (fake provider injected into a
+   synthetic local app) — real chat envelope + receipt, render the
+   real button, click, assert `current`; synthetic retention wipe,
+   click again, assert `unavailable`. Real local endpoint and CSRF,
+   no provider network/billing. UI shows the recheck time, surviving
+   coverage and original scope/source beside the state, with a live
+   `role="status"` announcement; central `en` keys, textContent-only
+   rendering, rerun-note kept.

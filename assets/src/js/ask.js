@@ -130,13 +130,21 @@
       const status = document.createElement("span");
       status.className = "ml-2 text-sm";
       status.setAttribute("data-recheck-status", "");
+      // Announce each recheck outcome to assistive technology; the
+      // text is set via textContent only, never HTML.
+      status.setAttribute("role", "status");
       row.appendChild(status);
+      const detail = document.createElement("span");
+      detail.className = "ml-2 block text-xs text-base-content/70";
+      detail.setAttribute("data-recheck-detail", "");
+      detail.hidden = true;
+      row.appendChild(detail);
       if (typeof envelope.receipt === "string" && envelope.receipt) {
         const button = document.createElement("button");
         button.type = "button";
         button.className = "btn btn-ghost btn-xs ml-2";
         button.textContent = msg("recheck");
-        button.addEventListener("click", () => recheckEvidence(envelope.receipt, button, status));
+        button.addEventListener("click", () => recheckEvidence(envelope.receipt, button, status, detail));
         row.appendChild(button);
       } else {
         status.textContent = msg("recheck-unverified");
@@ -146,7 +154,49 @@
     evidenceEl.appendChild(list);
   };
 
-  const recheckEvidence = async (receipt, button, status) => {
+  const fill = (template, values) => {
+    // Plain-text placeholder fill for central locale strings; values
+    // come from the server JSON and are assigned via textContent only.
+    let text = template;
+    for (const [key, value] of Object.entries(values)) {
+      text = text.split(`{${key}}`).join(value);
+    }
+    return text;
+  };
+
+  const scopeText = (filters) => {
+    const safe = filters && typeof filters === "object" ? filters : {};
+    const text = (value) => (typeof value === "string" && value ? value : "?");
+    const base = {
+      site: text(safe.site_id),
+      from: text(safe.time_from),
+      to: text(safe.time_to),
+    };
+    if (typeof safe.source_id === "string" && safe.source_id) {
+      return fill(msg("recheck-scope-source"), { ...base, source: safe.source_id });
+    }
+    return fill(msg("recheck-scope-nosource"), base);
+  };
+
+  const detailText = (data) => {
+    // When the recheck ran, how many scoped events still resolve,
+    // and the original scope/observation: a bare state label alone
+    // would age without context.
+    const text = (value) => (typeof value === "string" && value ? value : "?");
+    const scope = scopeText(data.filters);
+    const when = text(data.observation_time);
+    const original = text(data.original_observation_time);
+    const count =
+      data.coverage && typeof data.coverage.unique_events === "number"
+        ? data.coverage.unique_events
+        : null;
+    if (count === null || !Number.isFinite(count)) {
+      return fill(msg("recheck-detail-unknown"), { when, scope, original });
+    }
+    return fill(msg("recheck-detail"), { when, count: String(count), scope, original });
+  };
+
+  const recheckEvidence = async (receipt, button, status, detail) => {
     const csrf = window.LogcarveCSRF;
     if (!csrf || typeof csrf.postJson !== "function") {
       status.textContent = msg("error");
@@ -154,6 +204,8 @@
     }
     button.disabled = true;
     status.textContent = msg("recheck-checking");
+    detail.hidden = true;
+    detail.textContent = "";
     try {
       const response = await csrf.postJson("/api/v1/chat/evidence/recheck", { receipt });
       const data = await response.json().catch(() => ({}));
@@ -171,7 +223,12 @@
         status.textContent = msg("recheck-unavailable");
       } else {
         status.textContent = msg("recheck-unverified");
+        return;
       }
+      // Successful replays carry the fresh observation time, surviving
+      // coverage and the (signed, server-bound) original scope.
+      detail.textContent = detailText(data || {});
+      detail.hidden = false;
     } catch {
       status.textContent = msg("error");
     } finally {

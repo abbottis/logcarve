@@ -7,6 +7,8 @@ replays the EXACT original scope through the same deterministic tool
 path; rotation/retention classify honestly; failures fail closed.
 """
 
+import hashlib
+import sqlite3
 from datetime import UTC, datetime
 from pathlib import Path
 
@@ -194,6 +196,8 @@ def test_recheck_changed_after_rotation_new_generation(env):
 
 def test_recheck_unavailable_after_retention(env):
     envelope = _envelope(env)
+    live = env["root"] / "access.log"
+    before = hashlib.sha256(live.read_bytes()).hexdigest()
     with writer_transaction(env["db"]) as conn:
         deleted = apply_retention(conn, days=1, now=datetime(2027, 1, 1, tzinfo=UTC))
     assert deleted > 0
@@ -203,6 +207,89 @@ def test_recheck_unavailable_after_retention(env):
     assert body["status"] == "unavailable"
     assert body["result_match"] is False
     assert body["coverage"]["unique_events"] == 0
+    # Retention plus recheck only touch owned rows: source bytes are intact.
+    assert hashlib.sha256(live.read_bytes()).hexdigest() == before
+
+
+def test_recheck_changed_after_partial_retention_source_bytes_intact(env):
+    envelope = _envelope(env)
+    live = env["root"] / "access.log"
+    before = hashlib.sha256(live.read_bytes()).hexdigest()
+    total = envelope["coverage"]["unique_events"]
+    assert total > 0
+    # Cutoff 2026-10-27T10:00Z keeps the later fixture events only.
+    with writer_transaction(env["db"]) as conn:
+        deleted = apply_retention(conn, days=1, now=datetime(2026, 10, 28, 10, 0, tzinfo=UTC))
+    assert 0 < deleted < total
+    client = _client(env)
+    csrf = _login(client)
+    body = _recheck(client, csrf, {"receipt": _receipt_for(envelope)}).json()
+    assert body["status"] == "changed"
+    assert body["result_match"] is False
+    surviving = body["coverage"]["unique_events"]
+    assert 0 < surviving < total
+    assert surviving == total - deleted
+    assert hashlib.sha256(live.read_bytes()).hexdigest() == before
+
+
+def test_recheck_current_new_generation_after_run_follow_rotation(env):
+    """Genuine rotation: rename the live file, follow the new generation.
+
+    The recorded window keeps resolving exactly (same digest), while the
+    follow/rotation generation heads move. New records land strictly
+    outside the recorded window so only provenance moves, not content.
+    """
+    from app.db.follow import run_follow
+
+    # get_security_findings carries a strictly window-scoped result: the
+    # summary/timeseries envelopes embed source-wide import stats that
+    # legitimately move with any new import activity.
+    envelope = _envelope(env, name="get_security_findings")
+    assert envelope["provenance"]["sources"][0]["generation_seq"] is None
+    live = env["root"] / "access.log"
+    live.rename(env["root"] / "access.log.1")
+    live.write_bytes(
+        b'203.0.113.9 - - [29/Oct/2026:12:30:00 +0000] "GET /extra HTTP/1.1"'
+        b' 200 12 "-" "synthetic-agent/1.0"\n'
+    )
+    result = run_follow(
+        env["db"],
+        source=SourceConfig(
+            source_id="example-combined",
+            format_id="nginx_combined",
+            allowed_root=env["root"],
+            relative_path="access.log",
+        ),
+        site_id="default",
+        site_name="s",
+        site_hostname="example.org",
+        server_type="nginx",
+        path_alias="access.log",
+        hmac_key=HMAC_KEY,
+        max_polls=2,
+        poll_interval_s=0,
+        # External rotation: the replacement file shares no prefix with
+        # the earlier batch import, so follow starts a fresh generation
+        # from offset 0 (no duplicated bytes: the new file holds only
+        # the out-of-window record).
+        fresh_start=True,
+    )
+    assert result.status == "completed", result.error_summary
+    assert result.records_inserted == 1
+    new_hash = hashlib.sha256(live.read_bytes()).hexdigest()
+    client = _client(env)
+    csrf = _login(client)
+    body = _recheck(client, csrf, {"receipt": _receipt_for(envelope)}).json()
+    # Original evidence still resolves; only generation/provenance moved.
+    assert body["status"] == "current"
+    assert body["result_match"] is True
+    assert body["generation_changed"] is True
+    assert body["coverage"]["unique_events"] == envelope["coverage"]["unique_events"]
+    new_sources = body["provenance"]["sources"]
+    assert new_sources[0]["generation_seq"] == 1
+    assert new_sources[0]["generation_id"] is not None
+    # The replay is a pure read: the rotated source bytes are untouched.
+    assert hashlib.sha256(live.read_bytes()).hexdigest() == new_hash
 
 
 def test_same_count_different_evidence_digests_differ():
@@ -296,8 +383,222 @@ def test_legacy_evidence_without_receipt_is_unverified(env):
     csrf = _login(client)
     response = _recheck(client, csrf, {"tool": "get_summary", "filters": _args()})
     assert response.status_code == 200
-    assert response.json()["status"] == "unverified"
+    body = response.json()
+    assert body["status"] == "unverified"
+    assert body["reason"] == "legacy_no_receipt"
+    # The untrusted client filters object is never echoed back.
+    assert body["filters"] is None
     assert _recheck(client, csrf, {}).status_code == 400
+
+
+def test_legacy_evidence_never_echoes_unbounded_client_filters(env):
+    client = _client(env)
+    csrf = _login(client)
+    junk = {f"junk-{index}": "x" * 500 for index in range(50)}
+    response = _recheck(client, csrf, {"tool": "get_summary", "filters": junk})
+    assert response.status_code == 200
+    body = response.json()
+    assert body["status"] == "unverified"
+    assert body["filters"] is None
+    assert "junk-0" not in response.text
+
+
+@pytest.mark.parametrize("bad", ["abc.é", "é.abc", "", ".", "...", "a.b", "!!.!!"])
+def test_verify_receipt_rejects_malformed_signatures_without_raising(bad):
+    assert receipts.verify_receipt(bad, secret=SECRET) is None
+
+
+@pytest.mark.parametrize("bad", [None, 123, b"abc.def", ["x"], {"receipt": 1}])
+def test_verify_receipt_rejects_odd_types_without_raising(bad):
+    assert receipts.verify_receipt(bad, secret=SECRET) is None
+
+
+def test_verify_receipt_rejects_oversize_and_bad_shapes():
+    assert receipts.verify_receipt("a" * 70000 + "." + "b" * 64, secret=SECRET) is None
+    base = {
+        "v": "ev-receipt-1",
+        "tool": "get_summary",
+        "filters": {"site_id": "default"},
+        "result_digest": "0" * 64,
+        "provenance": {},
+        "observation_time": NOW.isoformat(),
+    }
+    assert (
+        receipts.verify_receipt(
+            receipts.sign_receipt({**base, "extra": 1}, secret=SECRET), secret=SECRET
+        )
+        is None
+    )
+    assert (
+        receipts.verify_receipt(
+            receipts.sign_receipt({**base, "v": "ev-receipt-0"}, secret=SECRET),
+            secret=SECRET,
+        )
+        is None
+    )
+    assert (
+        receipts.verify_receipt(
+            receipts.sign_receipt({**base, "tool": ""}, secret=SECRET), secret=SECRET
+        )
+        is None
+    )
+    assert (
+        receipts.verify_receipt(
+            receipts.sign_receipt({**base, "result_digest": "xyz"}, secret=SECRET),
+            secret=SECRET,
+        )
+        is None
+    )
+    assert (
+        receipts.verify_receipt(
+            receipts.sign_receipt(["not", "a", "dict"], secret=SECRET), secret=SECRET
+        )
+        is None
+    )
+    # Corrupting one body character keeps the failure a clean None.
+    good = receipts.sign_receipt(base, secret=SECRET)
+    body, _, sig = good.rpartition(".")
+    assert receipts.verify_receipt("!" + body[1:] + "." + sig, secret=SECRET) is None
+    assert receipts.verify_receipt(body + ".é", secret=SECRET) is None
+
+
+def test_recheck_malformed_receipt_returns_400_with_request_id(env):
+    envelope = _envelope(env)
+    receipt = _receipt_for(envelope)
+    client = _client(env)
+    csrf = _login(client)
+    for bad in ("abc.é", "!!!.def", "a.b", receipt[:-1] + "é"):
+        response = _recheck(client, csrf, {"receipt": bad})
+        assert response.status_code == 400, bad
+        body = response.json()
+        assert body["code"] == "invalid_receipt"
+        assert body["request_id"] == response.headers.get("X-Request-ID")
+
+
+def test_recheck_rejects_unknown_fields(env):
+    envelope = _envelope(env)
+    client = _client(env)
+    csrf = _login(client)
+    response = _recheck(client, csrf, {"receipt": _receipt_for(envelope), "unexpected": 1})
+    assert response.status_code == 400
+    assert response.json()["code"] == "invalid_request"
+
+
+def test_recheck_ignores_client_filters_alongside_receipt(env):
+    envelope = _envelope(env)
+    forged = dict(envelope["filters"])
+    forged["site_id"] = "other"
+    client = _client(env)
+    csrf = _login(client)
+    # Client scope riding alongside a receipt must not broaden execution.
+    response = _recheck(client, csrf, {"receipt": _receipt_for(envelope), "filters": forged})
+    assert response.status_code == 200
+    assert response.json()["status"] == "current"
+
+
+def test_recheck_missing_generation_table_returns_503_not_current(env):
+    envelope = _envelope(env)
+    receipt = _receipt_for(envelope)
+    with writer_transaction(env["db"]) as conn:
+        conn.execute("DROP TABLE follow_generations")
+    client = _client(env)
+    csrf = _login(client)
+    response = _recheck(client, csrf, {"receipt": receipt})
+    # Metadata errors must never read as fresh/changed generation claims.
+    assert response.status_code == 503
+    body = response.json()
+    assert body["code"] == "store_unavailable"
+    assert body["request_id"] == response.headers.get("X-Request-ID")
+    assert "follow_generations" not in response.text
+    assert "OperationalError" not in response.text
+
+
+def test_provenance_helper_propagates_store_errors(env):
+    from app.analytics import provenance as provenance_mod
+
+    with writer_transaction(env["db"]) as conn:
+        conn.execute("DROP TABLE follow_generations")
+    conn = connect(env["db"], read_only=True)
+    try:
+        with pytest.raises(sqlite3.Error):
+            provenance_mod.build_provenance(
+                conn,
+                site_id="default",
+                source_id="example-combined",
+                unique_events=1,
+                observed_min=None,
+                observed_max=None,
+                imports_truncated=False,
+                digest="x",
+            )
+    finally:
+        conn.close()
+
+
+def test_recheck_withholds_current_when_source_listing_capped(env):
+    from app.analytics.provenance import MAX_PROVENANCE_SOURCES
+
+    with writer_transaction(env["db"]) as conn:
+        for index in range(MAX_PROVENANCE_SOURCES + 6):
+            conn.execute(
+                "INSERT INTO log_sources (id, site_id, server_type, format_id, path_alias)"
+                " VALUES (?, ?, ?, ?, ?)",
+                (
+                    f"extra-{index:03d}",
+                    "default",
+                    "nginx",
+                    "nginx_combined",
+                    f"extra-{index:03d}.log",
+                ),
+            )
+    envelope = _envelope(env)
+    assert len(envelope["provenance"]["sources"]) == MAX_PROVENANCE_SOURCES
+    assert envelope["provenance"]["complete"] is False
+    client = _client(env)
+    csrf = _login(client)
+    body = _recheck(client, csrf, {"receipt": _receipt_for(envelope)}).json()
+    assert body["status"] == "unverified"
+    assert body["reason"] == "provenance_incomplete"
+
+
+def test_recheck_store_open_failure_returns_structured_503(env, monkeypatch):
+    from app.api import deps
+
+    real_connect = deps.connect
+    armed = {"on": False}
+
+    def _failing(db_path, **kwargs):
+        if armed["on"]:
+            raise sqlite3.OperationalError("synthetic open failure")
+        return real_connect(db_path, **kwargs)
+
+    monkeypatch.setattr(deps, "connect", _failing)
+    receipt = _receipt_for(_envelope(env))
+    client = _client(env)
+    csrf = _login(client)
+    armed["on"] = True
+    response = _recheck(client, csrf, {"receipt": receipt})
+    assert response.status_code == 503
+    body = response.json()
+    assert body["code"] == "store_unavailable"
+    assert body["request_id"] == response.headers.get("X-Request-ID")
+    assert "synthetic" not in response.text
+    assert "OperationalError" not in response.text
+
+
+def test_recheck_plain_value_error_is_not_store_unavailable(env, monkeypatch):
+    from app.ai.tools import definitions
+
+    def _boom(*args, **kwargs):
+        raise ValueError("synthetic validation failure")
+
+    receipt = _receipt_for(_envelope(env))
+    monkeypatch.setattr(definitions, "execute_tool", _boom)
+    client = _client(env)
+    csrf = _login(client)
+    response = _recheck(client, csrf, {"receipt": receipt})
+    assert response.status_code == 400
+    assert response.json()["code"] == "invalid_arguments"
 
 
 def test_recheck_runs_with_ai_disabled_and_no_model_calls(env):

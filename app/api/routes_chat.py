@@ -27,7 +27,13 @@ from fastapi import APIRouter, Request
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel, Field
 
-from app.api.deps import _db_path, require_admin_session, require_csrf
+from app.api.deps import (
+    StoreUnavailable,
+    _db_path,
+    read_store,
+    require_admin_session,
+    require_csrf,
+)
 from app.api.errors import error_response
 
 router = APIRouter(prefix="/api/v1/chat")
@@ -101,8 +107,11 @@ class RecheckBody(BaseModel):
 
     The receipt's embedded tool plus filters are the ONLY trusted scope:
     client-supplied filters are never executed. Legacy evidence without
-    a receipt returns ``unverified`` and never a current claim.
+    a receipt returns ``unverified`` and never a current claim. Unknown
+    fields are rejected outright instead of silently changing behavior.
     """
+
+    model_config = {"extra": "forbid"}
 
     receipt: str | None = Field(default=None, min_length=1, max_length=65536)
     tool: str | None = Field(default=None, min_length=1, max_length=64)
@@ -329,7 +338,6 @@ def post_evidence_recheck(request: Request, body: RecheckBody):
     from app.ai import receipts
     from app.ai.tools.definitions import TOOL_NAMES, ToolError, execute_tool
     from app.config import load_settings
-    from app.db.database import connect
     from app.web.evidence import envelope_href
 
     request_id = request.state.request_id
@@ -346,7 +354,9 @@ def post_evidence_recheck(request: Request, body: RecheckBody):
         secret_value = ""
     if not body.receipt:
         # Legacy evidence without a receipt cannot prove its scope:
-        # report it honestly instead of replaying client filters.
+        # report it honestly instead of replaying client filters. The
+        # client filters object is NOT echoed back: it is untrusted,
+        # unbounded input and must never read as trusted metadata.
         if body.tool is None or not isinstance(body.filters, dict):
             return error_response(
                 400, "invalid_request", "An evidence receipt is required.", request_id
@@ -355,7 +365,7 @@ def post_evidence_recheck(request: Request, body: RecheckBody):
             "status": "unverified",
             "reason": "legacy_no_receipt",
             "tool": body.tool,
-            "filters": body.filters,
+            "filters": None,
             "observation_time": None,
             "original_observation_time": None,
         }
@@ -374,15 +384,26 @@ def post_evidence_recheck(request: Request, body: RecheckBody):
         return error_response(
             400, "invalid_receipt", "The evidence receipt is invalid.", request_id
         )
-    conn = connect(_db_path(request), read_only=True)
+    # The signed receipt scope is the ONLY executed scope: any client
+    # ``filters`` riding alongside a receipt are ignored, never merged.
+    # The whole replay — handle open, tool read and provenance read —
+    # runs inside the shared read snapshot: storage-access failures
+    # surface as the narrow ``StoreUnavailable`` signal (safe structured
+    # 503 with request-id parity, no paths/SQL), never a bare 500. A
+    # plain ``ValueError`` unrelated to storage keeps its own 400 below.
     try:
-        fresh = execute_tool(
-            conn,
-            request.app.state.rules,
-            name=tool,
-            arguments=filters,
-            tool_call_id="recheck",
-            observation_time=datetime.now(UTC),
+        with read_store(request) as conn:
+            fresh = execute_tool(
+                conn,
+                request.app.state.rules,
+                name=tool,
+                arguments=filters,
+                tool_call_id="recheck",
+                observation_time=datetime.now(UTC),
+            )
+    except StoreUnavailable:
+        return error_response(
+            503, "store_unavailable", "The data store is unavailable.", request_id
         )
     except ToolError as exc:
         status = {
@@ -395,11 +416,23 @@ def post_evidence_recheck(request: Request, body: RecheckBody):
         return error_response(
             400, "invalid_arguments", "Tool arguments failed validation.", request_id
         )
-    finally:
-        try:
-            conn.close()
-        except (ValueError, TypeError, OSError, AttributeError):
-            pass
+    fresh_provenance = fresh.get("provenance") if isinstance(fresh.get("provenance"), dict) else {}
+    old_provenance = (
+        payload.get("provenance") if isinstance(payload.get("provenance"), dict) else {}
+    )
+    # A capped or otherwise incomplete provenance cannot support a
+    # completeness claim: report honestly instead of risking ``current``.
+    # Pre-cap receipts carry no ``complete`` marker and keep the legacy
+    # assumption; an explicit ``False`` (old or fresh) withholds it.
+    if not fresh_provenance.get("complete", True) or not old_provenance.get("complete", True):
+        return {
+            "status": "unverified",
+            "reason": "provenance_incomplete",
+            "tool": tool,
+            "filters": filters,
+            "observation_time": fresh.get("observation_time"),
+            "original_observation_time": payload.get("observation_time"),
+        }
     fresh_digest = fresh.get("result_digest")
     result_match = fresh_digest == payload.get("result_digest")
     fresh_coverage = fresh.get("coverage") if isinstance(fresh.get("coverage"), dict) else {}
