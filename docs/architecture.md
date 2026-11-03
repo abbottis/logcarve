@@ -14,7 +14,7 @@ flowchart TD
     Q --> API[Authenticated external REST API]
     Q --> T[Bounded internal tools]
     T --> E[Data-egress and budget gate]
-    E --> M[Meta Standard model adapter]
+    E --> M[Native provider adapters (Meta/OpenAI/Gemini/Claude)]
 ```
 
 The assistant consumes analytics. Its import, configuration or startup failure must not prevent the external API or dashboard from serving deterministic data. API/AI share query services, not HTTP calls back into themselves or a duplicated metrics engine.
@@ -33,11 +33,11 @@ The assistant consumes analytics. Its import, configuration or startup failure m
 | `assets/src/` | Authored CSS/JS for a build step | Runtime CDN dependencies |
 | `config/` | Nonsecret examples, versioned rules and English catalog | Actual deployment credentials |
 
-`app/main.py` will be the composition root after plan approval. Shared configuration/DTO modules should be introduced only as the first use requires them, with no unnecessary abstraction layer.
+`app/main.py` is the composition root. Shared configuration/DTO modules should be introduced only as the first use requires them, with no unnecessary abstraction layer.
 
 ## Storage and identifiers
 
-Start with spec §2.5 domain tables: `sites`, `log_sources`, `imports`, `requests`, `schema_migrations`; decide whether `findings` is derived or persisted. Auth/session/token storage is a concrete security need to design explicitly, not an excuse for generic ORM scaffolding.
+Start with spec §2.5 domain tables: `sites`, `log_sources`, `imports`, `requests`, `schema_migrations`; findings are derived on read (accepted ADR 0002 decision 6; implemented shared deterministic layer). Auth/session/token storage is a concrete security need to design explicitly, not an excuse for generic ORM scaffolding.
 
 Use SQLite WAL, one writer, transactions, measured indexes and local persistent storage. Preserve UTC timestamps and original offset context. Store HMAC-pseudonymized client IDs, sanitized paths/Referer and nullable duration. Record the rule/version necessary to explain classifications.
 

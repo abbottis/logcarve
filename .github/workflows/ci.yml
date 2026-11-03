@@ -27,7 +27,7 @@ jobs:
       - name: Set up uv and Python
         uses: astral-sh/setup-uv@68559e99cc807c1eb7e9238fd43a15bba460eec2 # v10.3.3
         with:
-          uv-version: "0.13.6"
+          version: "0.13.6"
           python-version: "3.12.16"
           enable-cache: false
 
@@ -66,7 +66,7 @@ jobs:
           GITLEAKS_VERSION="8.30.1"
           curl -sSL --max-time 120 -o /tmp/gitleaks.tar.gz \
             "https://github.com/gitleaks/gitleaks/releases/download/v${GITLEAKS_VERSION}/gitleaks_${GITLEAKS_VERSION}_linux_x64.tar.gz"
-          echo "551f6fc83ea457d62a0d98237cbad105af8d557003051f3e7ca7b3f2470eb  /tmp/gitleaks.tar.gz" | sha256sum -c -
+          echo "551f6fc83ea457d62a0d98237cbad105af8d557003051f41f3e7ca7b3f2470eb  /tmp/gitleaks.tar.gz" | sha256sum -c -
           mkdir -p /tmp/gitleaks-bin
           tar -xzf /tmp/gitleaks.tar.gz -C /tmp/gitleaks-bin gitleaks
 
@@ -74,9 +74,10 @@ jobs:
         run: |
           set -eu
           set +e
-          /tmp/gitleaks-bin/gitleaks detect \
-            --source "$GITHUB_WORKSPACE" \
+          /tmp/gitleaks-bin/gitleaks git "$GITHUB_WORKSPACE" \
+            --log-opts='--all --full-history' \
             --redact=100 \
+            --ignore-gitleaks-allow \
             --report-format json \
             --report-path /tmp/gitleaks-report.json \
             --exit-code 1 > /tmp/gitleaks-stdout.log 2>&1

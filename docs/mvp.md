@@ -1,9 +1,8 @@
 # MVP scope
 
-Status: derived from technical spec v0.4 on 2026-10-28. The "no product
-behavior implemented" line below is the preserved 2026-10-28 scaffold
-snapshot; behavior since then is implemented per
-[current status](current-status.md) and [verification](verification.md).
+Status: original scope dated 2026-10-28 from technical spec v0.4;
+behavior since then is implemented per [current status](current-status.md)
+and [verification](verification.md).
 
 ## Scope contract
 

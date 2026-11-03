@@ -153,6 +153,53 @@ def test_rejects_malformed_expected(tmp_path):
         load_expected(bad)
 
 
+def test_rejects_fingerprint_only_forgery():
+    """Changing ONLY Fingerprint (metadata intact) must reject, not exit 0."""
+    forged = _report_findings()
+    forged[0] = dict(forged[0], Fingerprint="forged-fingerprint")
+    with pytest.raises(ReportError):
+        adjudicate(forged, _expected(), 1)
+
+
+def test_rejects_missing_fingerprint():
+    missing = _report_findings()
+    entry = dict(missing[0])
+    del entry["Fingerprint"]
+    missing[0] = entry
+    with pytest.raises(ReportError):
+        adjudicate(missing, _expected(), 1)
+
+
+def test_rejects_self_inconsistent_expected(tmp_path):
+    bad = tmp_path / "expected.json"
+    entries = _expected()
+    entries[0] = dict(entries[0], fingerprint="forged-fingerprint")
+    bad.write_text(json.dumps(entries), encoding="utf-8")
+    with pytest.raises(ReportError):
+        load_expected(bad)
+
+
+def test_diagnostics_never_echo_untrusted_keys(tmp_path, capsys):
+    sentinel = "synthetic-private-sentinel-key"
+    report = tmp_path / "report.json"
+    report.write_text(json.dumps([{sentinel: "x"}]), encoding="utf-8")
+    assert main(["--report", str(report), "--expected", str(EXPECTED), "--gitleaks-exit", "1"]) == 1
+    assert sentinel not in capsys.readouterr().out
+    described = _mod._safe_describe({sentinel: "x"})
+    assert sentinel not in described
+
+
+def test_rejects_invalid_utf8_without_traceback(tmp_path, capsys):
+    report = tmp_path / "report.json"
+    report.write_bytes(b'[{"Commit": "\xff\xfe invalid"}]')
+    with pytest.raises(ReportError):
+        load_findings(report, 1)
+    assert main(["--report", str(report), "--expected", str(EXPECTED), "--gitleaks-exit", "1"]) == 1
+    out = capsys.readouterr().out
+    assert "Traceback" not in out
+    assert "GITLEAKS_REJECTED" in out
+
+
 def test_main_never_prints_secret_payloads(tmp_path, capsys):
     report = tmp_path / "report.json"
     report.write_text(

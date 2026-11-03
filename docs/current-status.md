@@ -12,9 +12,12 @@ History stays in [verification](verification.md); scope history stays in
 - Implemented and locally activated: LogWerk-parity T1–T5, four native
   AI provider adapters/settings/runtime allowance (ADR 0004), and local
   evidence revalidation. Details in [verification](verification.md).
-- Last test evidence: **1486** unit/integration PASS with zero skips,
-  plus **3** protected Chromium checks, at `250ff35`. Doc-only commits
-  after that anchor claim no rerun.
+- Last application test evidence (dated baseline, not a running total):
+  **1486** unit/integration PASS with zero skips, plus **3** protected
+  Chromium checks, at application source `250ff35`. Doc-only commits
+  after that anchor claim no rerun, and the application source/tree is
+  unchanged in this maintenance slice. Later repository/helper
+  validation is owned by the live CI checks (see `.github/workflows/ci.yml`).
 - Demos: a fresh local demo defaults to AI-off. A separately
   authorized configured runtime may differ; never assume stored keys,
   and never claim all demos run AI-off or grant permission.

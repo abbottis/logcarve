@@ -40,15 +40,15 @@ Accepted exception 2026-11-01 (owner scope `artifacts/task-inputs/logwerk-parity
 ## Architecture
 
 - Target Linux x86-64 and Docker Compose, with Python 3.12+, FastAPI and Pydantic.
-- Proposed UI: Jinja2, locally bundled htmx, Tailwind CSS 4, daisyUI 5 and Chart.js 4.
-- Proposed storage: SQLite WAL on a local persistent filesystem, migrations and one writer.
+- Implemented UI: Jinja2, locally bundled htmx, Tailwind CSS 4, daisyUI 5 and Chart.js 4.
+- Implemented storage: SQLite WAL on a local persistent filesystem, migrations and one writer.
 - Node is for building assets; do not introduce a separate production Node service or SPA by default.
 - Keep ingestion, analytics, API transport, model adapter and web rendering separate.
 - Dashboard, external API and internal tools share ONE deterministic analytics/query layer.
 - Use typed, validated contracts and parameterized SQL. Models never generate executable SQL.
 - Do not add dependencies without a concrete need; resolve versions and commit lockfiles when implementing.
-- No production log paths, provider URLs or credentials hardcoded in application code.
-- Follow the module ownership and proposed dependency direction in `docs/architecture.md`.
+- No production log paths or credentials hardcoded in application code. Accepted ADR 0004 exception: the fixed native endpoint allowlist for the four accepted providers is the only permitted hardcoded provider surface; arbitrary configurable provider URLs remain banned, as does any runtime/privacy weakening.
+- Follow the module ownership and implemented dependency direction in `docs/architecture.md`.
 
 ## Data and safety invariants
 
