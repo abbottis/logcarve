@@ -1,5 +1,18 @@
 # Verification record
 
+## 2026-11-03 — Corrected-Linux-CI success receipt (doc-only closeout)
+
+Owner-authorized documentation-only closeout on `feature/evidence-revalidation-2026-11-03` after the actual corrected GitHub CI PASS; no subagents, prior commits preserved, no amend/main/push/deployment. No application, tests, workflows, config, locks, assets, memory or other docs changed. Public source + synthetic facts only. This entry records the receipt `artifacts/task-inputs/ci-success-public-receipt.json` over the exact already-tested application source `d375d2743f06e3cb62a5bc574fcb79dfcec128b4`; it is prose-only and is not a new suite run — no application tests, builds, scans, provider, Docker or browser checks were rerun here. No scanning rule, workflow, branch protection or application test is disabled; the coordinator still performs a full-history redacted secret scan before publication.
+
+Actual checks from the receipt (successful push run [41616559340](https://github.com/abbottis/logcarve/actions/runs/41616559340), conclusion `success`):
+
+- Pinned setup/install (uv/Python, Node, locked sync/install), Ruff lint, Ruff format check, lockfile check, asset build, external asset check, unit and integration tests, and the full-history secret scan (redacted, fail-closed adjudication): all `success`.
+- Full pytest: **1503** passed, **0** skipped. First Linux run at `2ce8787` stays historical: **1497** pass / **5** fail (see entry below).
+- Root focused local checks: **36** Python passed; protected local Chromium: **3** passed.
+- Gitleaks: raw exit 1 with **3** reviewed false positives, adjudication PASS — not a zero-findings claim.
+- Local demo image source unchanged; native Linux x86-64 Docker INSTALL NOT RUN; no product model calls. The local source correction did not deploy and changed neither the existing demo image nor provider keys/allowance.
+- Owner manual acceptance and the video rehearsal remain pending. This timestamp/history is not a promise of production release or live activation.
+
 ## 2026-11-03 — First-Linux-CI portability correction (build order + timezone catalogue)
 
 Owner-authorized bounded correction on `feature/evidence-revalidation-2026-11-03` from clean HEAD `2ce8787` (confirmed via `git status`/`git log` before editing); exact model `muse-spark-1.3-contributor` / medium, Contributor ON, safeguards ON, sandbox ON, one writer, no subagents, public source + synthetic fixtures only. Prior commits preserved, no amend/main/push/deployment. No auth/parser/analytics/provider/budget/key/dependency/lock/migration changes.
