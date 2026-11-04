@@ -1,0 +1,1 @@
+{"format_id": "custom-acme", "max_pattern_len": 2048, "pattern": "^(?P<host>\\S+) \\S+ \\S+ \\[(?P<time>[^\\]]+)\\] \"(?P<request>[^\"]*)\" (?P<status>\\d{3}) (?P<size>\\d+|-) \"(?P<referer>[^\"]*)\" \"(?P<user_agent>[^\"]*)\" (?P<request_time>\\d+|-)$", "time_format": "combined", "timing": {"request_time": {"unit": "us"}}}

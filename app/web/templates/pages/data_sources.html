@@ -1,0 +1,75 @@
+{% extends "base.html" %}
+{% set active = "sources" %}
+{% block content %}
+<div class="mb-4 flex flex-wrap items-baseline gap-x-3 gap-y-1">
+  <h1 class="text-2xl font-semibold">{{ t("sources.title") }}</h1>
+</div>
+<div class="grid gap-6 xl:grid-cols-2">
+  <section class="card bg-base-100 shadow" aria-labelledby="src-sites-h">
+    <div class="card-body">
+      <h2 id="src-sites-h" class="card-title text-base">{{ t("sources.sites") }}</h2>
+      <div class="table-scroll overflow-x-auto">
+        <table class="table table-sm">
+          <caption class="sr-only">{{ t("sources.sites") }}</caption>
+          <thead><tr><th scope="col">{{ t("table.site") }}</th><th scope="col">{{ t("table.hostname") }}</th><th scope="col">{{ t("table.timezone") }}</th></tr></thead>
+          <tbody>
+            {% for site in sites %}
+            <tr><td><span class="tech">{{ site.id }}</span><br>{{ site.name }}</td><td class="tech break-all">{{ site.hostname }}</td><td class="tech">{{ site.timezone }}</td></tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+    </div>
+  </section>
+  <section class="card bg-base-100 shadow" aria-labelledby="src-src-h">
+    <div class="card-body">
+      <h2 id="src-src-h" class="card-title text-base">{{ t("sources.sources") }}</h2>
+      <div class="table-scroll overflow-x-auto">
+        <table class="table table-sm">
+          <caption class="sr-only">{{ t("sources.sources") }}</caption>
+          <thead><tr><th scope="col">{{ t("table.source") }}</th><th scope="col">{{ t("table.site") }}</th><th scope="col">{{ t("table.server") }}</th><th scope="col">{{ t("table.format") }}</th><th scope="col">{{ t("table.alias") }}</th><th scope="col">{{ t("table.state") }}</th></tr></thead>
+          <tbody>
+            {% for source in sources %}
+            <tr><td class="tech break-all">{{ source.id }}</td><td class="tech">{{ source.site_id }}</td><td class="tech">{{ source.server_type }}</td><td class="tech">{{ source.format_id }}</td><td class="tech break-all">{{ source.path_alias }}</td><td>{% if source.enabled %}{{ t("settings.enabled") }}{% else %}{{ t("settings.disabled") }}{% endif %}</td></tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+    </div>
+  </section>
+</div>
+<section class="card mt-6 bg-base-100 shadow" aria-labelledby="src-imp-h">
+  <div class="card-body">
+    <h2 id="src-imp-h" class="card-title text-base">{{ t("sources.imports") }}</h2>
+    {% if imports %}
+    <div class="table-scroll overflow-x-auto">
+      <table class="table table-sm">
+        <caption class="sr-only">{{ t("sources.imports") }}</caption>
+        <thead><tr><th scope="col">{{ t("table.import") }}</th><th scope="col">{{ t("table.source") }}</th><th scope="col">{{ t("table.fingerprint") }}</th><th scope="col" class="text-right">{{ t("table.lines") }}</th><th scope="col" class="text-right">{{ t("table.accepted") }}</th><th scope="col" class="text-right">{{ t("table.rejected") }}</th><th scope="col">{{ t("table.state") }}</th><th scope="col">{{ t("table.started") }}</th></tr></thead>
+        <tbody>
+          {% for imp in imports %}
+          <tr><td class="tech">{{ imp.id }}</td><td class="tech break-all">{{ imp.source_id }}</td><td class="tech">{{ imp.fingerprint_prefix }}</td><td class="text-right tech">{{ imp.lines_total }}</td><td class="text-right tech">{{ imp.lines_accepted }}</td><td class="text-right tech">{{ imp.lines_rejected }}</td><td class="tech">{{ imp.status }}</td><td class="tech">{{ imp.started_at }}</td></tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+    {% else %}
+    <p class="text-sm text-base-content/70" role="status">{{ t("data.no_data") }}</p>
+    {% endif %}
+  </div>
+</section>
+<section class="card mt-6 bg-base-100 shadow" aria-labelledby="src-cli-h">
+  <div class="card-body">
+    <h2 id="src-cli-h" class="card-title text-base">{{ t("sources.cli") }}</h2>
+    <p class="text-sm">{{ t("sources.cli_note") }}</p>
+    <ul class="tech mt-2 space-y-1 text-sm">
+      <li>python -m app.db.cli --db DB import --source-id ID --format nginx_combined --root ROOT --path REL</li>
+      <li>python -m app.db.cli --db DB retention --days N</li>
+      <li>python -m app.db.cli --db DB backup --dest-dir DIR --keep 7</li>
+      <li>python -m app.db.cli --db DB restore --backup FILE --dest DB</li>
+      <li>python -m app.auth.cli --db DB create-admin --username NAME</li>
+      <li>python -m app.auth.cli --db DB issue-token --name NAME --site-id SITE</li>
+    </ul>
+  </div>
+</section>
+{% endblock %}

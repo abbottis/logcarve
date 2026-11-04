@@ -1,0 +1,64 @@
+# MVP acceptance criteria
+
+All criteria are **NOT IMPLEMENTED / NOT RUN** at scaffold creation. Check a criterion only after repeatable evidence exists. Record command, environment, result and safe artifact references in `verification.md`. A proposed test name is not evidence.
+
+| ID | Criterion | Required verification |
+| --- | --- | --- |
+| ING-01 | Nginx and Apache NCSA Combined normalize to independently expected fields/metrics | Synthetic fixtures: quoting, escapes, IPv4/IPv6, offsets, invalid bytes, missing fields, unusual methods/HTTP versions |
+| ING-02 | Import is streaming, bounded and accounts for accepted/rejected lines | Oversized line/URL/UA cases, invalid-line counts, bounded masked diagnostics |
+| ING-03 | Source selection is administrative and read-only | Traversal, symlink escape and arbitrary client path rejection; unchanged source-file evidence |
+| ING-04 | Replay of the same file adds no events; legitimate identical requests survive | Import same fixture twice and fixture with identical adjacent requests |
+| ING-05 | At least 100k synthetic rows import without a crash | Recorded hardware, duration, peak RAM, accepted/rejected totals and DB size |
+| DB-01 | Schema migration, restart persistence and transactional import work | Isolated DB migration/restart/integrity tests, interrupted-batch behavior |
+| DB-02 | Backup/restore and configured retention affect only owned data | Restore test; retained/deleted record counts; untouched source logs |
+| ANA-01 | Shared analytics have deterministic totals, filters, buckets and stable sorting | Hand-calculated dataset; cross-consumer equality for matching filters |
+| ANA-02 | Missing timing is null/unavailable, not zero or invented | Combined-only dataset; API `available: false`; UI notice and no fabricated percentile |
+| ANA-03 | Classification/finding claims are explainable and limited | Versioned rule refs, claimed-bot wording, evidence filters, coverage/quality warnings |
+| AUTH-01 | Private admin access, password hashing and secure sessions | Login/rate-limit/cookie/CSRF tests behind intended TLS configuration |
+| AUTH-02 | Machine tokens are hashed, scoped and site-limited | Missing/invalid/expired/revoked token, missing scope and cross-site 401/403 tests |
+| API-01 | Versioned OpenAPI contract exposes bounded read-only analytics | Schema, field types, validated ranges/limits/pagination and deterministic sort tests |
+| API-02 | External client can retrieve summary, crawlers and findings without AI | Integration run with chat off, no model key and denied/failing provider transport |
+| API-03 | Responses carry site/time/generation/filter/coverage/sample/quality metadata | Contract checks for empty, partial and normal datasets and safe structured errors |
+| API-04 | Analytics tokens cannot mutate/import/escalate, expose raw data or proxy a model | Negative integration/E2E tests; no Meta key/model relay in any external response |
+| AI-01 | Real permitted Meta model performs a bounded tool-call investigation | Separate authorized smoke call, sanitized output, actual model/tool/evidence IDs |
+| AI-02 | Three questions are demonstrable with evidence | AI crawler, 404 with referrer and suspicious-pattern cases; counts/time/source limits visible |
+| AI-03 | Tool allowlist, validated arguments and read-only boundaries survive hostile inputs | Adversarial URL/UA/Referer; SQL/shell/scan/firewall/tool escalation attempts cause no execution |
+| AI-04 | Assistant failure/cancellation does not break deterministic features | Timeout, offline/provider failure and cancellation with API/dashboard still usable |
+| AI-05 | Native server-side transports for Meta, OpenAI, Gemini and Claude with model-specific pricing | Per-provider mocked-transport chat→tool→evidence runs; native bodies/headers/IDs, usage normalization and cost ledger checks (ADR 0004) |
+| AI-06 | Backend AI settings: provider/model selection, per-provider encrypted keys, policies | Auth/CSRF/body-bound tests; blank-keeps/remove-deletes/env-managed semantics; encrypted at rest; provider switches never mix credentials or policies (ADR 0004) |
+| AI-07 | Explicit bounded runtime usage authorization, initially none, never implicit | Grant-missing fail-closed; caps across providers and restarts; settings saves never create/reset spend; T8 smoke ledger preserved (ADR 0004) |
+| PRIV-01 | No raw logs, original IPs, query secrets or sensitive context leave the egress gate | Capture mocked outgoing prompts, history, tool outputs, retries and replay; assert forbidden data absent |
+| PRIV-02 | Real-data requests fail closed on Contributor/unknown/unverified providers/tiers | Fake account/provider metadata and mid-session/replay tier-switch tests |
+| PRIV-03 | Privacy defaults minimize storage and local disclosure | HMAC key separation, query discard, path/Referer/UA masking, safe diagnostics and retention tests |
+| COST-01 | Model calls obey warning/stop/daily limits and bounded work | Boundary/concurrent/in-flight simulations, timeouts, max tokens/steps and safe usage records |
+| COST-02 | LLM budget exhaustion preserves API/dashboard | Mock exhausted budget; no new model call; local English error and successful deterministic queries |
+| UI-01 | English central locale catalog covers UI/errors/starters/accessible labels | Locale coverage and English-fallback checks; UTC/display-timezone test |
+| UI-02 | Core navigation, login, filters, paginated tables and charts work | Playwright: Overview/Security/Crawlers/Errors/Ask AI/Settings/Data Sources |
+| UI-03 | Both themes and keyboard/responsive basics work | Desktop/narrow viewport, system/manual theme persistence, focus and accessible chart table |
+| UI-04 | Browser assets are entirely self-hosted | Network evidence without external fonts/CDNs/analytics; CSP-compatible external scripts and local font licenses |
+| OPS-01 | Fresh Linux Compose install uses least privilege | Non-root, no privileged mode/socket, loopback/private network, read-only log mount and healthcheck |
+| OPS-02 | Persistent data survives restart; offline deterministic features work | Volume restart test and installation with synthetic demo data/provider unavailable |
+| OPS-03 | Performance is measured, not assumed | Reproducible 100k/1M synthetic benchmark, import/RAM/DB/query measurements and reference hardware |
+| QA-01 | Required tests and independent reviews complete | Actual pytest/httpx/Playwright results; reviewer evidence for parser/auth/tools/retention/authorization |
+| ANA-04 | Traffic-type, named-bot, category, provider and purpose filters change every count deterministically; every row has exactly one traffic class and bucket totals sum exactly | Hand-counted overlap/mixed-case/NULL/malicious-UA fixture; SQL-vs-Python classifier agreement; cross-consumer equality |
+| ANA-05 | Named-bot table sorts/paginates deterministically with stable ties; request explorer rows are sanitized, bounded and newest/oldest sortable | Hand-counted bot/sort/paging fixture; explorer schema checks (no raw lines, IPs, query values); invalid sort/filter rejection |
+| API-05 | Traffic/bot/browsers/resources/heatmap/clients/explorer endpoints enforce token site/source, bounded search/output and coverage metadata | Endpoint contract tests, cross-site/source denial, unknown-selector 400s, chat-off/provider-unreachable operation |
+| UI-05 | Traffic/bot/explorer controls reflect in every panel through safe URL state with filter-reset paging | Playwright: Apply flow, back/forward, empty states, populated/empty datasets (Slice B) |
+| QA-02 | UI visual QA supplements automated tests | Desktop/mobile light/dark screenshots, console/network review, no screenshot-only completion claim |
+| GOV-01 | Architecture/scope decisions and feature acceptance mapping are recorded | Accepted plan/ADR references; no silent promotion of DECISION/P1/P2 |
+| GOV-02 | License, LogWerk provenance and account/data-mode prerequisites are resolved | Owner decisions, upstream notices, verified setup record without credentials |
+| PAR-01 | gzip/rotation/file-series ingest, presets, autodetect + CLI override, host filter, job accounting | Bounded streaming fixtures; vhost isolation; replay/replay-identity proofs (extends ING-01–05) |
+| PAR-02 | Enriched nullable fields; local-admin IP view (default full, suffix-mask, pseudonym-only); at-rest protection; fail-closed key absence | Mode/CSRF tests; no originals in API/exports/errors/tools; reprocess without duplicates (extends DB-01–02, PRIV-03, AUTH-01) |
+| PAR-03 | Measured latency/cache/MIME/version/host distributions via shared analytics | Hand-counted timing/cache fixtures; `available: false` when absent (extends ANA-01–02) |
+| PAR-04 | Bot 3xx/4xx/5xx per path, AI-only paths with caveat, referrer-path 404s, entry paths from journeys | Absence/coverage honesty; no indexing/training claims (extends ANA-03) |
+| PAR-05 | Request journeys with documented 30-min boundary, truncation/window honesty | Grouping/boundary fixtures; no original IP in shared analyses (extends ANA-01, PRIV-01) |
+| PAR-06 | Expanded versioned security patterns, pseudonym rates/sequences, 401/403 clusters, baseline comparisons | Exact-count large fixtures; 304/401 wording preserved; provenance kept (extends ANA-03) |
+| PAR-07 | Full-result CSV+JSON export with metadata, privacy labels, formula protection | Not-page equality; quoting; token/site enforcement; offline/AI-off run (extends API-01–04, PRIV-01) |
+| PAR-08 | Incremental follow/rotation, refresh on import, saved views, comparison windows | Historical checkpoint at `84f440f` (see `verification.md` final receipts): opt-in bounded CLI follow (atomic batch+checkpoint commits, append/restart/rename-drain/copytruncate/replacement, once-per-restart prefix validation with taint refusal incl. durable oversized-line discard marker, honestly labeled generation identity, batch-prefix adoption or explicit refusal, plain/gzip archive replay with prefix validation); `/readyz` schema gate (MAX 8 + structural checks at that time); reviewed `upgrade_demo.py` migrated live 4 → 8 with 120 legacy rows preserved; consolidated suite 1263 PASS at `7f0c20d` + 48 affected-file rerun at `84f440f`; no live watcher/service. Current schema is 9 (migration `0009_runtime_allowance`); maintained status in [current status](current-status.md). No criterion is promoted PASS or closed by this note (extends DB-01, UI-02) |
+| PAR-09 | Genuine offline country lookup with documented source/version/license; Unknown stays Unknown | Implemented, verified and locally activated at `84f440f` (see `verification.md` final receipts): 44 unit + 17 integration T5a tests green (mock readers/synthetic fixtures as before); genuine offline DB-IP Country Lite November 2026 MMDB pipeline independently PASS outside Contributor (vendor SHA-1 validated, 6 synthetic rows → AU 1 / US 2 / Unknown 3, import → enrich → replay 0, no originals stored without key, all 10 country-filtered pages 200 + credit); 120 demo documentation-range IPs honestly Unknown; actual DB outside Git/image/Contributor, read-only mount (extends ANA-03, PRIV-01) |
+| PAR-10 | Locale preparation: central English keys, locale-ready formatting, coverage audit; no shipped translations | Coverage audit; no chooser implying translations (extends UI-01) |
+| GOV-03 | Reviewable delivery and hackathon materials exist | README/install/API/privacy docs, license, synthetic dataset, public-repo approval and 3-minute real-call demo; Official Rules reviewed |
+
+## Definition of done
+
+The feature has an agreed scope, a focused change, relevant passing tests, safe evidence and required independent review. A PR can be prepared for human review. Merge/publication/deployment still require explicit user authorization. If checks are blocked by missing implementation or credentials, record BLOCKED or NOT RUN and the reason.

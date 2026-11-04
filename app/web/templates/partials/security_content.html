@@ -1,0 +1,152 @@
+{% if oob_notice %}<p id="filter-times-notice" hx-swap-oob="true" class="w-full text-sm text-base-content/70">{{ t("filter.times_in", tz=tz_name) }} ({{ tz_offset }}; {{ t("filter.offset_note", date=window_start_date) }})</p>{% endif %}
+<p class="tech mb-4 text-sm text-base-content/70" data-observation-window>{{ window_from }} → {{ window_to }}</p>
+{% include "partials/filter_oob.html" %}
+{% include "partials/active_matchers.html" %}
+{% if summary.warnings %}
+<div class="mb-4 space-y-2" role="status">
+  {% for warning in summary.warnings %}
+  <p class="alert alert-warning text-sm">{% include "icons/triangle-alert.svg" %}{{ warning }}</p>
+  {% endfor %}
+</div>
+{% endif %}
+
+<section class="card bg-base-100 shadow" aria-labelledby="sec-status-h">
+  <div class="card-body">
+    <h2 id="sec-status-h" class="card-title text-base">{{ t("security.status_breakdown") }}</h2>
+    <p class="text-sm text-base-content/70">{{ t("security.challenge_note") }}</p>
+    {% if status_rows %}
+    <div class="table-scroll overflow-x-auto">
+      <table class="table table-sm">
+        <caption class="sr-only">{{ t("security.status_breakdown") }}</caption>
+        <thead><tr><th scope="col">{{ t("table.status") }}</th><th scope="col" class="text-right">{{ t("table.requests") }}</th></tr></thead>
+        <tbody>
+          {% for row in status_rows %}
+          <tr><td class="tech">{{ row.status }}</td><td class="text-right tech">{{ row.requests }}</td></tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+    {% else %}
+    <p class="text-sm text-base-content/70" role="status">{{ t("errors.no_groups") }}</p>
+    {% endif %}
+  </div>
+</section>
+
+<section class="card mt-6 bg-base-100 shadow" aria-labelledby="sec-find-h">
+  <div class="card-body">
+    <h2 id="sec-find-h" class="card-title text-base">{{ t("security.findings") }}</h2>
+    {% if findings %}
+    <div class="chart-frame"><canvas id="security-findings-chart" aria-label="{{ t("security.chart") }}" role="img"></canvas></div>
+    <script id="security-findings-chart-data" type="application/json">{{ {"rows": chart_rows, "requestsLabel": t("table.requests")} | tojson }}</script>
+    <p class="text-sm text-base-content/70">{{ t("security.rate_note") }}</p>
+    <ul class="space-y-3">
+      {% for finding in findings %}
+      <li class="rounded-lg border border-base-300 p-3">
+        <p class="font-medium">{{ finding.title }}</p>
+        <p class="text-sm text-base-content/70">
+          <span class="tech">{{ finding.rule_id }} v{{ finding.rule_version }}</span>
+          · {{ t("finding.investigation_candidate") }}
+          {% if finding.counts.requests is defined %}<span class="tech">{{ finding.counts.requests }}</span> {{ t("table.requests") | lower }}{% endif %}
+          {% if finding.counts.errors is defined %}<span class="tech">{{ finding.counts.errors }}</span> {{ t("table.errors") | lower }}{% endif %}
+          {% if finding.counts.distinct_agents is defined %}<span class="tech">{{ finding.counts.distinct_agents }}</span> {{ t("table.agent") | lower }}s{% endif %}
+          {% if finding.counts.distinct_paths is defined %}<span class="tech">{{ finding.counts.distinct_paths }}</span> {{ t("table.paths") | lower }}{% endif %}
+        </p>
+        <p class="mt-1 text-sm">{{ finding.meaning }}</p>
+        {% if finding.evidence.avg_requests_per_minute is defined and finding.evidence.avg_requests_per_minute is not none %}
+        <dl class="mt-2 flex flex-wrap gap-x-8 gap-y-2 text-sm">
+          <div><dt class="text-base-content/70">{{ t("security.avg_rate") }}</dt><dd class="tech">{{ "%.3f"|format(finding.evidence.avg_requests_per_minute) }}/min ({{ t(finding.evidence.avg_numerator_key) }})</dd></div>
+          <div><dt class="text-base-content/70">{{ t("security.peak_minute") }}</dt><dd class="tech">{{ finding.evidence.peak_minute_requests }} {{ t("security.peak_requests_at", minute=finding.evidence.peak_minute) }}</dd></div>
+        </dl>
+        <p class="mt-1 text-sm text-base-content/70">{{ t("security.measure_scope", scope=t(finding.evidence.peak_scope_key)) }} · {{ t(finding.evidence.peak_numerator_key) }}</p>
+        {% if finding.evidence.peak_interval_endpoints %}<p class="mt-1 text-sm text-base-content/70 tech">{{ t("security.peak_interval", start=finding.evidence.peak_interval_endpoints[0], end=finding.evidence.peak_interval_endpoints[1]) }}{% if finding.evidence.peak_minute_partial %} · {{ t("security.partial_bucket") }}{% endif %}</p>{% endif %}
+        {% if finding.evidence.tempo_note %}<p class="mt-1 text-sm text-base-content/70">{{ finding.evidence.tempo_note }}</p>{% endif %}
+        {% endif %}
+        {% if finding.evidence.offenders_total is defined %}
+        <p class="mt-2 text-sm text-base-content/70">{{ t("security.offenders") }}: {{ t("security.sample_truncated", shown=finding.evidence.offenders_shown, total=finding.evidence.offenders_total) }}</p>
+        {% endif %}
+        {% if finding.evidence.paths %}
+        <h3 class="mt-2 text-sm font-medium">{{ t("finding.evidence") }}</h3>
+        <div class="table-scroll overflow-x-auto">
+          <table class="table table-sm">
+            <caption class="sr-only">{{ finding.title }} — {{ t("finding.evidence") }}</caption>
+            <thead><tr><th scope="col">{{ t("table.path") }}</th><th scope="col" class="text-right">{{ t("table.requests") }}</th><th scope="col" class="text-right">{{ t("table.errors") }}</th></tr></thead>
+            <tbody>
+              {% for row in finding.evidence.paths %}
+              <tr><td class="tech break-all"><a class="link" href="{{ page_url("/requests", path_exact=row.path, offset=0) }}" title="{{ t("security.view_path") }}">{{ row.path }}</a></td><td class="text-right tech">{{ row.requests }}</td><td class="text-right tech">{{ row.errors }}</td></tr>
+              {% endfor %}
+            </tbody>
+          </table>
+        </div>
+        <p class="mt-1 text-sm text-base-content/70">{{ t("finding.sample_paths", shown=finding.evidence.paths_shown, total=finding.evidence.paths_total) }}</p>
+        {% endif %}
+        {% if finding.evidence.agents %}
+        <h3 class="mt-2 text-sm font-medium">{{ t("finding.evidence") }}</h3>
+        <ul class="mt-1 space-y-1">
+          {% for agent in finding.evidence.agents %}
+          <li class="tech break-all text-sm">{{ agent.user_agent }} · {{ agent.requests }}</li>
+          {% endfor %}
+        </ul>
+        <p class="mt-1 text-sm text-base-content/70">{{ t("finding.sample_agents", shown=finding.evidence.agents_shown, total=finding.evidence.agents_total) }}</p>
+        {% endif %}
+        {% if finding.evidence.client_pseudonym %}
+        <h3 class="mt-2 text-sm font-medium">{{ t("finding.evidence") }}</h3>
+        <p class="tech min-w-0 break-all text-sm">{{ t("finding.client_pseudonym") }}: <a class="link" href="{{ page_url("/requests", client=finding.evidence.client_pseudonym, offset=0) }}" title="{{ t("security.view_client") }}"><span>{{ finding.evidence.client_pseudonym }}</span></a></p>
+        {% if finding.evidence.sample_paths %}
+        <div class="table-scroll overflow-x-auto">
+          <table class="table table-sm">
+            <caption class="sr-only">{{ finding.title }} — {{ t("finding.evidence") }}</caption>
+            <thead><tr><th scope="col">{{ t("table.path") }}</th><th scope="col">{{ t("table.status") }}</th><th scope="col" class="text-right">{{ t("table.requests") }}</th></tr></thead>
+            <tbody>
+              {% for row in finding.evidence.sample_paths %}
+              <tr><td class="tech break-all"><a class="link" href="{{ page_url("/requests", path_exact=row.path, offset=0) }}" title="{{ t("security.view_path") }}">{{ row.path }}</a></td><td class="tech">{{ row.status }}</td><td class="text-right tech">{{ row.hits }}</td></tr>
+              {% endfor %}
+            </tbody>
+          </table>
+        </div>
+        <p class="mt-1 text-sm text-base-content/70">{{ t("finding.sample_paths", shown=finding.evidence.sample_paths_shown, total=finding.evidence.sample_paths_total) }}</p>
+        {% endif %}
+        {% if finding.evidence.path_sequence %}
+        <h3 class="mt-2 text-sm font-medium">{{ t("security.sequence") }}</h3>
+        <div class="table-scroll overflow-x-auto">
+          <table class="table table-sm">
+            <caption class="sr-only">{{ finding.title }} — {{ t("security.sequence") }}</caption>
+            <thead><tr><th scope="col">{{ t("requests.utc_instant") }}</th><th scope="col">{{ t("table.path") }}</th><th scope="col">{{ t("table.status") }}</th><th scope="col" class="text-right">{{ t("security.gap_seconds") }}</th></tr></thead>
+            <tbody>
+              {% for row in finding.evidence.path_sequence %}
+              <tr><td class="tech whitespace-nowrap">{{ row.ts_utc }}</td><td class="tech break-all">{{ row.path }}</td><td class="tech">{{ row.status }}</td><td class="text-right tech">{{ row.gap_prev_s }}</td></tr>
+              {% endfor %}
+            </tbody>
+          </table>
+        </div>
+        <p class="mt-1 text-sm text-base-content/70">{{ t("security.sample_truncated", shown=finding.evidence.path_sequence_shown, total=finding.evidence.path_sequence_total) }}</p>
+        {% if finding.evidence.sequence_note %}<p class="mt-1 text-sm text-base-content/70">{{ finding.evidence.sequence_note }}</p>{% endif %}
+        {% endif %}
+        {% endif %}
+        <p class="mt-2 text-sm text-base-content/70">
+          {{ t("finding.window") }}: <span class="tech">{{ finding.window.time_from }} → {{ finding.window.time_to }}</span>
+          · {{ t("finding.coverage") }}: <span class="tech">{{ finding.coverage_summary.unique_events }}</span>
+        </p>
+        {% if finding.limitations %}
+        <h3 class="mt-2 text-sm font-medium">{{ t("finding.limitations") }}</h3>
+        <ul class="list-disc space-y-1 pl-5 text-sm text-base-content/70">
+          {% for limitation in finding.limitations %}
+          <li>{{ limitation }}</li>
+          {% endfor %}
+        </ul>
+        {% endif %}
+        {% if finding.link %}
+        <p class="mt-2"><a class="link" href="{{ finding.link }}">{{ t("finding.supporting_data") }}</a></p>
+        {% endif %}
+      </li>
+      {% endfor %}
+    </ul>
+    {% else %}
+    <p class="text-sm text-base-content/70" role="status">{{ t("security.no_findings") }}</p>
+    {% endif %}
+    {% include "partials/paging.html" %}
+  </div>
+</section>
+
+<div class="mt-6 space-y-2 text-sm text-base-content/70">
+  <p>{{ t("data.events", count=summary.coverage.unique_events) }} · {{ t("data.observed", min=summary.coverage.observed_min, max=summary.coverage.observed_max) }}</p>
+</div>

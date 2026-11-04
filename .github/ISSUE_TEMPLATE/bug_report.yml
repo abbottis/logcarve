@@ -1,0 +1,55 @@
+name: Bug report
+description: Report a reproducible functional problem (no security issues here).
+title: "[Bug]: "
+body:
+  - type: markdown
+    attributes:
+      value: >
+        Report functional bugs only. Suspected vulnerabilities belong in a
+        private report — see SECURITY.md. Use synthetic data only: never
+        paste real logs, original client addresses, passwords, tokens, or
+        personal data.
+  - type: input
+    id: version
+    attributes:
+      label: Version and environment
+      description: Commit hash or branch, plus Python/Docker/browser versions where relevant.
+      placeholder: "commit abc1234 on branch X; Python 3.12; Docker image Y"
+    validations:
+      required: true
+  - type: dropdown
+    id: area
+    attributes:
+      label: Area
+      description: Which part of LogCarve is affected?
+      options:
+        - Import / parsing
+        - Analytics / dashboard
+        - External API / client
+        - Assistant / AI boundary
+        - Documentation
+        - Other
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: Expected behavior
+      description: What did you expect to happen?
+    validations:
+      required: true
+  - type: textarea
+    id: actual
+    attributes:
+      label: Actual behavior
+      description: What happened instead? Include error text with secrets redacted.
+    validations:
+      required: true
+  - type: textarea
+    id: reproduction
+    attributes:
+      label: Sanitized reproduction steps
+      description: Minimal steps with synthetic data only. Do not attach or paste real log content.
+      placeholder: "1. Seed the synthetic demo. 2. Open ... 3. Observe ..."
+    validations:
+      required: true

@@ -1,0 +1,1 @@
+{"format_id": "custom-vhost", "pattern": "^(?P<vhost>\\S+) (?P<host>\\S+) \\[(?P<time>[^\\]]+)\\] \"(?P<request>[^\"]*)\" (?P<status>\\d{3}) (?P<size>\\d+|-)$", "time_format": "combined"}

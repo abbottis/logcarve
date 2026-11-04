@@ -1,0 +1,199 @@
+{% if oob_notice %}<p id="filter-times-notice" hx-swap-oob="true" class="w-full text-sm text-base-content/70">{{ t("filter.times_in", tz=tz_name) }} ({{ tz_offset }}; {{ t("filter.offset_note", date=window_start_date) }})</p>{% endif %}
+<p class="tech mb-4 text-sm text-base-content/70" data-observation-window>{{ window_from }} → {{ window_to }}</p>
+{% include "partials/filter_oob.html" %}
+{% include "partials/active_matchers.html" %}
+{% if summary.warnings %}
+<div class="mb-4 space-y-2" role="status">
+  {% for warning in summary.warnings %}
+  <p class="alert alert-warning text-sm">{% include "icons/triangle-alert.svg" %}{{ warning }}</p>
+  {% endfor %}
+</div>
+{% endif %}
+
+<section class="card bg-base-100 shadow" aria-labelledby="perf-lat-h">
+  <div class="card-body">
+    <h2 id="perf-lat-h" class="card-title text-base">{{ t("perf.latency") }}</h2>
+    {% if latency_available %}
+    <dl class="flex flex-wrap gap-x-8 gap-y-2">
+      <div><dt class="text-sm text-base-content/70">{{ t("table.requests") }}</dt><dd class="tech text-lg">{{ latency.total }}</dd></div>
+      <div><dt class="text-sm text-base-content/70">{{ t("perf.measured") }}</dt><dd class="tech text-lg">{{ latency.measured }}</dd></div>
+      <div><dt class="text-sm text-base-content/70">{{ t("perf.missing") }}</dt><dd class="tech text-lg">{{ latency.missing }}</dd></div>
+      <div><dt class="text-sm text-base-content/70">{{ t("perf.p50_ms") }}</dt><dd class="tech text-lg">{% if latency.p50_ms is not none %}{{ latency.p50_ms }}{% else %}—{% endif %}</dd></div>
+      <div><dt class="text-sm text-base-content/70">{{ t("perf.p95_ms") }}</dt><dd class="tech text-lg">{% if latency.p95_ms is not none %}{{ latency.p95_ms }}{% else %}—{% endif %}</dd></div>
+      <div><dt class="text-sm text-base-content/70">{{ t("perf.avg_ms") }}</dt><dd class="tech text-lg">{% if latency.average_ms is not none %}{{ latency.average_ms }}{% else %}—{% endif %}</dd></div>
+    </dl>
+    <p class="mt-2 text-sm text-base-content/70">{{ percentile_definition }}</p>
+    {% else %}
+    <p class="text-sm text-base-content/70" role="note">{{ t("data.response_time_unavailable") }}</p>
+    {% endif %}
+  </div>
+</section>
+
+<section class="card mt-6 bg-base-100 shadow" aria-labelledby="perf-up-h">
+  <div class="card-body">
+    <h2 id="perf-up-h" class="card-title text-base">{{ t("perf.upstream") }}</h2>
+    {% if upstream.measured %}
+    <dl class="flex flex-wrap gap-x-8 gap-y-2">
+      <div><dt class="text-sm text-base-content/70">{{ t("perf.measured") }}</dt><dd class="tech text-lg">{{ upstream.measured }}</dd></div>
+      <div><dt class="text-sm text-base-content/70">{{ t("perf.missing") }}</dt><dd class="tech text-lg">{{ upstream.missing }}</dd></div>
+      <div><dt class="text-sm text-base-content/70">{{ t("perf.p50_ms") }}</dt><dd class="tech text-lg">{% if upstream.p50_ms is not none %}{{ upstream.p50_ms }}{% else %}—{% endif %}</dd></div>
+      <div><dt class="text-sm text-base-content/70">{{ t("perf.p95_ms") }}</dt><dd class="tech text-lg">{% if upstream.p95_ms is not none %}{{ upstream.p95_ms }}{% else %}—{% endif %}</dd></div>
+      <div><dt class="text-sm text-base-content/70">{{ t("perf.avg_ms") }}</dt><dd class="tech text-lg">{% if upstream.average_ms is not none %}{{ upstream.average_ms }}{% else %}—{% endif %}</dd></div>
+    </dl>
+    {% else %}
+    <p class="text-sm text-base-content/70" role="note">{{ t("data.response_time_unavailable") }}</p>
+    {% endif %}
+  </div>
+</section>
+
+<section class="card mt-6 bg-base-100 shadow" aria-labelledby="perf-slow-h">
+  <div class="card-body">
+    <h2 id="perf-slow-h" class="card-title text-base">{{ t("perf.slow") }}</h2>
+    <p class="text-sm text-base-content/70">{{ t("perf.rank_note") }}</p>
+    <div class="mb-3 flex flex-wrap gap-2 text-sm" role="group" aria-label="{{ t("perf.slow") }}">
+      <a class="link" href="{{ page_url("/performance", sort="avg_desc", offset=0) }}" {% if slow_sort == "avg_desc" %}aria-current="true"{% endif %}>{{ t("perf.sort_avg") }}</a>
+      <span aria-hidden="true">·</span>
+      <a class="link" href="{{ page_url("/performance", sort="p95_desc", offset=0) }}" {% if slow_sort == "p95_desc" %}aria-current="true"{% endif %}>{{ t("perf.sort_p95") }}</a>
+      <span aria-hidden="true">·</span>
+      <a class="link" href="{{ page_url("/performance", sort="requests_desc", offset=0) }}" {% if slow_sort == "requests_desc" %}aria-current="true"{% endif %}>{{ t("perf.sort_requests") }}</a>
+      <span aria-hidden="true">·</span>
+      <a class="link" href="{{ page_url("/performance", sort="max_desc", offset=0) }}" {% if slow_sort == "max_desc" %}aria-current="true"{% endif %}>{{ t("perf.sort_max") }}</a>
+    </div>
+    {% if slow_items %}
+    <div class="chart-frame"><canvas id="perf-slow-chart" aria-label="{{ t("perf.slow_chart") }}" role="img"></canvas></div>
+    <script id="perf-slow-chart-data" type="application/json">{{ {"rows": slow_items, "requestsLabel": (t("perf.measured_requests") if slow_sort == "requests_desc" else "ms"), "valueKey": ("average_ms" if slow_sort == "avg_desc" else ("p95_ms" if slow_sort == "p95_desc" else ("max_ms" if slow_sort == "max_desc" else "measured")))} | tojson }}</script>
+    <div class="table-scroll overflow-x-auto">
+      <table class="table table-sm">
+        <caption class="sr-only">{{ t("perf.slow_table") }}</caption>
+        <thead><tr><th scope="col">{{ t("table.path") }}</th><th scope="col" class="text-right">{{ t("perf.measured") }}</th><th scope="col" class="text-right">{{ t("perf.p50_ms") }}</th><th scope="col" class="text-right">{{ t("perf.p95_ms") }}</th><th scope="col" class="text-right">{{ t("perf.avg_ms") }}</th><th scope="col" class="text-right">{{ t("perf.max_ms") }}</th></tr></thead>
+        <tbody>
+          {% for item in slow_items %}
+          <tr>
+            <td class="tech break-all"><a class="link" href="{{ page_url("/requests", path_exact=item.path, timing_available="yes", offset=0) }}">{{ item.path }}</a></td>
+            <td class="text-right tech">{{ item.measured }}</td>
+            <td class="text-right tech">{% if item.p50_ms is not none %}{{ item.p50_ms }}{% else %}—{% endif %}</td>
+            <td class="text-right tech">{% if item.p95_ms is not none %}{{ item.p95_ms }}{% else %}—{% endif %}</td>
+            <td class="text-right tech">{% if item.average_ms is not none %}{{ item.average_ms }}{% else %}—{% endif %}</td>
+            <td class="text-right tech">{% if item.max_ms is not none %}{{ item.max_ms }}{% else %}—{% endif %}</td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+    {% include "partials/paging.html" %}
+    {% else %}
+    <p class="text-sm text-base-content/70" role="status">{{ t("perf.no_timing") }}</p>
+    {% endif %}
+  </div>
+</section>
+
+<section class="card mt-6 bg-base-100 shadow" aria-labelledby="perf-cache-h">
+  <div class="card-body">
+    <h2 id="perf-cache-h" class="card-title text-base">{{ t("perf.cache") }}</h2>
+    <dl class="flex flex-wrap gap-x-8 gap-y-2">
+      <div><dt class="text-sm text-base-content/70">{{ t("perf.measured") }}</dt><dd class="tech text-lg">{{ cache.cache_measured }}</dd></div>
+      <div><dt class="text-sm text-base-content/70">{{ t("table.status") }} HIT</dt><dd class="tech text-lg">{{ cache.hit_requests }}</dd></div>
+      <div><dt class="text-sm text-base-content/70">{{ t("perf.hit_ratio") }}</dt><dd class="tech text-lg">{% if cache.hit_ratio is not none %}{{ (cache.hit_ratio * 100) | round(1) }}%{% else %}—{% endif %}</dd></div>
+      <div><dt class="text-sm text-base-content/70">304</dt><dd class="tech text-lg">{{ cache.not_modified_304 }}</dd></div>
+    </dl>
+    <p class="mt-2 text-sm text-base-content/70">{{ t("perf.cache_note") }}</p>
+    <p class="text-sm text-base-content/70">{{ t("perf.validation_note") }}</p>
+    {% if cache["items"] %}
+    <div class="chart-frame"><canvas id="perf-cache-chart" aria-label="{{ t("perf.distribution_chart") }}" role="img"></canvas></div>
+    <script id="perf-cache-chart-data" type="application/json">{{ {"rows": cache["items"], "requestsLabel": t("table.requests")} | tojson }}</script>
+    <details class="collapse collapse-arrow border border-base-300">
+      <summary class="collapse-title text-sm font-medium">{{ t("perf.distribution_table") }}</summary>
+      <div class="collapse-content table-scroll overflow-x-auto">
+        <table class="table table-sm">
+          <caption class="sr-only">{{ t("perf.distribution_table") }}</caption>
+          <thead><tr><th scope="col">{{ t("table.status") }}</th><th scope="col" class="text-right">{{ t("table.requests") }}</th></tr></thead>
+          <tbody>
+            {% for row in cache["items"] %}
+            <tr><td class="tech break-all">{{ row.value }}</td><td class="text-right tech">{{ row.requests }}</td></tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+    </details>
+    {% if cache.other_requests %}<p class="mt-1 text-sm text-base-content/70">{{ t("perf.other_rows", count=cache.other_requests) }}</p>{% endif %}
+    {% endif %}
+  </div>
+</section>
+
+<section class="card mt-6 bg-base-100 shadow" aria-labelledby="perf-mime-h">
+  <div class="card-body">
+    <h2 id="perf-mime-h" class="card-title text-base">{{ t("perf.mime") }}</h2>
+    <p class="text-sm text-base-content/70">{{ t("perf.mime_note") }}</p>
+    {% if mime["items"] %}
+    <div class="chart-frame"><canvas id="perf-mime-chart" aria-label="{{ t("perf.distribution_chart") }}" role="img"></canvas></div>
+    <script id="perf-mime-chart-data" type="application/json">{{ {"rows": mime["items"], "requestsLabel": t("table.requests")} | tojson }}</script>
+    <details class="collapse collapse-arrow border border-base-300">
+      <summary class="collapse-title text-sm font-medium">{{ t("perf.distribution_table") }}</summary>
+      <div class="collapse-content table-scroll overflow-x-auto">
+        <table class="table table-sm">
+          <caption class="sr-only">{{ t("perf.distribution_table") }}</caption>
+          <thead><tr><th scope="col">{{ t("requests.mime_type") }}</th><th scope="col">{{ t("filter.category") }}</th><th scope="col" class="text-right">{{ t("table.requests") }}</th></tr></thead>
+          <tbody>
+            {% for row in mime["items"] %}
+            <tr><td class="tech break-all">{{ row.mime_type }}</td><td class="tech break-all">{{ row.resource_kind }}</td><td class="text-right tech">{{ row.requests }}</td></tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+    </details>
+    {% if mime.other_requests %}<p class="mt-1 text-sm text-base-content/70">{{ t("perf.other_rows", count=mime.other_requests) }}</p>{% endif %}
+    {% else %}
+    <p class="text-sm text-base-content/70" role="status">{{ t("data.no_data") }}</p>
+    {% endif %}
+  </div>
+</section>
+
+<div class="mt-6 grid gap-6 xl:grid-cols-3">
+  {% for dist_id, dist_title, dist in [("perf-http", t("perf.versions"), versions), ("perf-tls", t("perf.tls"), protocols), ("perf-hosts", t("perf.hosts"), hosts)] %}
+  <section class="card bg-base-100 shadow" aria-labelledby="{{ dist_id }}-h">
+    <div class="card-body">
+      <h2 id="{{ dist_id }}-h" class="card-title text-base">{{ dist_title }}</h2>
+      {% if dist["items"] %}
+      <div class="chart-frame"><canvas id="{{ dist_id }}-chart" aria-label="{{ t("perf.distribution_chart") }}" role="img"></canvas></div>
+      <script id="{{ dist_id }}-chart-data" type="application/json">{{ {"rows": dist["items"], "requestsLabel": t("table.requests")} | tojson }}</script>
+      <details class="collapse collapse-arrow border border-base-300">
+        <summary class="collapse-title text-sm font-medium">{{ t("perf.distribution_table") }}</summary>
+        <div class="collapse-content table-scroll overflow-x-auto">
+          <table class="table table-sm">
+            <caption class="sr-only">{{ dist_title }} — {{ t("perf.distribution_table") }}</caption>
+            <thead><tr><th scope="col">{{ t("table.value") }}</th><th scope="col" class="text-right">{{ t("table.requests") }}</th></tr></thead>
+            <tbody>
+              {% for row in dist["items"] %}
+              <tr><td class="tech break-all">{{ row.value }}</td><td class="text-right tech">{{ row.requests }}</td></tr>
+              {% endfor %}
+            </tbody>
+          </table>
+        </div>
+      </details>
+      {% if dist.other_requests %}<p class="mt-1 text-sm text-base-content/70">{{ t("perf.other_rows", count=dist.other_requests) }}</p>{% endif %}
+      {% else %}
+      <p class="text-sm text-base-content/70" role="status">{{ t("data.no_data") }}</p>
+      {% endif %}
+    </div>
+  </section>
+  {% endfor %}
+</div>
+
+<div class="mt-6 space-y-2 text-sm text-base-content/70">
+  <p>{{ t("data.events", count=summary.coverage.unique_events) }} · {{ t("data.observed", min=summary.coverage.observed_min, max=summary.coverage.observed_max) }}</p>
+  {% if overview.warnings %}
+  <ul class="space-y-1" role="status">
+    {% for warning in overview.warnings %}
+    <li class="alert alert-warning text-sm">{{ warning }}</li>
+    {% endfor %}
+  </ul>
+  {% endif %}
+  {% if overview.limitations %}
+  <h2 class="font-medium">{{ t("finding.limitations") }}</h2>
+  <ul class="list-disc space-y-1 pl-5">
+    {% for limitation in overview.limitations %}
+    <li>{{ limitation }}</li>
+    {% endfor %}
+  </ul>
+  {% endif %}
+</div>

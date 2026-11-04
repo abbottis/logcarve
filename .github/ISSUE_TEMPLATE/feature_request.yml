@@ -1,0 +1,45 @@
+name: Feature request
+description: Suggest a small improvement within the documented scope.
+title: "[Feature]: "
+body:
+  - type: markdown
+    attributes:
+      value: >
+        Keep requests within the documented MVP scope and roadmap.
+        Use synthetic examples only: never include real logs, original
+        client addresses, passwords, tokens, or personal data.
+  - type: dropdown
+    id: area
+    attributes:
+      label: Area
+      description: Which part of LogCarve does this concern?
+      options:
+        - Import / parsing
+        - Analytics / dashboard
+        - External API / client
+        - Assistant / AI boundary
+        - Documentation
+        - Other
+    validations:
+      required: true
+  - type: textarea
+    id: problem
+    attributes:
+      label: Problem and use case
+      description: What problem does this solve, and for whom?
+    validations:
+      required: true
+  - type: textarea
+    id: request
+    attributes:
+      label: Requested change
+      description: What would you like LogCarve to do?
+    validations:
+      required: true
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: Alternatives considered
+      description: What workarounds or alternatives exist today, if any?
+    validations:
+      required: false

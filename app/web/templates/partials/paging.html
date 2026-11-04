@@ -1,0 +1,13 @@
+{% if paging.total > 0 %}
+<nav class="mt-4 flex flex-wrap items-center gap-3" aria-label="{{ t("paging.nav") }}">
+  <p class="text-sm text-base-content/70">{{ t("paging.showing", start=paging.start, end=paging.end, total=paging.total) }}</p>
+  <div class="ms-auto flex gap-2">
+    {% if paging.prev_url %}
+    <a href="{{ paging.prev_url }}" class="btn btn-sm" data-paging>{{ t("paging.prev") }}</a>
+    {% endif %}
+    {% if paging.next_url %}
+    <a href="{{ paging.next_url }}" class="btn btn-sm" data-paging>{{ t("paging.next") }}</a>
+    {% endif %}
+  </div>
+</nav>
+{% endif %}

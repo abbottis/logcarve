@@ -1,0 +1,69 @@
+{% extends "base.html" %}
+{% set active = "views" %}
+{% block content %}
+<div class="mb-4 flex flex-wrap items-baseline gap-x-3 gap-y-1">
+  <h1 class="text-2xl font-semibold">{{ t("views.title") }}</h1>
+</div>
+<p class="mb-6 max-w-3xl text-sm text-base-content/70">{{ t("views.intro") }}</p>
+{% if form_error %}
+<p class="alert alert-error mb-4 max-w-3xl text-sm" role="alert">{{ t(form_error) }}</p>
+{% endif %}
+<div class="grid max-w-4xl gap-6">
+  <section class="card bg-base-100 shadow" aria-labelledby="views-list-h">
+    <div class="card-body">
+      <h2 id="views-list-h" class="card-title text-base">{{ t("views.list") }}</h2>
+      <p class="text-sm text-base-content/70">{{ t("views.count", count=view_count, max=view_max) }}</p>
+      {% if views %}
+      <ul class="mt-2 space-y-3">
+        {% for view in views %}
+        <li class="rounded-lg border border-base-300 p-3">
+          <p class="font-medium break-all">{{ view.name }}</p>
+          <p class="mt-1 text-sm"><a class="link link-primary tech break-all" href="{{ view.url }}">{{ view.path }}{{ "?" + view.query if view.query else "" }}</a></p>
+          <div class="mt-2 flex flex-wrap gap-2">
+            <form method="post" action="/saved-views/{{ view.id }}/rename" class="flex flex-wrap items-center gap-2">
+              <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+              <label class="sr-only" for="rename-{{ view.id }}">{{ t("views.rename_label", name=view.name) }}</label>
+              <input id="rename-{{ view.id }}" name="name" type="text" value="{{ view.name }}" maxlength="64" class="input input-bordered input-sm">
+              <button type="submit" class="btn btn-outline btn-xs">{{ t("views.rename") }}</button>
+            </form>
+            <form method="post" action="/saved-views/{{ view.id }}/delete" class="flex items-center gap-2">
+              <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+              <button type="submit" class="btn btn-outline btn-xs">{{ t("views.delete") }}</button>
+            </form>
+            <form method="post" action="/saved-views/{{ view.id }}/update" class="flex flex-wrap items-center gap-2">
+              <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+              <label class="sr-only" for="update-{{ view.id }}">{{ t("views.update_label", name=view.name) }}</label>
+              <input id="update-{{ view.id }}" name="target" type="text" value="{{ view.url }}" maxlength="2000" class="input input-bordered input-sm tech">
+              <button type="submit" class="btn btn-outline btn-xs">{{ t("views.update") }}</button>
+            </form>
+          </div>
+          <p class="mt-1 text-sm text-base-content/70">{{ t("views.updated", date=view.updated_at) }}</p>
+        </li>
+        {% endfor %}
+      </ul>
+      {% else %}
+      <p class="mt-2 text-sm text-base-content/70" role="status">{{ t("views.empty") }}</p>
+      {% endif %}
+    </div>
+  </section>
+  <section class="card bg-base-100 shadow" aria-labelledby="views-save-h">
+    <div class="card-body">
+      <h2 id="views-save-h" class="card-title text-base">{{ t("views.save") }}</h2>
+      <p class="text-sm text-base-content/70">{{ t("views.save_note") }}</p>
+      <form method="post" action="/saved-views" class="mt-2 space-y-3">
+        <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+        <div class="form-control">
+          <label class="label py-1" for="v-name"><span class="label-text">{{ t("views.name") }}</span></label>
+          <input id="v-name" name="name" type="text" maxlength="64" required class="input input-bordered input-sm" placeholder="{{ t("views.name_placeholder") }}">
+        </div>
+        <div class="form-control">
+          <label class="label py-1" for="v-target"><span class="label-text">{{ t("views.target") }}</span></label>
+          <input id="v-target" name="target" type="text" maxlength="2000" required class="input input-bordered input-sm tech" placeholder="/requests?site=default&amp;range=24h&amp;tz=UTC">
+        </div>
+        <button type="submit" class="btn btn-primary btn-sm">{{ t("views.save_button") }}</button>
+      </form>
+    </div>
+  </section>
+</div>
+<p class="mt-6 max-w-4xl"><a class="link" href="/{{ nav_query }}">{{ t("views.back") }}</a></p>
+{% endblock %}

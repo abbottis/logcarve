@@ -1,0 +1,37 @@
+{# Out-of-band dropdown refresh for htmx fragment responses.
+
+When a filter Apply succeeds, the window changes, so the option labels
+(timezone UTC offsets at the applied window start) and the
+scope-derived method/status/country options must refresh together with
+the notice. These selects swap out-of-band by id into the shared filter
+form (which lives outside #page-content); full pages render them only
+inside the form, so exactly one of each id exists in every response.
+A stale automatic response cancelled before the swap never reaches
+these swaps, so unapplied drafts in these controls survive it.
+#}
+{% if oob_notice %}
+<select id="f-tz" name="tz" class="select select-bordered select-sm" hx-swap-oob="true" aria-label="{{ t("filter.timezone") }}">
+  {% for tz in display_timezones %}
+  <option value="{{ tz.value }}" {% if tz.value == tz_name %}selected{% endif %}>{{ tz.label }}</option>
+  {% endfor %}
+</select>
+<select id="f-method" name="method" class="select select-bordered select-sm" hx-swap-oob="true" aria-label="{{ t("filter.method") }}">
+  <option value="" {% if not filt.method %}selected{% endif %}>{{ t("filter.all") }}</option>
+  {% for method in filter_options.methods %}
+  <option value="{{ method }}" {% if filt.method == method %}selected{% endif %}>{{ method }}</option>
+  {% endfor %}
+</select>
+<select id="f-status" name="status" class="select select-bordered select-sm" hx-swap-oob="true" aria-label="{{ t("filter.status_exact") }}">
+  <option value="" {% if filt.status is none %}selected{% endif %}>{{ t("filter.all") }}</option>
+  {% for entry in filter_options.statuses %}
+  <option value="{{ entry.value }}" {% if filt.status == entry.value %}selected{% endif %}>{{ entry.label }}</option>
+  {% endfor %}
+</select>
+<select id="f-country" name="country" class="select select-bordered select-sm" hx-swap-oob="true" aria-label="{{ t("filter.country") }}">
+  <option value="" {% if not filt.country %}selected{% endif %}>{{ t("filter.all") }}</option>
+  <option value="UNKNOWN" {% if filt.country == "UNKNOWN" %}selected{% endif %}>{{ t("filter.country_unknown") }}</option>
+  {% for code in filter_options.countries %}
+  <option value="{{ code }}" {% if filt.country == code %}selected{% endif %}>{{ code }}</option>
+  {% endfor %}
+</select>
+{% endif %}

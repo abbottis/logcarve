@@ -1,0 +1,726 @@
+# LogCarve bot-claim rules, version 3.
+#
+# Provenance: 70 of 75 entries adapted 2026-11-01 from the public LogWerk
+# rule catalog (`parser.js` `botRules`) at pinned commit
+# d7ab01cae910fdd0c5165ee8378506c081c7124a. Upstream MIT license and
+# copyright are retained verbatim in THIRD_PARTY_NOTICES.md. Only the
+# match patterns, display names and provider/purpose claims were reused;
+# category mapping, precedence order, rule IDs, matcher form
+# (`ua_contains`/`ua_regex`) and the automation remap below are new LogCarve
+# work. No LogWerk application code, session/person inference or sample
+# data was copied. The 5 `bot-search-*`/`bot-ai-*` rules from v2 keep
+# their IDs; specifics stay before generics so first match wins.
+# Two ORIGINAL LogCarve rules close the catalog: an UptimeRobot monitoring
+# rule (documented at
+# https://help.uptimerobot.com/en/articles/11358466-how-to-debug-a-monitor-showing-as-down-in-uptimerobot,
+# UA contains "UptimeRobot") and a generic suspected-automation fallback
+# (`bot`, `crawl`, `spider`, `scrap`, `scan` signals) ordered after every
+# named rule, so named claims always win and generic signals are labeled
+# suspected automation, never proven crawler or human.
+#
+# A match proves a CLAIMED User-Agent identity only; verification
+# (reverse/forward DNS) is an explicit P1 non-goal. `provider`/`purpose`
+# are configured claims from upstream labels, never proof of training
+# use, indexing or verified identity. Every consumer must surface the
+# `meaning` wording instead of asserting a verified crawler.
+#
+# Documented remaps from upstream types: CLI/HTTP clients, headless
+# browsers and security scanners -> `automation_tool`; search-engine
+# media/preview/ads fetchers -> `search_crawler`; performance auditors
+# (Lighthouse) -> `automation_tool`; generic crawlers, archivers and
+# plagiarism checkers -> `generic_bot`; social -> `social_bot`;
+# federation -> `federation_crawler`; feeds -> `feed_fetcher`.
+version: 3
+provenance: "LogCarve MVP bot claims v3: 5 hand-authored rules kept, 70 adapted from public LogWerk parser.js at d7ab01cae910fdd0c5165ee8378506c081c7124a (MIT, see THIRD_PARTY_NOTICES.md), 2 original monitoring/fallback rules; UA match only, verification deferred to P1"
+rules:
+  - id: bot-search-google-image
+    version: 1
+    category: search_crawler
+    title: "Claimed Googlebot Image"
+    meaning: "User-Agent claims Googlebot Image; identity not verified"
+    provider: "Google"
+    purpose: "Media Fetcher"
+    ua_contains: ["googlebot-image"]
+    severity: info
+  - id: bot-search-google-video
+    version: 1
+    category: search_crawler
+    title: "Claimed Googlebot Video"
+    meaning: "User-Agent claims Googlebot Video; identity not verified"
+    provider: "Google"
+    purpose: "Media Fetcher"
+    ua_contains: ["googlebot-video"]
+    severity: info
+  - id: bot-search-google
+    version: 1
+    category: search_crawler
+    title: "Claimed Googlebot"
+    meaning: "User-Agent claims Googlebot; identity not verified"
+    provider: "Google"
+    purpose: "Search Indexer"
+    ua_contains: ["Googlebot"]
+    severity: info
+  - id: bot-search-google-other
+    version: 1
+    category: generic_bot
+    title: "Claimed GoogleOther"
+    meaning: "User-Agent claims GoogleOther; identity not verified"
+    provider: "Google"
+    purpose: "Generic Crawler"
+    ua_contains: ["GoogleOther"]
+    severity: info
+  - id: bot-search-google-inspection
+    version: 1
+    category: search_crawler
+    title: "Claimed Google-InspectionTool"
+    meaning: "User-Agent claims Google-InspectionTool; identity not verified"
+    provider: "Google"
+    purpose: "Search Indexer"
+    ua_contains: ["Google-InspectionTool"]
+    severity: info
+  - id: bot-feed-google
+    version: 1
+    category: feed_fetcher
+    title: "Claimed FeedFetcher-Google"
+    meaning: "User-Agent claims FeedFetcher-Google; identity not verified"
+    provider: "Google"
+    purpose: "Feed Fetcher"
+    ua_contains: ["FeedFetcher-Google"]
+    severity: info
+  - id: bot-search-google-ads
+    version: 1
+    category: search_crawler
+    title: "Claimed AdsBot-Google"
+    meaning: "User-Agent claims AdsBot-Google; identity not verified"
+    provider: "Google"
+    purpose: "Ads Crawler"
+    ua_contains: ["AdsBot-Google"]
+    severity: info
+  - id: bot-search-google-preview
+    version: 1
+    category: search_crawler
+    title: "Claimed Google Web Preview"
+    meaning: "User-Agent claims Google Web Preview; identity not verified"
+    provider: "Google"
+    purpose: "Preview Fetcher"
+    ua_contains: ["Google Web Preview"]
+    severity: info
+  - id: bot-auto-lighthouse
+    version: 1
+    category: automation_tool
+    title: "Claimed Chrome Lighthouse"
+    meaning: "User-Agent claims Chrome Lighthouse; identity not verified"
+    provider: "Google"
+    purpose: "Performance Auditor"
+    ua_contains: ["Chrome-Lighthouse"]
+    severity: info
+  - id: bot-search-bing
+    version: 1
+    category: search_crawler
+    title: "Claimed Bingbot"
+    meaning: "User-Agent claims Bingbot; identity not verified"
+    provider: "Microsoft"
+    purpose: "Search Indexer"
+    ua_contains: ["Bingbot"]
+    severity: info
+  - id: bot-search-msn
+    version: 1
+    category: search_crawler
+    title: "Claimed MSNBot"
+    meaning: "User-Agent claims MSNBot; identity not verified"
+    provider: "Microsoft"
+    purpose: "Search Indexer"
+    ua_contains: ["MSNBot"]
+    severity: info
+  - id: bot-search-yandexbot
+    version: 1
+    category: search_crawler
+    title: "Claimed YandexBot"
+    meaning: "User-Agent claims YandexBot; identity not verified"
+    provider: "Yandex"
+    purpose: "Search Indexer"
+    ua_contains: ["YandexBot"]
+    severity: info
+  - id: bot-search-yandex
+    version: 1
+    category: search_crawler
+    title: "Claimed Yandex crawler"
+    meaning: "User-Agent claims a Yandex crawler; identity not verified"
+    provider: "Yandex"
+    purpose: "Search Indexer"
+    ua_contains: ["Yandex"]
+    severity: info
+  - id: bot-search-baidu
+    version: 1
+    category: search_crawler
+    title: "Claimed Baiduspider"
+    meaning: "User-Agent claims Baiduspider; identity not verified"
+    provider: "Baidu"
+    purpose: "Search Indexer"
+    ua_contains: ["Baiduspider"]
+    severity: info
+  - id: bot-search-duckduckgo
+    version: 1
+    category: search_crawler
+    title: "Claimed DuckDuckBot"
+    meaning: "User-Agent claims DuckDuckBot; identity not verified"
+    provider: "DuckDuckGo"
+    purpose: "Search Indexer"
+    ua_contains: ["DuckDuckBot"]
+    severity: info
+  - id: bot-search-petal
+    version: 1
+    category: search_crawler
+    title: "Claimed PetalBot"
+    meaning: "User-Agent claims PetalBot; identity not verified"
+    provider: "Petal / Huawei"
+    purpose: "Search Indexer"
+    ua_contains: ["PetalBot"]
+    severity: info
+  - id: bot-search-seznam
+    version: 1
+    category: search_crawler
+    title: "Claimed SeznamBot"
+    meaning: "User-Agent claims SeznamBot; identity not verified"
+    provider: "Seznam"
+    purpose: "Search Indexer"
+    ua_contains: ["SeznamBot"]
+    severity: info
+  - id: bot-search-yahoo
+    version: 1
+    category: search_crawler
+    title: "Claimed Yahoo Slurp"
+    meaning: "User-Agent claims Yahoo Slurp; identity not verified"
+    provider: "Yahoo"
+    purpose: "Search Indexer"
+    ua_contains: ["Slurp"]
+    severity: info
+  - id: bot-generic-archive
+    version: 1
+    category: generic_bot
+    title: "Claimed Internet Archive bot"
+    meaning: "User-Agent claims an Internet Archive crawler; identity not verified"
+    provider: "Internet Archive"
+    purpose: "Archiver"
+    ua_contains: ["archive.org_bot"]
+    severity: info
+  - id: bot-generic-turnitin
+    version: 1
+    category: generic_bot
+    title: "Claimed TurnitinBot"
+    meaning: "User-Agent claims TurnitinBot; identity not verified"
+    provider: "Turnitin"
+    purpose: "Plagiarism Checker"
+    ua_contains: ["TurnitinBot"]
+    severity: info
+  - id: bot-ai-perplexity
+    version: 1
+    category: ai_crawler
+    title: "Claimed PerplexityBot"
+    meaning: "User-Agent claims PerplexityBot; identity not verified"
+    provider: "Perplexity AI"
+    purpose: "AI Crawler"
+    ua_contains: ["PerplexityBot"]
+    severity: info
+  - id: bot-ai-perplexity-user
+    version: 1
+    category: ai_crawler
+    title: "Claimed Perplexity-User"
+    meaning: "User-Agent claims Perplexity-User; identity not verified"
+    provider: "Perplexity AI"
+    purpose: "AI Crawler"
+    ua_contains: ["Perplexity-User"]
+    severity: info
+  - id: bot-ai-gpt
+    version: 1
+    category: ai_crawler
+    title: "Claimed GPTBot"
+    meaning: "User-Agent claims GPTBot; identity not verified"
+    provider: "OpenAI"
+    purpose: "AI Crawler"
+    ua_contains: ["GPTBot"]
+    severity: info
+  - id: bot-ai-oai-search
+    version: 1
+    category: ai_crawler
+    title: "Claimed OAI-SearchBot"
+    meaning: "User-Agent claims OAI-SearchBot; identity not verified"
+    provider: "OpenAI"
+    purpose: "AI Crawler"
+    ua_contains: ["OAI-SearchBot"]
+    severity: info
+  - id: bot-ai-chatgpt-user
+    version: 1
+    category: ai_crawler
+    title: "Claimed ChatGPT-User"
+    meaning: "User-Agent claims ChatGPT-User; identity not verified"
+    provider: "OpenAI"
+    purpose: "AI Crawler"
+    ua_contains: ["ChatGPT-User"]
+    severity: info
+  - id: bot-ai-claude-search
+    version: 1
+    category: ai_crawler
+    title: "Claimed Claude-SearchBot"
+    meaning: "User-Agent claims Claude-SearchBot; identity not verified"
+    provider: "Anthropic"
+    purpose: "AI Crawler"
+    ua_contains: ["Claude-SearchBot"]
+    severity: info
+  - id: bot-ai-claude-user
+    version: 1
+    category: ai_crawler
+    title: "Claimed Claude-User"
+    meaning: "User-Agent claims Claude-User; identity not verified"
+    provider: "Anthropic"
+    purpose: "AI Crawler"
+    ua_contains: ["Claude-User"]
+    severity: info
+  - id: bot-ai-claude
+    version: 1
+    category: ai_crawler
+    title: "Claimed ClaudeBot"
+    meaning: "User-Agent claims ClaudeBot; identity not verified"
+    provider: "Anthropic"
+    purpose: "AI Crawler"
+    ua_contains: ["ClaudeBot"]
+    severity: info
+  - id: bot-ai-amazon
+    version: 1
+    category: ai_crawler
+    title: "Claimed Amazonbot"
+    meaning: "User-Agent claims Amazonbot; identity not verified"
+    provider: "Amazon"
+    purpose: "AI Crawler"
+    ua_contains: ["Amazonbot"]
+    severity: info
+  - id: bot-ai-meta-agent
+    version: 1
+    category: ai_crawler
+    title: "Claimed Meta External Agent"
+    meaning: "User-Agent claims Meta External Agent; identity not verified"
+    provider: "Meta"
+    purpose: "AI Crawler"
+    ua_contains: ["meta-externalagent"]
+    severity: info
+  - id: bot-ai-meta-fetcher
+    version: 1
+    category: ai_crawler
+    title: "Claimed Meta External Fetcher"
+    meaning: "User-Agent claims Meta External Fetcher; identity not verified"
+    provider: "Meta"
+    purpose: "AI Crawler"
+    ua_contains: ["meta-externalfetcher"]
+    severity: info
+  - id: bot-ai-bytespider
+    version: 1
+    category: ai_crawler
+    title: "Claimed Bytespider"
+    meaning: "User-Agent claims Bytespider; identity not verified"
+    provider: "ByteDance"
+    purpose: "AI Crawler"
+    ua_contains: ["Bytespider"]
+    severity: info
+  - id: bot-ai-ccbot
+    version: 1
+    category: ai_crawler
+    title: "Claimed CCBot"
+    meaning: "User-Agent claims CCBot; identity not verified"
+    provider: "Common Crawl"
+    purpose: "AI Crawler"
+    ua_contains: ["CCBot"]
+    severity: info
+  - id: bot-ai-cohere
+    version: 1
+    category: ai_crawler
+    title: "Claimed cohere-ai"
+    meaning: "User-Agent claims cohere-ai; identity not verified"
+    provider: "Cohere"
+    purpose: "AI Crawler"
+    ua_contains: ["cohere-ai"]
+    severity: info
+  - id: bot-ai-diffbot
+    version: 1
+    category: ai_crawler
+    title: "Claimed Diffbot"
+    meaning: "User-Agent claims Diffbot; identity not verified"
+    provider: "Diffbot"
+    purpose: "AI Crawler"
+    ua_contains: ["Diffbot"]
+    severity: info
+  - id: bot-ai-imagesift
+    version: 1
+    category: ai_crawler
+    title: "Claimed ImagesiftBot"
+    meaning: "User-Agent claims ImagesiftBot; identity not verified"
+    provider: "Hive AI"
+    purpose: "AI Crawler"
+    ua_contains: ["ImagesiftBot"]
+    severity: info
+  - id: bot-ai-timpi
+    version: 1
+    category: ai_crawler
+    title: "Claimed Timpibot"
+    meaning: "User-Agent claims Timpibot; identity not verified"
+    provider: "Timpi"
+    purpose: "AI Crawler"
+    ua_contains: ["Timpibot"]
+    severity: info
+  - id: bot-ai-youbot
+    version: 1
+    category: ai_crawler
+    title: "Claimed YouBot"
+    meaning: "User-Agent claims YouBot; identity not verified"
+    provider: "You.com"
+    purpose: "AI Crawler"
+    ua_contains: ["YouBot"]
+    severity: info
+  - id: bot-search-apple
+    version: 1
+    category: search_crawler
+    title: "Claimed Applebot"
+    meaning: "User-Agent claims Applebot; identity not verified"
+    provider: "Apple"
+    purpose: "Search Indexer"
+    ua_contains: ["Applebot"]
+    severity: info
+  - id: bot-seo-ahrefs-audit
+    version: 1
+    category: seo_tool
+    title: "Claimed AhrefsSiteAudit"
+    meaning: "User-Agent claims AhrefsSiteAudit; identity not verified"
+    provider: "Ahrefs"
+    purpose: "SEO/Marketing"
+    ua_contains: ["AhrefsSiteAudit"]
+    severity: info
+  - id: bot-seo-ahrefs
+    version: 1
+    category: seo_tool
+    title: "Claimed AhrefsBot"
+    meaning: "User-Agent claims AhrefsBot; identity not verified"
+    provider: "Ahrefs"
+    purpose: "SEO/Marketing"
+    ua_contains: ["AhrefsBot"]
+    severity: info
+  - id: bot-seo-semrush
+    version: 1
+    category: seo_tool
+    title: "Claimed SemrushBot"
+    meaning: "User-Agent claims SemrushBot; identity not verified"
+    provider: "Semrush"
+    purpose: "SEO/Marketing"
+    ua_contains: ["SemrushBot"]
+    severity: info
+  - id: bot-seo-mj12
+    version: 1
+    category: seo_tool
+    title: "Claimed MJ12bot"
+    meaning: "User-Agent claims MJ12bot; identity not verified"
+    provider: "Majestic"
+    purpose: "SEO/Marketing"
+    ua_contains: ["MJ12bot"]
+    severity: info
+  - id: bot-seo-dataforseo
+    version: 1
+    category: seo_tool
+    title: "Claimed DataForSeoBot"
+    meaning: "User-Agent claims DataForSeoBot; identity not verified"
+    provider: "DataForSEO"
+    purpose: "SEO/Marketing"
+    ua_contains: ["DataForSeoBot"]
+    severity: info
+  - id: bot-seo-screamingfrog
+    version: 1
+    category: seo_tool
+    title: "Claimed Screaming Frog SEO Spider"
+    meaning: "User-Agent claims Screaming Frog SEO Spider; identity not verified"
+    provider: "Screaming Frog"
+    purpose: "SEO/Marketing"
+    ua_contains: ["Screaming Frog SEO Spider"]
+    severity: info
+  - id: bot-social-twitter
+    version: 1
+    category: social_bot
+    title: "Claimed Twitterbot"
+    meaning: "User-Agent claims Twitterbot; identity not verified"
+    provider: "X (Twitter)"
+    purpose: "Social Media"
+    ua_contains: ["Twitterbot"]
+    severity: info
+  - id: bot-social-facebook
+    version: 1
+    category: social_bot
+    title: "Claimed Facebook External Hit"
+    meaning: "User-Agent claims Facebook External Hit; identity not verified"
+    provider: "Meta"
+    purpose: "Social Media"
+    ua_contains: ["facebookexternalhit"]
+    severity: info
+  - id: bot-search-meta-indexer
+    version: 1
+    category: search_crawler
+    title: "Claimed Meta Web Indexer"
+    meaning: "User-Agent claims Meta Web Indexer; identity not verified"
+    provider: "Meta"
+    purpose: "Search Indexer"
+    ua_contains: ["meta-webindexer"]
+    severity: info
+  - id: bot-social-linkedin
+    version: 1
+    category: social_bot
+    title: "Claimed LinkedInBot"
+    meaning: "User-Agent claims LinkedInBot; identity not verified"
+    provider: "LinkedIn"
+    purpose: "Social Media"
+    ua_contains: ["LinkedInBot"]
+    severity: info
+  - id: bot-social-bluesky
+    version: 1
+    category: social_bot
+    title: "Claimed Bluesky AppView"
+    meaning: "User-Agent claims Bluesky AppView; identity not verified"
+    provider: "Bluesky"
+    purpose: "Social Media"
+    ua_contains: ["bskyappview"]
+    severity: info
+  - id: bot-fed-mastodon
+    version: 1
+    category: federation_crawler
+    title: "Claimed Mastodon WebAgent"
+    meaning: "User-Agent claims a Mastodon agent; identity not verified"
+    provider: "Mastodon"
+    purpose: "Social Media"
+    ua_contains: ["Mastodon"]
+    severity: info
+  - id: bot-fed-friendica
+    version: 1
+    category: federation_crawler
+    title: "Claimed Friendica"
+    meaning: "User-Agent claims Friendica; identity not verified"
+    provider: "Friendica"
+    purpose: "Social Media"
+    ua_contains: ["Friendica"]
+    severity: info
+  - id: bot-fed-l9explore
+    version: 1
+    category: federation_crawler
+    title: "Claimed l9explore"
+    meaning: "User-Agent claims l9explore; identity not verified"
+    provider: "Fediverse / ActivityPub"
+    purpose: "Federation Crawler"
+    ua_contains: ["l9explore"]
+    severity: info
+  - id: bot-fed-pathscan
+    version: 1
+    category: federation_crawler
+    title: "Claimed pathscan"
+    meaning: "User-Agent claims pathscan; identity not verified"
+    provider: "Fediverse / ActivityPub"
+    purpose: "Federation Crawler"
+    ua_contains: ["pathscan"]
+    severity: info
+  - id: bot-fed-ghostexplore
+    version: 1
+    category: federation_crawler
+    title: "Claimed GhostExplore"
+    meaning: "User-Agent claims GhostExplore; identity not verified"
+    provider: "Ghost"
+    purpose: "Federation Crawler"
+    ua_contains: ["GhostExplore"]
+    severity: info
+  - id: bot-fed-poduptime
+    version: 1
+    category: federation_crawler
+    title: "Claimed Poduptime"
+    meaning: "User-Agent claims Poduptime; identity not verified"
+    provider: "Fediverse / ActivityPub"
+    purpose: "Federation Crawler"
+    ua_contains: ["Poduptime"]
+    severity: info
+  - id: bot-fed-fedidb
+    version: 1
+    category: federation_crawler
+    title: "Claimed FediDB Crawler"
+    meaning: "User-Agent claims FediDB Crawler; identity not verified"
+    provider: "Fediverse / ActivityPub"
+    purpose: "Federation Crawler"
+    ua_contains: ["FediDB"]
+    severity: info
+  - id: bot-fed-fediindex
+    version: 1
+    category: federation_crawler
+    title: "Claimed FediIndex"
+    meaning: "User-Agent claims FediIndex; identity not verified"
+    provider: "Fediverse / ActivityPub"
+    purpose: "Federation Crawler"
+    ua_contains: ["FediIndex"]
+    severity: info
+  - id: bot-fed-indigo
+    version: 1
+    category: federation_crawler
+    title: "Claimed indigo-automod"
+    meaning: "User-Agent claims indigo-automod; identity not verified"
+    provider: "Bluesky"
+    purpose: "Federation Crawler"
+    ua_contains: ["indigo-automod"]
+    severity: info
+  - id: bot-fed-skywatch
+    version: 1
+    category: federation_crawler
+    title: "Claimed SkyWatch"
+    meaning: "User-Agent claims SkyWatch; identity not verified"
+    provider: "Bluesky"
+    purpose: "Federation Crawler"
+    ua_contains: ["SkyWatch"]
+    severity: info
+  - id: bot-fed-health
+    version: 1
+    category: federation_crawler
+    title: "Claimed Fediverse Health Checker"
+    meaning: "User-Agent claims a fediverse health checker; identity not verified"
+    provider: "Fediverse / ActivityPub"
+    purpose: "Federation Crawler"
+    ua_contains: ["unifiedfediversehealthchecker"]
+    severity: info
+  - id: bot-fed-minoru
+    version: 1
+    category: federation_crawler
+    title: "Claimed Minoru fediverse crawler"
+    meaning: "User-Agent claims a Minoru fediverse crawler; identity not verified"
+    provider: "Fediverse / ActivityPub"
+    purpose: "Federation Crawler"
+    ua_contains: ["Minoru"]
+    severity: info
+  - id: bot-auto-curl
+    version: 1
+    category: automation_tool
+    title: "Claimed curl"
+    meaning: "User-Agent claims curl; a developer tool, never a crawler"
+    provider: "Independent"
+    purpose: "Developer Tool"
+    ua_contains: ["curl"]
+    severity: info
+  - id: bot-auto-wget
+    version: 1
+    category: automation_tool
+    title: "Claimed Wget"
+    meaning: "User-Agent claims Wget; a developer tool, never a crawler"
+    provider: "Independent"
+    purpose: "Developer Tool"
+    ua_contains: ["Wget"]
+    severity: info
+  - id: bot-auto-python
+    version: 1
+    category: automation_tool
+    title: "Claimed Python client"
+    meaning: "User-Agent claims a Python HTTP client; a developer tool, never a crawler"
+    provider: "Independent"
+    purpose: "Developer Tool"
+    ua_contains: ["python"]
+    severity: info
+  - id: bot-auto-go
+    version: 1
+    category: automation_tool
+    title: "Claimed Go HTTP client"
+    meaning: "User-Agent claims a Go HTTP client; a developer tool, never a crawler"
+    provider: "Independent"
+    purpose: "Developer Tool"
+    ua_contains: ["go-http-client"]
+    severity: info
+  - id: bot-auto-nodefetch
+    version: 1
+    category: automation_tool
+    title: "Claimed node-fetch"
+    meaning: "User-Agent claims node-fetch; a developer tool, never a crawler"
+    provider: "Independent"
+    purpose: "Developer Tool"
+    ua_contains: ["node-fetch"]
+    severity: info
+  - id: bot-auto-n8n
+    version: 1
+    category: automation_tool
+    title: "Claimed n8n automation"
+    meaning: "User-Agent claims n8n; an automation tool, never a crawler"
+    provider: "n8n"
+    purpose: "Automation Tool"
+    ua_regex: ['\bn8n\b']
+    severity: info
+  - id: bot-auto-headless
+    version: 1
+    category: automation_tool
+    title: "Claimed Headless Chrome"
+    meaning: "User-Agent claims Headless Chrome; automation, never a verified crawler"
+    provider: "Independent"
+    purpose: "Automation Tool"
+    ua_contains: ["HeadlessChrome"]
+    severity: info
+  - id: bot-auto-modat
+    version: 1
+    category: automation_tool
+    title: "Claimed ModatScanner"
+    meaning: "User-Agent claims ModatScanner; an investigation lead, never proof of a scan"
+    provider: "Modat"
+    purpose: "Security Scanner"
+    ua_contains: ["ModatScanner"]
+    severity: info
+  - id: bot-auto-censys
+    version: 1
+    category: automation_tool
+    title: "Claimed Censys scanner"
+    meaning: "User-Agent claims a Censys scanner; an investigation lead, never proof of a scan"
+    provider: "Censys"
+    purpose: "Security Scanner"
+    ua_contains: ["Censys"]
+    severity: info
+  - id: bot-auto-nmap
+    version: 1
+    category: automation_tool
+    title: "Claimed Nmap scanner"
+    meaning: "User-Agent claims Nmap; an investigation lead, never proof of a scan"
+    provider: "Independent"
+    purpose: "Security Scanner"
+    ua_contains: ["Nmap"]
+    severity: info
+  - id: bot-auto-zgrab
+    version: 1
+    category: automation_tool
+    title: "Claimed Zgrab scanner"
+    meaning: "User-Agent claims Zgrab; an investigation lead, never proof of a scan"
+    provider: "Independent"
+    purpose: "Security Scanner"
+    ua_contains: ["Zgrab"]
+    severity: info
+  - id: bot-auto-masscan
+    version: 1
+    category: automation_tool
+    title: "Claimed Masscan scanner"
+    meaning: "User-Agent claims Masscan; an investigation lead, never proof of a scan"
+    provider: "Independent"
+    purpose: "Security Scanner"
+    ua_contains: ["Masscan"]
+    severity: info
+  - id: bot-auto-paloalto
+    version: 1
+    category: automation_tool
+    title: "Claimed Palo Alto scanner"
+    meaning: "User-Agent claims Palo Alto Networks scanning; an investigation lead, never proof of a scan"
+    provider: "Palo Alto Networks"
+    purpose: "Security Scanner"
+    ua_contains: ["paloaltonetworks"]
+    severity: info
+  - id: bot-mon-uptimerobot
+    version: 1
+    category: monitoring
+    title: "Claimed UptimeRobot monitor"
+    meaning: "User-Agent claims UptimeRobot monitoring; a monitoring claim, never a verified check"
+    provider: "UptimeRobot"
+    purpose: "Monitoring"
+    ua_contains: ["UptimeRobot"]
+    severity: info
+  - id: bot-suspected-generic
+    version: 1
+    category: suspected_automation
+    title: "Claimed generic bot/crawler signal"
+    meaning: "User-Agent carries a generic bot/crawler signal without a named rule; suspected automation, never a proven crawler or human"
+    ua_contains: ["bot", "crawl", "spider", "scrap", "scan"]
+    severity: info

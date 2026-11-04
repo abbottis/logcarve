@@ -1,0 +1,24 @@
+# T1 baseline: loopback exposure, persistent owned data, no log source mounted.
+# Copy .env.example to .env and fill in real secrets before starting.
+# To import logs later, add an explicit read-only source mount such as:
+#   volumes:
+#     - /var/log/nginx:/logs:ro
+services:
+  app:
+    build: .
+    image: logcarve:t1
+    ports:
+      - "127.0.0.1:8080:8080"
+    env_file:
+      - path: .env
+        required: false
+    environment:
+      AI_ENABLED: "false"
+      DATABASE_PATH: /data/logcarve.sqlite3
+      SESSION_SECRET: ${SESSION_SECRET:?SESSION_SECRET must be set in the shell or .env}
+      HMAC_KEY: ${HMAC_KEY:?HMAC_KEY must be set in the shell or .env}
+    volumes:
+      - logcarve-data:/data
+
+volumes:
+  logcarve-data:

@@ -1,0 +1,70 @@
+# Proposed schema for review, not consumed by an application yet.
+# No live log paths, keys or credentials belong in this file.
+site:
+  id: default
+  name: Example site
+  hostname: example.org
+  timezone: UTC
+
+storage:
+  database_path: /data/logcarve.sqlite3
+  retention_days: 30
+
+sources:
+  - id: example-combined
+    site_id: default
+    format_id: ncsa_combined
+    path_alias: example-access
+    allowed_root: /logs
+    relative_path: access.log
+    enabled: false
+
+privacy:
+  persist_raw_lines: false
+  persist_query_values: false
+  client_identity: hmac
+  export_original_ip: false
+
+api:
+  enabled: true
+  required_scope: analytics:read
+  # Proposed bounds; validate and finalize with the API contract.
+  default_window_days: 7
+  max_window_days: 30
+  default_limit: 50
+  max_limit: 200
+
+ai:
+  enabled: false
+  provider: meta
+  model_id: muse-spark-1.3
+  # Operator-supplied Responses endpoint (empty disables real runs).
+  # The only accepted value is the documented Standard endpoint;
+  # unknown endpoints are rejected at dispatch.
+  endpoint: https://api.meta.ai/v1/responses
+  service_tier: standard
+  # Lifetime smoke caps for the single capped approval (never reset).
+  smoke_max_investigations: 3
+  smoke_max_requests: 12
+  smoke_budget_usd: 1.0
+  # Requested tier is not independently verified provider handling.
+  data_policy_verified: false
+  allow_real_data: false
+  allowed_model_ids:
+    - muse-spark-1.3
+  # Proposed bounded loop; actual enforcement belongs in backend code/tests.
+  max_tool_calls: 6
+  max_output_tokens: 2048
+  timeout_seconds: 30
+  budget_usd: 150
+  warn_at_usd: 120
+  stop_at_usd: 140
+  daily_limit_usd: 0
+
+ui:
+  default_locale: en
+  fallback_locale: en
+  theme: system
+
+# MODEL_API_KEY, SESSION_SECRET and HMAC_KEY are injected separately.
+# Bot/security rules and starter-question schemas are versioned when implemented.

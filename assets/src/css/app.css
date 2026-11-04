@@ -1,0 +1,250 @@
+@import "tailwindcss";
+@plugin "daisyui" {
+  themes: light --default, dark;
+}
+
+/* Bind daisyUI semantic tokens to the spec §3.4 sky/slate palette so
+   both themes change actual computed colors (no purple defaults). */
+@plugin "daisyui/theme" {
+  name: "light";
+  --color-base-100: var(--color-white);
+  --color-base-200: var(--color-slate-50);
+  --color-base-300: var(--color-slate-200);
+  --color-base-content: var(--color-slate-900);
+  --color-primary: var(--color-sky-600);
+  /* White text on sky-600 only reaches ~4.0:1, below AA. Near-black
+     foreground keeps the semantic sky accent while passing 4.5:1. */
+  --color-primary-content: var(--color-slate-950);
+  --color-info: var(--color-sky-600);
+  --color-info-content: var(--color-white);
+  --color-success: var(--color-emerald-600);
+  --color-success-content: var(--color-white);
+  --color-warning: var(--color-amber-600);
+  --color-warning-content: var(--color-white);
+  --color-error: var(--color-red-600);
+  --color-error-content: var(--color-white);
+}
+
+@plugin "daisyui/theme" {
+  name: "dark";
+  --color-base-100: var(--color-slate-900);
+  --color-base-200: var(--color-slate-950);
+  --color-base-300: var(--color-slate-800);
+  --color-base-content: var(--color-slate-100);
+  --color-primary: var(--color-sky-400);
+  --color-primary-content: var(--color-slate-950);
+  --color-info: var(--color-sky-400);
+  --color-info-content: var(--color-slate-950);
+  --color-success: var(--color-emerald-400);
+  --color-success-content: var(--color-slate-950);
+  --color-warning: var(--color-amber-400);
+  --color-warning-content: var(--color-slate-950);
+  --color-error: var(--color-red-400);
+  --color-error-content: var(--color-slate-950);
+}
+
+/* Local self-hosted fonts (WOFF2 vendored by npm run build:vendor). */
+@font-face {
+  font-family: "Inter Variable";
+  font-style: normal;
+  font-weight: 100 900;
+  font-display: swap;
+  src: url("/static/fonts/inter-latin-wght-normal.woff2") format("woff2");
+}
+
+@font-face {
+  font-family: "JetBrains Mono Variable";
+  font-style: normal;
+  font-weight: 100 800;
+  font-display: swap;
+  src: url("/static/fonts/jetbrains-mono-latin-wght-normal.woff2") format("woff2");
+}
+
+@theme {
+  --font-sans: "Inter Variable", ui-sans-serif, system-ui, sans-serif;
+  --font-mono: "JetBrains Mono Variable", ui-monospace, monospace;
+}
+
+/* Visible keyboard focus everywhere; never remove outlines without a
+   stronger replacement. */
+:where(a, button, input, select, [tabindex]):focus-visible {
+  outline: 2px solid var(--color-sky-600);
+  outline-offset: 2px;
+}
+
+/* Monospace is reserved for technical values (hashes, URLs, code,
+   table numerals, labels); never for long prose. */
+.tech {
+  font-family: var(--font-mono);
+  font-variant-numeric: tabular-nums;
+}
+
+/* Brand wordmark: reusable inline SVG ("Log" in the surrounding
+   foreground via currentColor, "Carve" in the sky theme accent).
+   Sizing comes from the placement context so one partial serves the
+   prominent login hero and the compact header. Large bold wordmark
+   text keeps 3:1 contrast in both themes (sky-600 on light,
+   sky-400 on dark). */
+.brand-logo {
+  display: block;
+  height: auto;
+}
+.brand-logo text {
+  font-family: "Inter Variable", ui-sans-serif, system-ui, sans-serif;
+  font-weight: 800;
+  letter-spacing: -0.02em;
+}
+.brand-logo .brand-log {
+  fill: currentColor;
+}
+.brand-logo .brand-carve {
+  fill: var(--color-sky-600);
+}
+[data-theme="dark"] .brand-logo .brand-carve {
+  fill: var(--color-sky-400);
+}
+.brand-hero .brand-logo {
+  width: min(280px, 72vw);
+}
+.brand-home .brand-logo {
+  width: 160px;
+  max-width: 42vw;
+}
+
+/* Charts keep a readable minimum height; their data tables remain the
+   primary content for assistive technology. */
+.chart-frame {
+  position: relative;
+  min-width: 0;
+  min-height: 16rem;
+}
+
+/* Intrinsic-size guards: cards, grid children, stats and chart frames
+   must never force document-level horizontal overflow. Long content
+   wraps or scrolls inside its own bounded container instead. The page
+   itself is never clipped to hide overflow. */
+.card,
+.card-body,
+.stats,
+.stat,
+.chart-frame {
+  min-width: 0;
+}
+.stat-title,
+.stat-desc {
+  overflow-wrap: anywhere;
+}
+
+/* Settings forms: daisyUI .label defaults to nowrap inline-flex, so
+   long checkbox/policy/key captions overflow narrow viewports. Wrap
+   the caption inside its bounded container; checkboxes keep their
+   size and align to the first text line. */
+.settings-form .label-text {
+  white-space: normal;
+  min-width: 0;
+  max-width: 100%;
+}
+.settings-form .settings-check {
+  align-items: flex-start;
+}
+.settings-form .settings-check .checkbox {
+  flex-shrink: 0;
+}
+.chart-frame canvas {
+  max-width: 100%;
+}
+.table-scroll {
+  max-width: 100%;
+  overflow-x: auto;
+}
+
+/* Bot and group display names: ordinary names never break mid-word
+   (no letter-wrapping of "OpenAI" or "AI crawlers"). Wide tables keep
+   their natural width and scroll inside .table-scroll instead. */
+.bot-name {
+  white-space: nowrap;
+}
+
+/* Requests explorer: the table fills the main width; client pseudonyms
+   stay on one compact line (full value in details/title); paths wrap at
+   word boundaries instead of splitting every letter. Detail panels span
+   the full table width inside the scroll container and wrap normally. */
+.req-table {
+  width: 100%;
+}
+.req-client {
+  white-space: nowrap;
+}
+.req-path {
+  overflow-wrap: anywhere;
+}
+.req-detail td {
+  white-space: normal;
+}
+.req-detail .tech {
+  overflow-wrap: anywhere;
+}
+
+/* Local htmx request indicators (htmx includeIndicatorStyles is off so
+   no style element is injected at runtime, keeping style-src 'self'). */
+.htmx-indicator {
+  opacity: 0;
+  transition: opacity 150ms ease-in;
+}
+.htmx-request .htmx-indicator,
+.htmx-request.htmx-indicator {
+  opacity: 1;
+}
+
+/* Inlined monochrome icons inherit the surrounding text color, so they
+   stay readable in both themes (unlike <img>-loaded SVGs). */
+.lc-icon {
+  width: 1.125rem;
+  height: 1.125rem;
+  flex: none;
+}
+.btn .lc-icon {
+  width: 1rem;
+  height: 1rem;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after {
+    animation-duration: 0.01ms !important;
+    transition-duration: 0.01ms !important;
+  }
+}
+
+/* Weekday/hour heatmap intensity. Levels are server-computed 0-4
+   relative to the busiest cell and render through these external
+   classes (never inline styles), keeping style-src 'self' without
+   unsafe-inline in both themes. */
+.heat-swatch {
+  display: inline-block;
+  width: 1rem;
+  height: 1rem;
+  border-radius: 0.25rem;
+  border: 1px solid var(--color-base-300);
+}
+[data-theme="light"] .heat-0 { background-color: transparent; }
+[data-theme="light"] .heat-1 { background-color: var(--color-sky-100); }
+[data-theme="light"] .heat-2 { background-color: var(--color-sky-300); }
+[data-theme="light"] .heat-3 { background-color: var(--color-sky-600); color: var(--color-white); }
+[data-theme="light"] .heat-4 { background-color: var(--color-sky-900); color: var(--color-white); }
+[data-theme="dark"] .heat-0 { background-color: transparent; }
+[data-theme="dark"] .heat-1 { background-color: var(--color-sky-950); }
+[data-theme="dark"] .heat-2 { background-color: var(--color-sky-800); }
+[data-theme="dark"] .heat-3 { background-color: var(--color-sky-500); color: var(--color-slate-950); }
+[data-theme="dark"] .heat-4 { background-color: var(--color-sky-300); color: var(--color-slate-950); }
+
+/* Untrusted plain model answers: the browser inserts them via
+   textContent (no markup execution), and this guard keeps readable
+   line breaks plus bounded wrapping even for a long single token or
+   a client pseudonym, inside a bounded scroll region. */
+.ask-answer {
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  word-break: break-word;
+  max-height: 24rem;
+  overflow-y: auto;
+}

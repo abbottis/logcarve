@@ -1,0 +1,83 @@
+{% extends "base.html" %}
+{% set active = "ask" %}
+{% block head %}
+<script src="/static/js/ask.js" defer></script>
+{% endblock %}
+{% block content %}
+{% include "partials/filter_bar.html" %}
+<div class="mb-4 flex flex-wrap items-baseline gap-x-3 gap-y-1">
+  <h1 class="text-2xl font-semibold">{{ t("ask.title") }}</h1>
+  <p class="tech text-sm text-base-content/70">{{ window_from }} → {{ window_to }} · {{ site }}</p>
+</div>
+<div class="grid gap-6 lg:grid-cols-2" data-ask data-site="{{ site }}" data-source="{{ params_source or "" }}" data-from="{{ window_from }}" data-to="{{ window_to }}" data-tz="{{ tz_name }}"
+  data-method="{{ filt.method or "" }}" data-status="{{ filt.status if filt.status is not none else "" }}"
+  data-status-class="{{ filt.status_class or "" }}" data-path-prefix="{{ filt.path_prefix or "" }}"
+  data-path-exact="{{ filt.path_exact or "" }}"
+  data-referer-host="{{ filt.referer_host or "" }}" data-traffic="{{ filt.traffic }}"
+  data-bot="{{ filt.bot or "" }}" data-category="{{ filt.category or "" }}"
+  data-provider="{{ filt.provider or "" }}" data-purpose="{{ filt.purpose or "" }}"
+  data-search="{{ filt.search or "" }}" data-client="{{ filt.client or "" }}"
+  data-server-host="{{ filt.server_host or "" }}" data-http-version="{{ filt.http_version or "" }}"
+  data-mime-type="{{ filt.mime_type or "" }}" data-cache-status="{{ filt.cache_status or "" }}"
+  data-tls-protocol="{{ filt.tls_protocol or "" }}"
+  data-timing-available="{{ "yes" if filt.timing_available is true else ("no" if filt.timing_available is false else "") }}"
+  data-upstream-available="{{ "yes" if filt.upstream_available is true else ("no" if filt.upstream_available is false else "") }}"
+  data-timing-min-ms="{{ filt.timing_min_ms if filt.timing_min_ms is not none else "" }}"
+  data-timing-max-ms="{{ filt.timing_max_ms if filt.timing_max_ms is not none else "" }}"
+  data-country="{{ filt.country or "" }}"
+    data-msg-evidence="{{ t("ask.evidence") }}"
+    data-msg-evidence-rerun-note="{{ t("ask.evidence_rerun_note") }}"
+    data-msg-recheck="{{ t("ask.recheck") }}"
+    data-msg-recheck-checking="{{ t("ask.recheck_checking") }}"
+    data-msg-recheck-current="{{ t("ask.recheck_current") }}"
+    data-msg-recheck-current-new-generation="{{ t("ask.recheck_current_new_generation") }}"
+    data-msg-recheck-changed="{{ t("ask.recheck_changed") }}"
+    data-msg-recheck-unavailable="{{ t("ask.recheck_unavailable") }}"
+    data-msg-recheck-unverified="{{ t("ask.recheck_unverified") }}"
+    data-msg-recheck-detail="{{ t("ask.recheck_detail") }}"
+    data-msg-recheck-detail-unknown="{{ t("ask.recheck_detail_unknown") }}"
+    data-msg-recheck-scope-nosource="{{ t("ask.recheck_scope_nosource") }}"
+    data-msg-recheck-scope-source="{{ t("ask.recheck_scope_source") }}"
+    data-msg-disabled="{{ t("ai.disabled") }}"
+    data-msg-unavailable="{{ t("ai.unavailable") }}"
+    data-msg-budget="{{ t("ai.budget_reached") }}"
+    data-msg-rate-limited="{{ t("ask.rate_limited") }}"
+    data-msg-error="{{ t("ask.failed") }}"
+    data-msg-network="{{ t("ask.network") }}">
+  <section class="card bg-base-100 shadow" aria-labelledby="ask-starters-h">
+    <div class="card-body">
+      <h2 id="ask-starters-h" class="card-title text-base">{{ t("ask.starters") }}</h2>
+      <p class="text-sm text-base-content/70">{{ t("ask.hint") }}</p>
+      <ul class="mt-2 space-y-2">
+        {% for starter in starters %}
+        <li>
+          <button type="button" class="btn btn-outline btn-sm w-full justify-start" data-starter-prompt="{{ starter.prompt }}">
+            <span class="badge badge-ghost mr-1">{{ starter.category }}</span>
+            {{ starter.label }}
+          </button>
+        </li>
+        {% endfor %}
+      </ul>
+      {% if not duration_available %}
+      <p class="mt-3 text-sm text-base-content/70" role="note">{{ t("data.response_time_unavailable") }}</p>
+      {% endif %}
+    </div>
+  </section>
+  <section class="card bg-base-100 shadow" aria-labelledby="ask-chat-h">
+    <div class="card-body">
+      <h2 id="ask-chat-h" class="card-title text-base">{{ t("ask.title") }}</h2>
+      {% if not ai_enabled %}
+      <p class="alert" role="status">{{ t("ai.disabled") }}</p>
+      {% endif %}
+      <div class="form-control">
+        <label class="label" for="ask-input"><span class="label-text">{{ t("ask.question") }}</span></label>
+        <textarea id="ask-input" rows="4" class="textarea textarea-bordered w-full" data-ask-input></textarea>
+      </div>
+      <button type="button" class="btn btn-primary mt-3" data-ask-send>{{ t("ask.send") }}</button>
+      <p data-ask-status class="alert alert-warning mt-3" role="status" hidden></p>
+      <div data-ask-answer class="ask-answer prose mt-3 max-w-none text-sm" aria-live="polite"></div>
+      <div data-ask-evidence class="mt-3 text-sm"></div>
+    </div>
+  </section>
+</div>
+{% endblock %}

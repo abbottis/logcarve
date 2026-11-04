@@ -1,0 +1,137 @@
+{% extends "base.html" %}
+{% set active = "help" %}
+{% block content %}
+<div class="mb-4 flex flex-wrap items-baseline gap-x-3 gap-y-1">
+  <h1 class="text-2xl font-semibold">{{ t("help.title") }}</h1>
+</div>
+<p class="mb-6 max-w-3xl text-sm text-base-content/70">{{ t("help.intro") }}</p>
+<div class="grid max-w-4xl gap-6">
+  <section class="card bg-base-100 shadow" aria-labelledby="help-filters-h">
+    <div class="card-body">
+      <h2 id="help-filters-h" class="card-title text-base">{{ t("help.filters") }}</h2>
+      <p class="text-sm">{{ t("help.filters_body") }}</p>
+    </div>
+  </section>
+  <section class="card bg-base-100 shadow" aria-labelledby="help-offsets-h">
+    <div class="card-body">
+      <h2 id="help-offsets-h" class="card-title text-base">{{ t("help.offsets") }}</h2>
+      <p class="text-sm">{{ t("help.offsets_body") }}</p>
+    </div>
+  </section>
+  <section class="card bg-base-100 shadow" aria-labelledby="help-formats-h">
+    <div class="card-body">
+      <h2 id="help-formats-h" class="card-title text-base">{{ t("help.formats") }}</h2>
+      <p class="text-sm">{{ t("help.formats_body") }}</p>
+    </div>
+  </section>
+  <section class="card bg-base-100 shadow" aria-labelledby="help-timing-h">
+    <div class="card-body">
+      <h2 id="help-timing-h" class="card-title text-base">{{ t("help.timing") }}</h2>
+      <p class="text-sm">{{ t("help.timing_body") }}</p>
+    </div>
+  </section>
+  <section class="card bg-base-100 shadow" aria-labelledby="help-labels-h">
+    <div class="card-body">
+      <h2 id="help-labels-h" class="card-title text-base">{{ t("help.labels") }}</h2>
+      <p class="text-sm">{{ t("help.labels_body") }}</p>
+    </div>
+  </section>
+  <section class="card bg-base-100 shadow" aria-labelledby="help-identity-h">
+    <div class="card-body">
+      <h2 id="help-identity-h" class="card-title text-base">{{ t("help.identity") }}</h2>
+      <p class="text-sm">{{ t("help.identity_body") }}</p>
+      <p class="mt-2 text-sm">{{ t("help.conflict_body") }}</p>
+      <p class="mt-2 text-sm">{{ t("help.verify_body") }}</p>
+      <p class="mt-1 text-sm"><a class="link link-primary break-all" href="{{ verify_url }}">{{ verify_url }}</a></p>
+    </div>
+  </section>
+  <section class="card bg-base-100 shadow" aria-labelledby="help-privacy-h">
+    <div class="card-body">
+      <h2 id="help-privacy-h" class="card-title text-base">{{ t("help.privacy") }}</h2>
+      <p class="text-sm">{{ t("help.privacy_body") }}</p>
+    </div>
+  </section>
+  <section class="card bg-base-100 shadow" aria-labelledby="help-bots-seo-h">
+    <div class="card-body">
+      <h2 id="help-bots-seo-h" class="card-title text-base">{{ t("help.bots_seo") }}</h2>
+      <p class="text-sm">{{ t("help.bots_seo_body") }}</p>
+    </div>
+  </section>
+  <section class="card bg-base-100 shadow" aria-labelledby="help-explorer-h">
+    <div class="card-body">
+      <h2 id="help-explorer-h" class="card-title text-base">{{ t("help.explorer") }}</h2>
+      <p class="text-sm">{{ t("help.explorer_body") }}</p>
+    </div>
+  </section>
+  <section class="card bg-base-100 shadow" aria-labelledby="help-journeys-h">
+    <div class="card-body">
+      <h2 id="help-journeys-h" class="card-title text-base">{{ t("help.journeys_help") }}</h2>
+      <p class="text-sm">{{ t("help.journeys_help_body") }}</p>
+    </div>
+  </section>
+  <section class="card bg-base-100 shadow" aria-labelledby="help-security-h">
+    <div class="card-body">
+      <h2 id="help-security-h" class="card-title text-base">{{ t("help.security_cards") }}</h2>
+      <p class="text-sm">{{ t("help.security_cards_body") }}</p>
+    </div>
+  </section>
+  <section class="card bg-base-100 shadow" aria-labelledby="help-ip-modes-h">
+    <div class="card-body">
+      <h2 id="help-ip-modes-h" class="card-title text-base">{{ t("help.ip_modes") }}</h2>
+      <p class="text-sm">{{ t("help.ip_modes_body") }}</p>
+    </div>
+  </section>
+  <section class="card bg-base-100 shadow" aria-labelledby="help-exports-h">
+    <div class="card-body">
+      <h2 id="help-exports-h" class="card-title text-base">{{ t("help.exports") }}</h2>
+      <p class="text-sm">{{ t("help.exports_body") }}</p>
+    </div>
+  </section>
+  <section class="card bg-base-100 shadow" aria-labelledby="help-views-compare-h">
+    <div class="card-body">
+      <h2 id="help-views-compare-h" class="card-title text-base">{{ t("help.views_compare") }}</h2>
+      <p class="text-sm">{{ t("help.views_compare_body") }}</p>
+    </div>
+  </section>
+  <section class="card bg-base-100 shadow" aria-labelledby="help-trouble-h">
+    <div class="card-body">
+      <h2 id="help-trouble-h" class="card-title text-base">{{ t("help.troubleshooting") }}</h2>
+      <p class="text-sm">{{ t("help.troubleshooting_body") }}</p>
+    </div>
+  </section>
+  <section class="card bg-base-100 shadow" aria-labelledby="help-api-h">
+    <div class="card-body">
+      <h2 id="help-api-h" class="card-title text-base">{{ t("help.api") }}</h2>
+      <p class="text-sm">{{ t("help.api_body") }}</p>
+      <h3 class="mt-4 font-medium">{{ t("help.example_curl") }}</h3>
+      <pre class="tech overflow-x-auto rounded-lg bg-base-200 p-3 text-xs">curl -H "Authorization: Bearer &lt;YOUR_TOKEN&gt;" \
+  "https://&lt;YOUR_HOST&gt;/api/v1/summary?site_id=&lt;SITE&gt;&amp;from=&lt;FROM_UTC&gt;&amp;to=&lt;TO_UTC&gt;"</pre>
+      <h3 class="mt-4 font-medium">{{ t("help.example_stdlib") }}</h3>
+      <pre class="tech overflow-x-auto rounded-lg bg-base-200 p-3 text-xs">import json, urllib.request
+
+req = urllib.request.Request(
+    "https://&lt;YOUR_HOST&gt;/api/v1/summary"
+    "?site_id=&lt;SITE&gt;&amp;from=&lt;FROM_UTC&gt;&amp;to=&lt;TO_UTC&gt;",
+    headers={"Authorization": "Bearer &lt;YOUR_TOKEN&gt;"},
+)
+with urllib.request.urlopen(req, timeout=30) as resp:
+    print(json.load(resp)["totals"])</pre>
+    <h3 class="mt-4 font-medium">{{ t("help.api_n8n") }}</h3>
+    <p class="text-sm">{{ t("help.api_n8n_body") }}</p>
+    </div>
+  </section>
+  <section class="card bg-base-100 shadow" aria-labelledby="help-geoip-h">
+    <div class="card-body">
+      <h2 id="help-geoip-h" class="card-title text-base">{{ t("help.geoip") }}</h2>
+      <p class="text-sm">{{ t("help.geoip_body") }}</p>
+    </div>
+  </section>
+  <section class="card bg-base-100 shadow" aria-labelledby="help-follow-h">
+    <div class="card-body">
+      <h2 id="help-follow-h" class="card-title text-base">{{ t("help.follow") }}</h2>
+      <p class="text-sm">{{ t("help.follow_body") }}</p>
+    </div>
+  </section>
+  <p><a class="link" href="/{{ nav_query }}">{{ t("help.back") }}</a></p>
+</div>
+{% endblock %}

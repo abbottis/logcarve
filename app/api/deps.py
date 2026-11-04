@@ -1,0 +1,331 @@
+"""Request authentication, authorization and login rate limiting (T5).
+
+Scoped API tokens authorize analytics reads only: the token's site and
+scope are derived server-side from the stored hash, never from client
+claims. Admin routes require a server-side session cookie plus a
+per-session CSRF header. Login attempts are bounded per client address.
+"""
+
+import hmac
+import secrets
+import sqlite3
+import time
+from collections import deque
+from contextlib import contextmanager
+from pathlib import Path
+
+from fastapi import Request
+
+from app.api.errors import error_response
+from app.auth.tokens import ApiToken, get_session, verify_admin_credentials, verify_token
+from app.db.database import connect
+
+SESSION_COOKIE = "lc_admin_session"
+CSRF_HEADER = "X-CSRF-Token"
+
+#: Supported on-disk schema for serving traffic. The migration MAX
+#: version plus the structural gates newer queries require: a database
+#: that reports a current MAX row but misses gated structures (spoofed
+#: or partially applied upgrade) is still not ready. This is a cheap
+#: explicit preflight (version row, table list, two column sets), never
+#: a full integrity scan, and it creates no files.
+SUPPORTED_SCHEMA_VERSION = 9
+_READINESS_TABLES = frozenset(
+    {
+        "schema_migrations",
+        "sites",
+        "log_sources",
+        "imports",
+        "requests",
+        "follow_generations",
+        "follow_batches",
+        # Explicit bounded runtime usage authorization (ADR 0004,
+        # migration 0009): chat insists on these tables before
+        # serving, so a store upgraded only to 8 stays not ready
+        # instead of failing allowance checks per request.
+        "runtime_allowance",
+        "runtime_holds",
+    }
+)
+#: Per-table columns the current query/export paths actually require. A
+#: store that reports migration MAX 9 but misses any of these (a
+#: spoofed MAX row or a partially applied upgrade) is still not ready:
+#: without the check it would report ready and then fail analytic
+#: queries. This stays a cheap explicit read-only schema check (table
+#: list plus these column sets), never a per-request integrity scan.
+_READINESS_COLUMNS = {
+    "requests": frozenset(
+        {
+            # Explorer/export projection and content filters.
+            "format_id",
+            "http_version",
+            "server_host",
+            "referer_scheme",
+            "referer_path",
+            "cache_status",
+            "mime_type",
+            "tls_protocol",
+            "request_time_ms",
+            "upstream_time_ms",
+            "upstream_count",
+            "policy_version",
+            # Offline-country outcome consumed by coverage/breakdowns.
+            "country_code",
+            "geo_source",
+            "geo_release",
+            "geo_status",
+        }
+    ),
+    # Stored host aliases feeding internal/external referrer classification.
+    "log_sources": frozenset({"allowed_hosts"}),
+    "follow_generations": frozenset({"import_id", "consumed_sha256"}),
+    # Runtime allowance grant/hold columns the chat path relies on.
+    "runtime_allowance": frozenset(
+        {
+            "version",
+            "max_investigations",
+            "max_requests",
+            "max_micro_usd",
+            "used_investigations",
+            "used_requests",
+            "used_micro_usd",
+            "held_micro_usd",
+        }
+    ),
+}
+
+
+def schema_supported(conn: sqlite3.Connection) -> tuple[bool, int | None]:
+    """Check the store against the supported schema (read-only, cheap).
+
+    Returns ``(supported, version)`` where ``version`` is the reported
+    migration MAX (or ``None`` when unreadable). Table names are module
+    constants, never request input.
+    """
+    try:
+        row = conn.execute("SELECT MAX(version) FROM schema_migrations").fetchone()
+    except sqlite3.Error:
+        return False, None
+    version = row[0] if row else None
+    if not isinstance(version, int) or version != SUPPORTED_SCHEMA_VERSION:
+        return False, version if isinstance(version, int) else None
+    try:
+        tables = {
+            row[0]
+            for row in conn.execute(
+                "SELECT name FROM sqlite_master WHERE type = 'table'"
+            ).fetchall()
+        }
+        if not _READINESS_TABLES <= tables:
+            return False, version
+        for table, required in _READINESS_COLUMNS.items():
+            have = {info[1] for info in conn.execute(f"PRAGMA table_info({table})").fetchall()}
+            if not required <= have:
+                return False, version
+    except sqlite3.Error:
+        return False, version
+    return True, version
+
+
+class StoreUnavailable(RuntimeError):
+    """The credential store cannot be read (missing, corrupt or uninitialized)."""
+
+
+class LoginRateLimiter:
+    """In-memory sliding-window login bound (single process, documented)."""
+
+    def __init__(self, *, max_attempts: int = 10, window_s: float = 300.0) -> None:
+        self.max_attempts = max_attempts
+        self.window_s = window_s
+        self._attempts: dict[str, deque[float]] = {}
+
+    def allowed(self, key: str) -> bool:
+        now = time.monotonic()
+        recent = self._attempts.setdefault(key, deque())
+        while recent and now - recent[0] > self.window_s:
+            recent.popleft()
+        return len(recent) < self.max_attempts
+
+    def register(self, key: str) -> None:
+        self._attempts.setdefault(key, deque()).append(time.monotonic())
+
+
+def _client_key(request: Request) -> str:
+    if request.client is not None and request.client.host:
+        return request.client.host
+    return "unknown"
+
+
+def _db_path(request: Request) -> Path:
+    return request.app.state.db_path
+
+
+def open_read_db(request: Request) -> sqlite3.Connection:
+    return connect(_db_path(request), read_only=True)
+
+
+@contextmanager
+def read_store(request: Request):
+    """Yield a read-only store connection inside ONE read snapshot.
+
+    A deferred ``BEGIN`` spans every related query of the response
+    (counts/distributions/percentile ranks/coverage, or a displayed
+    event plus its private original), so a concurrent follow/refresh
+    batch committing mid-response cannot mix generations: retention
+    or new row IDs can never pair an old request with another
+    event's data. The snapshot releases (``COMMIT``) before the
+    response returns and is never held across model provider awaits;
+    exports hold their own bounded streaming snapshot instead.
+
+    Missing, corrupt or uninitialized stores surface only as the narrow
+    ``StoreUnavailable`` signal (mapped to a safe 503 elsewhere); only
+    storage-access failures (``sqlite3.Error``/``OSError``) are mapped,
+    never arbitrary programming exceptions. Nothing is created: the
+    handle is read-only.
+    """
+    try:
+        conn = open_read_db(request)
+    except (sqlite3.Error, OSError) as exc:
+        raise StoreUnavailable("data store unavailable") from exc
+    try:
+        conn.execute("BEGIN")
+    except (sqlite3.Error, OSError) as exc:
+        conn.close()
+        raise StoreUnavailable("data store unavailable") from exc
+    try:
+        yield conn
+    except (sqlite3.Error, OSError) as exc:
+        raise StoreUnavailable("data store unavailable") from exc
+    finally:
+        try:
+            conn.execute("COMMIT")
+        except (sqlite3.Error, OSError):
+            try:
+                conn.execute("ROLLBACK")
+            except (sqlite3.Error, OSError):
+                pass
+        finally:
+            conn.close()
+
+
+def bearer_credentials(request: Request) -> str | None:
+    header = request.headers.get("Authorization", "")
+    scheme, _, value = header.partition(" ")
+    if scheme.lower() != "bearer" or not value.strip():
+        return None
+    return value.strip()
+
+
+def _unauthorized(request_id: str, code: str, message: str, status: int = 401):
+    return error_response(status, code, message, request_id)
+
+
+def require_analytics_token(request: Request) -> ApiToken | object:
+    """Validate the scoped API token and return the stored token or an error response."""
+    request_id = request.state.request_id
+    if not request.headers.get("Authorization", "").strip():
+        return _unauthorized(request_id, "missing_token", "A Bearer token is required.")
+    plaintext = bearer_credentials(request)
+    if plaintext is None:
+        return _unauthorized(
+            request_id, "invalid_token", "The Authorization header must be a Bearer token."
+        )
+    with read_store(request) as conn:
+        token = verify_token(conn, plaintext=plaintext)
+    if token is None:
+        return _unauthorized(
+            request_id, "invalid_token", "The Bearer token is invalid, expired or revoked."
+        )
+    if "analytics:read" not in token.scopes:
+        return _unauthorized(
+            request_id,
+            "insufficient_scope",
+            "This token lacks the analytics:read scope.",
+            status=403,
+        )
+    return token
+
+
+def require_token_site(token: ApiToken, site_id: str, request_id: str):
+    """Tokens only authorize their own bound site."""
+    if token.site_id != site_id:
+        return _unauthorized(
+            request_id,
+            "forbidden_site",
+            "This token is not authorized for the requested site.",
+            status=403,
+        )
+    return None
+
+
+def require_token_source(
+    conn: sqlite3.Connection, *, token: ApiToken, source_id: str, request_id: str
+):
+    """Source filters must belong to the token's bound site (no cross-site reads)."""
+    row = conn.execute("SELECT site_id FROM log_sources WHERE id = ?", (source_id,)).fetchone()
+    if row is None or row[0] != token.site_id:
+        return _unauthorized(
+            request_id,
+            "forbidden_source",
+            "The requested source is not authorized for this token.",
+            status=403,
+        )
+    return None
+
+
+def require_admin_session(request: Request):
+    """Validate the session cookie; CSRF is checked separately per mutation."""
+    request_id = request.state.request_id
+    session_id = request.cookies.get(SESSION_COOKIE)
+    if not session_id:
+        return _unauthorized(
+            request_id, "expired_session", "A valid admin session is required.", status=401
+        )
+    with read_store(request) as conn:
+        session = get_session(conn, session_id=session_id)
+    if session is None:
+        return _unauthorized(
+            request_id, "expired_session", "The admin session is invalid or expired.", status=401
+        )
+    return session
+
+
+def require_csrf(request: Request, session, request_id: str):
+    """Browser mutations must echo the per-session CSRF token (fail-closed 403)."""
+    presented = request.headers.get(CSRF_HEADER, "")
+    expected = getattr(session, "csrf_token", "")
+    if not isinstance(presented, str) or not presented:
+        return _unauthorized(
+            request_id, "csrf_required", "A valid CSRF token is required.", status=403
+        )
+    try:
+        valid = hmac.compare_digest(presented, expected)
+    except (TypeError, ValueError, AttributeError):
+        # Non-ASCII/foreign-type presented values raise inside
+        # compare_digest; fail closed with the safe 403, never a 500.
+        return _unauthorized(
+            request_id, "csrf_required", "A valid CSRF token is required.", status=403
+        )
+    if not valid:
+        return _unauthorized(
+            request_id, "csrf_required", "A valid CSRF token is required.", status=403
+        )
+    return None
+
+
+def check_password(username: str, password: str, db_path: Path) -> int | None:
+    """Verify credentials without ever writing: read-only handle, no file creation."""
+    try:
+        conn = connect(db_path, read_only=True)
+    except (sqlite3.Error, OSError) as exc:
+        raise StoreUnavailable(f"credential store unavailable: {db_path}") from exc
+    try:
+        return verify_admin_credentials(conn, username=username, password=password)
+    except (sqlite3.Error, OSError) as exc:
+        raise StoreUnavailable(f"credential store unavailable: {db_path}") from exc
+    finally:
+        conn.close()
+
+
+def random_token_hex(nbytes: int = 32) -> str:
+    return secrets.token_hex(nbytes)
