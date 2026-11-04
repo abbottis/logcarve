@@ -51,12 +51,20 @@ Prerequisites:
 - Host Python 3 for demo initialization/helpers and the API client examples.
 
 ```bash
-git clone --branch feature/logwerk-parity-ready-2026-11-02 https://github.com/abbottis/logcarve.git
+git clone https://github.com/abbottis/logcarve.git
 cd logcarve
 ./scripts/demo/init.sh
 ./scripts/demo/start.sh
 ./scripts/demo/health.sh
 ```
+
+`main` is the ongoing development baseline. To review the exact submitted snapshot instead:
+
+```bash
+git checkout hackathon-submission-2026-11-03
+```
+
+The [hackathon-submission-2026-11-03](https://github.com/abbottis/logcarve/tree/hackathon-submission-2026-11-03) tag preserves the submitted snapshot. The prior published branch `feature/logwerk-parity-ready-2026-11-02` is temporarily retained for existing jury links.
 
 What the scripts do:
 

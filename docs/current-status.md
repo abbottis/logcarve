@@ -4,9 +4,27 @@ Volatile checkout anchors live here so standing rules do not copy them.
 History stays in [verification](verification.md); scope history stays in
 [decisions](decisions/README.md).
 
+- Branch layout (target repository layout for the approved
+  consolidation; the coordinator will finish it before handing
+  off): `main` is the ongoing/default branch; the annotated tag
+  `hackathon-submission-2026-11-03` at public commit
+  `36f2d72273b75abc7822a4af7a54d19accc18e12` preserves the
+  submitted snapshot; `feature/logwerk-parity-ready-2026-11-02`
+  remains at that commit through the jury phase. Only that former
+  default is retained; the duplicate evidence branch and old
+  publication branch are being deleted now.
+- Submission report: the owner has completed the video, confirmed
+  that the uploaded YouTube link works, and submitted on
+  2026-11-03. Submission alone claims no production readiness
+  and no acceptance-test completion; the native x86-64 install
+  proof and owner manual acceptance remain as recorded below,
+  with no runtime authorization or allowance changes included.
+
 - Public application source anchor:
   `d375d2743f06e3cb62a5bc574fcb79dfcec128b4` (verified current
-  code on `feature/evidence-revalidation-2026-11-03`: CI builds
+  code on the historical branch
+  `feature/evidence-revalidation-2026-11-03` at verification time:
+  CI builds
   assets before tests, plus a narrow `app/web/timezones.py`
   catalogue filter excluding the non-portable
   `localtime`/`posixrules`/`posix/*`/`right/*` entries that
@@ -41,5 +59,4 @@ History stays in [verification](verification.md); scope history stays in
   unit execution is not install/deployment proof). The local source
   correction did not deploy and changed neither the existing demo
   image (source unchanged) nor provider keys/allowance; no
-  activation authorized here. Owner manual acceptance and the video
-  rehearsal are pending.
+  activation authorized here. Owner manual acceptance is pending.

@@ -1,4 +1,14 @@
-# Next session checkpoint (2 Nov 2026, adapter operational docs handoff — CURRENT)
+# Next session checkpoint (4 Nov 2026 — CURRENT)
+
+## CURRENT checkpoint (4 Nov 2026, docs-only consolidation pointers)
+
+- Maintained anchors: see [current status](current-status.md) for the application-source anchor, branch layout, submission report and remaining gaps.
+- Submitted snapshot: annotated tag `hackathon-submission-2026-11-03` at public commit `36f2d72273b75abc7822a4af7a54d19accc18e12`.
+- Branch consolidation: `main` is the ongoing/default branch; the submitted snapshot is preserved by the tag above; `feature/logwerk-parity-ready-2026-11-02` remains at that commit through the jury phase and is the only former branch retained. The duplicate evidence branch and old publication branch are being deleted now.
+- Next work is owner-directed maintenance only.
+- All 2 November checkpoints below are preserved historical handoffs. Their old video-preparation tasks, limits, branch anchors and authorization text are history, not current instructions; the old text is kept verbatim.
+
+# Next session checkpoint (2 Nov 2026, adapter operational docs handoff — PRESERVED HISTORICAL HANDOFF, not current)
 
 ## CURRENT checkpoint (2 Nov 2026, docs-only operational handoff)
 
